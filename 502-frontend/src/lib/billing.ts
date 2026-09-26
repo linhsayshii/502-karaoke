@@ -2,35 +2,58 @@
 // the live total on screen. The server recomputes on preview/checkout, so
 // keep the two in sync when the rules change.
 
-export const roundUpToThousand = (value: number) => Math.ceil(value / 1000) * 1000;
+// Rounds up to 1,000 VND; sub-đồng float noise is dropped first.
+export const roundUpToThousand = (value: number) => Math.ceil(Math.round(value) / 1000) * 1000;
 
 export interface BillInput {
   startTime: Date;
   endTime: Date;
   pricePerHour: number;
   items: { price: number; quantity: number }[];
+  // A percent > 0 applies to the live base and wins over the amount.
+  discountPercent: number; // of the products
   discountAmount: number;
+  hourlyDiscountPercent: number; // of the room fee
   hourlyDiscountAmount: number;
+  serviceFeePercent: number; // of products + room fee after discounts
   serviceFeeAmount: number;
   taxPercent: number;
 }
 
+const clamp = (value: number, max: number) => Math.min(Math.max(value, 0), Math.max(max, 0));
+
+const byPercentOrAmount = (base: number, percent: number, amount: number) =>
+  percent > 0 ? roundUpToThousand((base * percent) / 100) : amount;
+
 export function computeBill(input: BillInput) {
   const durationMs = input.endTime.getTime() - input.startTime.getTime();
   const durationMinutes = Math.max(0, Math.ceil(durationMs / (1000 * 60)));
-  const hourlyFee = roundUpToThousand((durationMinutes / 60) * input.pricePerHour);
+  const hourlyFee = roundUpToThousand((durationMinutes * input.pricePerHour) / 60);
   const totalProductPrice = input.items.reduce((sum, i) => sum + i.price * i.quantity, 0);
-  const totalBeforeTax =
-    totalProductPrice +
-    hourlyFee -
-    input.discountAmount -
-    input.hourlyDiscountAmount +
-    input.serviceFeeAmount;
-  const taxAmount = roundUpToThousand(totalBeforeTax * (input.taxPercent / 100));
+
+  const discountAmount = clamp(
+    byPercentOrAmount(totalProductPrice, input.discountPercent, input.discountAmount),
+    totalProductPrice,
+  );
+  const hourlyDiscountAmount = clamp(
+    byPercentOrAmount(hourlyFee, input.hourlyDiscountPercent, input.hourlyDiscountAmount),
+    hourlyFee,
+  );
+  const serviceBase = totalProductPrice - discountAmount + hourlyFee - hourlyDiscountAmount;
+  const serviceFeeAmount = Math.max(
+    0,
+    byPercentOrAmount(serviceBase, input.serviceFeePercent, input.serviceFeeAmount),
+  );
+  const totalBeforeTax = serviceBase + serviceFeeAmount;
+  const taxAmount = roundUpToThousand((totalBeforeTax * input.taxPercent) / 100);
+
   return {
     durationMinutes,
     hourlyFee,
     totalProductPrice,
+    discountAmount,
+    hourlyDiscountAmount,
+    serviceFeeAmount,
     totalBeforeTax,
     taxAmount,
     finalAmount: totalBeforeTax + taxAmount,

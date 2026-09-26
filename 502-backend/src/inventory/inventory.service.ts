@@ -1,14 +1,21 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { Prisma, StockDocType, StockMovementType } from '@prisma/client';
+import {
+  OrderStatus,
+  Prisma,
+  StockDocType,
+  StockMovementType,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth-user';
 import { BranchScopeService } from '../common/branch-scope.service';
-import { dateRange } from '../common/dates';
+import { businessDayRange } from '../common/dates';
+import { cancelLinkedEntry, recordPurchasePayment } from '../funds/fund-ledger';
 import { CreateStockDocumentDto } from './dto/create-stock-document.dto';
 import {
   ListDocumentsQuery,
@@ -23,16 +30,25 @@ export interface MovementInput {
   documentId?: number;
   orderId?: number;
   createdById?: number;
-  // Sales may drive stock negative (never block the cashier); exports may not.
+  // Sales may drive stock negative (never block the cashier); exports and
+  // reversals of imports may not.
   allowNegative?: boolean;
 }
 
+type Db = Prisma.TransactionClient | PrismaService;
+
 const userRef = { select: { id: true, fullName: true } };
+const fundRef = {
+  select: { id: true, method: true, amount: true, cancelledAt: true },
+};
 const documentDetail = {
   lines: {
     include: { product: { select: { id: true, name: true, unit: true } } },
+    orderBy: { id: 'asc' },
   },
   createdBy: userRef,
+  cancelledBy: userRef,
+  fundTransaction: fundRef,
 } satisfies Prisma.StockDocumentInclude;
 
 function dateCode(d: Date) {
@@ -75,12 +91,40 @@ export class InventoryService {
     return product.stockQuantity;
   }
 
+  // Quantities ordered in open sessions: still in stock (deducted at
+  // checkout) but already promised to a room.
+  async pendingQuantities(branchId: number, db: Db = this.prisma) {
+    const rows = await db.orderItem.groupBy({
+      by: ['productId'],
+      where: { order: { branchId, status: OrderStatus.PENDING } },
+      _sum: { quantity: true },
+    });
+    return new Map(rows.map((r) => [r.productId, r._sum.quantity ?? 0]));
+  }
+
+  // Stock-tracked products, including discontinued ones that still hold
+  // stock (so the stock value never hides anything).
   async stock(user: AuthUser, branchCode?: string) {
     const branchId = await this.branchScope.resolveBranchId(user, branchCode);
-    return this.prisma.product.findMany({
-      where: { branchId, active: true, trackStock: true },
-      include: { category: true },
-      orderBy: { name: 'asc' },
+    const [products, pending] = await Promise.all([
+      this.prisma.product.findMany({
+        where: {
+          branchId,
+          trackStock: true,
+          OR: [{ active: true }, { stockQuantity: { not: 0 } }],
+        },
+        include: { category: true },
+        orderBy: { name: 'asc' },
+      }),
+      this.pendingQuantities(branchId),
+    ]);
+    return products.map((p) => {
+      const pendingQuantity = pending.get(p.id) ?? 0;
+      return {
+        ...p,
+        pendingQuantity,
+        availableQuantity: p.stockQuantity - pendingQuantity,
+      };
     });
   }
 
@@ -93,6 +137,10 @@ export class InventoryService {
     const branch = await this.prisma.branch.findUniqueOrThrow({
       where: { id: branchId },
     });
+    const isImport = dto.type === StockDocType.IMPORT;
+    if (!isImport && dto.paymentMethod) {
+      throw new BadRequestException('Phiếu xuất không ghi chi quỹ');
+    }
 
     const productIds = dto.lines.map((l) => l.productId);
     if (new Set(productIds).size !== productIds.length) {
@@ -106,15 +154,18 @@ export class InventoryService {
     const byId = new Map(products.map((p) => [p.id, p]));
     for (const id of productIds) {
       const p = byId.get(id);
-      if (!p || p.branchId !== branchId || !p.active) {
+      if (!p || p.branchId !== branchId) {
         throw new BadRequestException('Sản phẩm không thuộc cơ sở này');
       }
       if (!p.trackStock) {
         throw new BadRequestException(`"${p.name}" không quản lý tồn kho`);
       }
+      // Discontinued products may still be exported (clear what is left).
+      if (isImport && !p.active) {
+        throw new BadRequestException(`"${p.name}" đã ngừng bán`);
+      }
     }
 
-    const isImport = dto.type === StockDocType.IMPORT;
     const lines = dto.lines.map((l) => ({
       productId: l.productId,
       quantity: l.quantity,
@@ -128,8 +179,8 @@ export class InventoryService {
           branchId,
           type: dto.type,
           code: `tmp-${randomUUID()}`,
-          supplier: dto.supplier,
-          note: dto.note,
+          supplier: dto.supplier?.trim() || null,
+          note: dto.note?.trim() || null,
           totalAmount,
           createdById: user.id,
           lines: { create: lines },
@@ -147,7 +198,9 @@ export class InventoryService {
         data: { code },
       });
 
-      for (const line of lines) {
+      // Rows are locked in product id order (see checkout).
+      const byProduct = [...lines].sort((a, b) => a.productId - b.productId);
+      for (const line of byProduct) {
         await this.applyMovement(tx, {
           branchId,
           productId: line.productId,
@@ -164,11 +217,104 @@ export class InventoryService {
         }
       }
 
+      // Paid from the fund: the phiếu chi is written with the document.
+      if (isImport && dto.paymentMethod && totalAmount > 0) {
+        await recordPurchasePayment(tx, {
+          branchId,
+          stockDocumentId: created.id,
+          code,
+          supplier: created.supplier,
+          amount: totalAmount,
+          method: dto.paymentMethod,
+          occurredAt: created.createdAt,
+          createdById: user.id,
+        });
+      }
+
       return tx.stockDocument.findUniqueOrThrow({
         where: { id: created.id },
         include: documentDetail,
       });
     });
+  }
+
+  // Cancels a document: its stock movements are reversed (an import can only
+  // be cancelled while its goods are still in stock), the cost price falls
+  // back to the latest remaining import, and its fund payment is cancelled.
+  cancelDocument(user: AuthUser, id: number, reason: string) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const document = await tx.stockDocument.findUnique({
+          where: { id },
+          include: { lines: { orderBy: { productId: 'asc' } } },
+        });
+        if (!document) throw new NotFoundException('Không tìm thấy phiếu');
+        this.branchScope.assertBranchAccess(user, document.branchId);
+
+        const { count } = await tx.stockDocument.updateMany({
+          where: { id, cancelledAt: null },
+          data: {
+            cancelledAt: new Date(),
+            cancelledById: user.id,
+            cancelReason: reason.trim(),
+          },
+        });
+        if (count === 0) throw new ConflictException('Phiếu đã bị hủy');
+
+        const isImport = document.type === StockDocType.IMPORT;
+        for (const line of document.lines) {
+          try {
+            await this.applyMovement(tx, {
+              branchId: document.branchId,
+              productId: line.productId,
+              type: StockMovementType.REVERSAL,
+              quantity: isImport ? -line.quantity : line.quantity,
+              documentId: document.id,
+              createdById: user.id,
+            });
+          } catch (error) {
+            if (error instanceof BadRequestException) {
+              throw new BadRequestException(
+                `Không thể hủy phiếu ${document.code}: ${error.message}`,
+              );
+            }
+            throw error;
+          }
+        }
+
+        if (isImport) {
+          for (const line of document.lines) {
+            const latest = await tx.stockDocumentLine.findFirst({
+              where: {
+                productId: line.productId,
+                unitCost: { gt: 0 },
+                document: { type: StockDocType.IMPORT, cancelledAt: null },
+              },
+              orderBy: { document: { createdAt: 'desc' } },
+            });
+            await tx.product.update({
+              where: { id: line.productId },
+              data: { costPrice: latest?.unitCost ?? 0 },
+            });
+          }
+        }
+
+        await cancelLinkedEntry(
+          tx,
+          { stockDocumentId: document.id },
+          {
+            cancelledById: user.id,
+            reason: `Hủy phiếu ${document.code}: ${reason.trim()}`,
+          },
+        );
+
+        return tx.stockDocument.findUniqueOrThrow({
+          where: { id },
+          include: documentDetail,
+        });
+      },
+      { timeout: 15000 },
+    );
   }
 
   async listDocuments(user: AuthUser, query: ListDocumentsQuery) {
@@ -177,9 +323,14 @@ export class InventoryService {
       where: {
         branchId,
         type: query.type,
-        createdAt: dateRange(query.from, query.to),
+        createdAt: businessDayRange(query.from, query.to),
       },
-      include: { createdBy: userRef, _count: { select: { lines: true } } },
+      include: {
+        createdBy: userRef,
+        cancelledBy: userRef,
+        fundTransaction: fundRef,
+        _count: { select: { lines: true } },
+      },
       orderBy: { createdAt: 'desc' },
       take: 200,
     });
@@ -201,11 +352,11 @@ export class InventoryService {
       where: {
         branchId,
         productId: query.productId,
-        createdAt: dateRange(query.from, query.to),
+        createdAt: businessDayRange(query.from, query.to),
       },
       include: {
         product: { select: { id: true, name: true, unit: true } },
-        document: { select: { id: true, code: true } },
+        document: { select: { id: true, code: true, type: true } },
         createdBy: userRef,
       },
       orderBy: { id: 'desc' },

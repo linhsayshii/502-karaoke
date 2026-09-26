@@ -28,7 +28,12 @@ import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
 import { formatMoney, formatNumber } from "@/lib/format";
-import type { Product, StockDocType, StockDocument } from "@/lib/types";
+import { PAYMENT_METHOD_LABELS } from "@/lib/labels";
+import type { PaymentMethod, Product, StockDocType, StockDocument } from "@/lib/types";
+
+// How an import is paid: from the fund (writes a phiếu chi) or on credit.
+const UNPAID = "UNPAID";
+type Payment = PaymentMethod | typeof UNPAID;
 
 interface Line {
   key: number;
@@ -50,6 +55,7 @@ export function StockDocumentForm({ type }: { type: StockDocType }) {
   const [lines, setLines] = useState<Line[]>(() => [emptyLine()]);
   const [supplier, setSupplier] = useState("");
   const [note, setNote] = useState("");
+  const [payment, setPayment] = useState<Payment>("CASH");
   const [saving, setSaving] = useState(false);
 
   const loadProducts = useCallback(async () => {
@@ -66,7 +72,9 @@ export function StockDocumentForm({ type }: { type: StockDocType }) {
   }, [loadProducts]);
 
   const byId = new Map(products.map((p) => [String(p.id), p]));
-  const grouped = products.reduce<Record<string, Product[]>>((acc, p) => {
+  // Discontinued products can still be exported (to clear what is left).
+  const selectable = isImport ? products.filter((p) => p.active) : products;
+  const grouped = selectable.reduce<Record<string, Product[]>>((acc, p) => {
     (acc[p.category?.name ?? "Chưa phân loại"] ??= []).push(p);
     return acc;
   }, {});
@@ -107,6 +115,7 @@ export function StockDocumentForm({ type }: { type: StockDocType }) {
           type,
           supplier: isImport && supplier.trim() ? supplier.trim() : undefined,
           note: note.trim() || undefined,
+          paymentMethod: isImport && payment !== UNPAID ? payment : undefined,
           lines: filled.map((l) => ({
             productId: Number(l.productId),
             quantity: Number(l.quantity),
@@ -115,7 +124,11 @@ export function StockDocumentForm({ type }: { type: StockDocType }) {
         },
         { params: { branch } },
       );
-      notify.success(`Đã lưu phiếu ${res.data.code}`);
+      notify.success(
+        res.data.fundTransaction
+          ? `Đã lưu phiếu ${res.data.code} và ghi phiếu chi ${formatMoney(res.data.totalAmount)} vào quỹ`
+          : `Đã lưu phiếu ${res.data.code}`,
+      );
       setLines([emptyLine()]);
       setSupplier("");
       setNote("");
@@ -150,6 +163,23 @@ export function StockDocumentForm({ type }: { type: StockDocType }) {
             <div className="space-y-1.5">
               <Label>Nhà cung cấp</Label>
               <Input value={supplier} onChange={(e) => setSupplier(e.target.value)} />
+            </div>
+          )}
+          {isImport && (
+            <div className="space-y-1.5">
+              <Label>Thanh toán</Label>
+              <Select value={payment} onValueChange={(v) => setPayment(v as Payment)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="CASH">Đã trả – {PAYMENT_METHOD_LABELS.CASH} (ghi phiếu chi quỹ)</SelectItem>
+                  <SelectItem value="TRANSFER">
+                    Đã trả – {PAYMENT_METHOD_LABELS.TRANSFER} (ghi phiếu chi quỹ)
+                  </SelectItem>
+                  <SelectItem value={UNPAID}>Chưa trả / mua nợ (không ghi quỹ)</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           )}
           <div className="space-y-1.5">

@@ -40,7 +40,7 @@ TZ=Asia/Ho_Chi_Minh
 | `DATABASE_URL` | Prisma đọc trực tiếp từ `.env`. Muốn chạy với DB khác thì truyền qua shell: `DATABASE_URL=... npm run start:dev`. |
 | `JWT_SECRET`, `JWT_REFRESH_SECRET` | Bắt buộc khi `NODE_ENV=production`; khi phát triển, thiếu thì dùng giá trị cố định. |
 | `COOKIE_SECURE` | Cờ `secure` của cookie refresh token. `true` chỉ khi chạy qua HTTPS. |
-| `TZ` | Ngày kinh doanh (11:30 → 06:00) tính theo giờ máy chủ. Luôn để `Asia/Ho_Chi_Minh`. |
+| `TZ` | Ngày kinh doanh (06:00 → 06:00 hôm sau) tính theo giờ máy chủ. Luôn để `Asia/Ho_Chi_Minh`. |
 
 ### 3. Cài đặt và chạy
 
@@ -78,6 +78,7 @@ Commit cả thư mục migration mới. Khi triển khai, container backend tự
 
 - **Không dùng `prisma db push`** nữa.
 - `0_init` là baseline của schema cũ (tạo bằng `db push`); `20260926000000_foundation` là migration viết tay, chuyển dữ liệu cũ sang mô hình nhiều cơ sở. Xem [DEPLOYMENT.md §6](../DEPLOYMENT.md#6-chuyển-từ-bản-cũ-pm2--postgresql-cài-trực-tiếp).
+- `20260926120000_linked_flows`: chốt giá giờ trên hóa đơn, hình thức thanh toán, liên kết phiếu thu/chi với hóa đơn/phiếu nhập, hủy chứng từ. Xem [DEPLOYMENT.md §6.6](../DEPLOYMENT.md#66-bản-cập-nhật-liên-kết-bán-hàng--kho--quỹ-migration-20260926120000_linked_flows).
 - `test/fixtures/legacy-data.sql` là dữ liệu mẫu dạng cũ để tập dượt migration `foundation`: nạp vào DB chỉ có `0_init`, rồi chạy `npx prisma migrate deploy`.
 
 ## Docker

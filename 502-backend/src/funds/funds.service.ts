@@ -1,12 +1,33 @@
-import { Injectable } from '@nestjs/common';
-import { TransactionType } from '@prisma/client';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { PaymentMethod, Prisma, TransactionType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth-user';
 import { BranchScopeService } from '../common/branch-scope.service';
-import { dateRange } from '../common/dates';
+import { businessDayRange } from '../common/dates';
 import { DateRangeQuery } from '../inventory/dto/inventory-queries';
 import { CreateFundTransactionDto } from './dto/create-fund-transaction.dto';
 import { ListFundTransactionsQuery } from './dto/fund-queries';
+
+const userRef = { select: { id: true, fullName: true } };
+const fundInclude = {
+  createdBy: userRef,
+  cancelledBy: userRef,
+  order: {
+    select: { id: true, status: true, room: { select: { name: true } } },
+  },
+  stockDocument: { select: { id: true, code: true, type: true } },
+} satisfies Prisma.FundTransactionInclude;
+
+interface Totals {
+  income: number;
+  expense: number;
+}
+
+const METHODS = [PaymentMethod.CASH, PaymentMethod.TRANSFER];
 
 @Injectable()
 export class FundsService {
@@ -21,14 +42,16 @@ export class FundsService {
       where: {
         branchId,
         type: query.type,
-        occurredAt: dateRange(query.from, query.to),
+        method: query.method,
+        occurredAt: businessDayRange(query.from, query.to),
       },
-      include: { createdBy: { select: { id: true, fullName: true } } },
-      orderBy: { occurredAt: 'desc' },
+      include: fundInclude,
+      orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
       take: 500,
     });
   }
 
+  // Manual phiếu thu / phiếu chi.
   async create(
     user: AuthUser,
     branchCode: string | undefined,
@@ -39,25 +62,122 @@ export class FundsService {
       data: {
         ...dto,
         category: dto.category?.trim() || null,
+        description: dto.description?.trim() || null,
         branchId,
         createdById: user.id,
       },
-      include: { createdBy: { select: { id: true, fullName: true } } },
+      include: fundInclude,
     });
   }
 
-  // Totals for the period: thu, chi and chênh lệch.
+  // Only manual entries: the receipt of a bill or the payment of an import
+  // follows its source (void the bill / cancel the stock document instead).
+  async cancel(user: AuthUser, id: number, reason: string) {
+    const entry = await this.prisma.fundTransaction.findUnique({
+      where: { id },
+    });
+    if (!entry) throw new NotFoundException('Không tìm thấy phiếu thu/chi');
+    this.branchScope.assertBranchAccess(user, entry.branchId);
+    if (entry.orderId !== null) {
+      throw new ConflictException(
+        'Phiếu thu này gắn với hóa đơn; hãy hủy hóa đơn trong mục Hóa đơn',
+      );
+    }
+    if (entry.stockDocumentId !== null) {
+      throw new ConflictException(
+        'Phiếu chi này gắn với phiếu nhập kho; hãy hủy phiếu nhập trong mục Phiếu kho',
+      );
+    }
+
+    const { count } = await this.prisma.fundTransaction.updateMany({
+      where: { id, cancelledAt: null },
+      data: {
+        cancelledAt: new Date(),
+        cancelledById: user.id,
+        cancelReason: reason.trim(),
+      },
+    });
+    if (count === 0) throw new ConflictException('Phiếu đã bị hủy');
+    return this.prisma.fundTransaction.findUniqueOrThrow({
+      where: { id },
+      include: fundInclude,
+    });
+  }
+
+  // Cash book of the period: opening balance, receipts and payments (split by
+  // cash / transfer, and what came from sales and imports), closing balance.
+  // Cancelled entries are left out.
   async summary(user: AuthUser, query: DateRangeQuery) {
     const branchId = await this.branchScope.resolveBranchId(user, query.branch);
-    const groups = await this.prisma.fundTransaction.groupBy({
-      by: ['type'],
-      where: { branchId, occurredAt: dateRange(query.from, query.to) },
-      _sum: { amount: true },
-    });
-    const total = (type: TransactionType) =>
-      Number(groups.find((g) => g.type === type)?._sum.amount ?? 0);
-    const income = total(TransactionType.INCOME);
-    const expense = total(TransactionType.EXPENSE);
-    return { income, expense, net: income - expense };
+    const period = businessDayRange(query.from, query.to);
+    const active = { branchId, cancelledAt: null };
+
+    const [inPeriod, before, linked] = await Promise.all([
+      this.prisma.fundTransaction.groupBy({
+        by: ['type', 'method'],
+        where: { ...active, occurredAt: period },
+        _sum: { amount: true },
+      }),
+      period.gte
+        ? this.prisma.fundTransaction.groupBy({
+            by: ['type', 'method'],
+            where: { ...active, occurredAt: { lt: period.gte } },
+            _sum: { amount: true },
+          })
+        : Promise.resolve([]),
+      this.prisma.fundTransaction.groupBy({
+        by: ['type'],
+        where: {
+          ...active,
+          occurredAt: period,
+          OR: [{ orderId: { not: null } }, { stockDocumentId: { not: null } }],
+        },
+        _sum: { amount: true },
+      }),
+    ]);
+
+    type Row = {
+      type: TransactionType;
+      method: PaymentMethod;
+      _sum: { amount: Prisma.Decimal | null };
+    };
+    const totals = (rows: Row[], method?: PaymentMethod): Totals => {
+      const sum = (type: TransactionType) =>
+        rows
+          .filter((r) => r.type === type && (!method || r.method === method))
+          .reduce((s, r) => s + Number(r._sum.amount ?? 0), 0);
+      return {
+        income: sum(TransactionType.INCOME),
+        expense: sum(TransactionType.EXPENSE),
+      };
+    };
+    const balance = (t: Totals) => t.income - t.expense;
+
+    const periodTotals = totals(inPeriod);
+    const opening = balance(totals(before));
+    const linkedSum = (type: TransactionType) =>
+      Number(linked.find((r) => r.type === type)?._sum.amount ?? 0);
+
+    return {
+      openingBalance: opening,
+      income: periodTotals.income,
+      expense: periodTotals.expense,
+      net: balance(periodTotals),
+      closingBalance: opening + balance(periodTotals),
+      // Receipts of paid bills / payments of imports within the totals.
+      salesIncome: linkedSum(TransactionType.INCOME),
+      purchaseExpense: linkedSum(TransactionType.EXPENSE),
+      byMethod: METHODS.map((method) => {
+        const t = totals(inPeriod, method);
+        const methodOpening = balance(totals(before, method));
+        return {
+          method,
+          openingBalance: methodOpening,
+          income: t.income,
+          expense: t.expense,
+          closingBalance: methodOpening + balance(t),
+        };
+      }),
+    };
   }
 }

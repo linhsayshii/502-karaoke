@@ -24,7 +24,7 @@ RUN npm ci --omit=dev && npx prisma generate && npm cache clean --force
 # ---- runtime ----
 FROM node:22-bookworm-slim
 WORKDIR /app
-# openssl for the Prisma engines, tzdata so TZ=Asia/Ho_Chi_Minh resolves (business day 11:30 -> 06:00)
+# openssl for the Prisma engines, tzdata so TZ=Asia/Ho_Chi_Minh resolves (business day 06:00 -> 06:00)
 RUN apt-get update && apt-get install -y --no-install-recommends openssl tzdata \
   && rm -rf /var/lib/apt/lists/*
 

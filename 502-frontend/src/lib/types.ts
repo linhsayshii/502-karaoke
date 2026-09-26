@@ -47,6 +47,10 @@ export interface Product {
   unit: string;
   trackStock: boolean;
   active: boolean;
+  // Ordered in open sessions, deducted from stock at checkout.
+  pendingQuantity?: number;
+  // GET /inventory/stock: stockQuantity - pendingQuantity.
+  availableQuantity?: number;
 }
 
 export type RoomStatus = "AVAILABLE" | "ACTIVE" | "MAINTENANCE";
@@ -68,6 +72,16 @@ export interface Room {
   } | null;
 }
 
+export type PaymentMethod = "CASH" | "TRANSFER";
+
+// A fund entry linked to a bill or a stock document.
+export interface LinkedFundEntry {
+  id: number;
+  method: PaymentMethod;
+  amount: string | number;
+  cancelledAt: string | null;
+}
+
 export interface OrderItem {
   id: number;
   productId: number;
@@ -76,18 +90,29 @@ export interface OrderItem {
   product: Product;
 }
 
+export type OrderStatus = "PENDING" | "COMPLETED" | "CANCELLED";
+
 export interface Order {
   id: number;
   branchId: number;
-  status: "PENDING" | "COMPLETED" | "CANCELLED";
+  status: OrderStatus;
   roomId: number | null;
   room: Room | null;
   cskhId: number | null;
   serverId: number | null;
   cskh: StaffRef | null;
   server: StaffRef | null;
+  createdBy?: StaffRef | null;
+  checkedOutBy?: StaffRef | null;
+  cancelledBy?: StaffRef | null;
   startTime: string;
   endTime: string | null;
+  // Hourly price fixed when the session opened.
+  pricePerHour: string | number;
+  paymentMethod: PaymentMethod | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  fundTransaction?: LinkedFundEntry | null;
   items: OrderItem[];
   totalProductPrice: string | number;
   hourlyFee: string | number;
@@ -102,13 +127,40 @@ export interface Order {
   finalAmount: string | number;
 }
 
-export interface BillPreview extends Omit<Order, "hourlyFee" | "totalProductPrice" | "taxAmount" | "finalAmount"> {
+type BillAmounts =
+  | "hourlyFee"
+  | "totalProductPrice"
+  | "discountAmount"
+  | "hourlyDiscountAmount"
+  | "serviceFeeAmount"
+  | "taxAmount"
+  | "finalAmount";
+
+// GET /orders/:id/preview: the live bill (or the stored one once closed).
+export interface BillPreview extends Omit<Order, BillAmounts> {
   durationMinutes: number;
   hourlyFee: number;
   totalProductPrice: number;
+  discountAmount: number;
+  hourlyDiscountAmount: number;
+  serviceFeeAmount: number;
   totalBeforeTax: number;
   taxAmount: number;
   finalAmount: number;
+}
+
+// GET /orders/statistics: one business day.
+export interface DailyStat {
+  date: string;
+  orderCount: number;
+  totalRevenue: number;
+  hourlyFee: number;
+  productRevenue: number;
+  discount: number;
+  serviceFee: number;
+  tax: number;
+  cash: number;
+  transfer: number;
 }
 
 // GET /users/floor-staff: employees that can be assigned to a room.
@@ -117,7 +169,7 @@ export interface FloorStaff extends StaffRef {
 }
 
 export type StockDocType = "IMPORT" | "EXPORT";
-export type StockMovementType = "IMPORT" | "EXPORT" | "SALE" | "ADJUSTMENT";
+export type StockMovementType = "IMPORT" | "EXPORT" | "SALE" | "ADJUSTMENT" | "REVERSAL";
 
 export interface StockDocumentLine {
   id: number;
@@ -137,6 +189,10 @@ export interface StockDocument {
   totalAmount: string | number;
   createdAt: string;
   createdBy: StaffRef;
+  cancelledAt: string | null;
+  cancelledBy: StaffRef | null;
+  cancelReason: string | null;
+  fundTransaction: LinkedFundEntry | null;
   lines?: StockDocumentLine[];
   _count?: { lines: number };
 }
@@ -150,7 +206,7 @@ export interface StockMovement {
   orderId: number | null;
   createdAt: string;
   product: { id: number; name: string; unit: string };
-  document: { id: number; code: string } | null;
+  document: { id: number; code: string; type: StockDocType } | null;
   createdBy: StaffRef | null;
 }
 
@@ -159,11 +215,36 @@ export type FundType = "INCOME" | "EXPENSE";
 export interface FundTransaction {
   id: number;
   type: FundType;
+  method: PaymentMethod;
   amount: string | number;
   category: string | null;
   description: string | null;
   occurredAt: string;
   createdBy: StaffRef | null;
+  // Written by checkout / an import paid from the fund.
+  order: { id: number; status: OrderStatus; room: { name: string } | null } | null;
+  stockDocument: { id: number; code: string; type: StockDocType } | null;
+  cancelledAt: string | null;
+  cancelledBy: StaffRef | null;
+  cancelReason: string | null;
+}
+
+// GET /funds/summary (cancelled entries excluded).
+export interface FundSummary {
+  openingBalance: number;
+  income: number;
+  expense: number;
+  net: number;
+  closingBalance: number;
+  salesIncome: number;
+  purchaseExpense: number;
+  byMethod: {
+    method: PaymentMethod;
+    openingBalance: number;
+    income: number;
+    expense: number;
+    closingBalance: number;
+  }[];
 }
 
 // GET /users: an account as managers see it.

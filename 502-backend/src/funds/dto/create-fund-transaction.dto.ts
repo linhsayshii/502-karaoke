@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { TransactionType } from '@prisma/client';
+import { PaymentMethod, TransactionType } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   IsDate,
@@ -15,6 +15,11 @@ export class CreateFundTransactionDto {
   @ApiProperty({ enum: TransactionType })
   @IsEnum(TransactionType)
   type: TransactionType;
+
+  @ApiProperty({ enum: PaymentMethod, required: false, default: 'CASH' })
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  method?: PaymentMethod;
 
   @ApiProperty()
   @IsNumber()

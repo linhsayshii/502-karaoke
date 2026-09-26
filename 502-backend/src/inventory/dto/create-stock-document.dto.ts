@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { StockDocType } from '@prisma/client';
+import { PaymentMethod, StockDocType } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
@@ -47,6 +47,16 @@ export class CreateStockDocumentDto {
   @IsOptional()
   @IsString()
   note?: string;
+
+  @ApiProperty({
+    required: false,
+    enum: PaymentMethod,
+    description:
+      'Chỉ phiếu nhập: đã trả tiền từ quỹ (ghi phiếu chi). Bỏ trống nếu mua nợ.',
+  })
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  paymentMethod?: PaymentMethod;
 
   @ApiProperty({ type: [StockDocumentLineDto] })
   @IsArray()

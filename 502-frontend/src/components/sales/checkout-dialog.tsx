@@ -21,7 +21,8 @@ import {
 import { useToast } from "@/components/ui/use-toast";
 import api, { apiErrorMessage } from "@/lib/api";
 import { formatMoney, formatTime } from "@/lib/format";
-import type { BillPreview } from "@/lib/types";
+import { PAYMENT_METHOD_LABELS } from "@/lib/labels";
+import type { BillPreview, PaymentMethod } from "@/lib/types";
 
 interface CheckoutDialogProps {
   orderId: number | null;
@@ -41,12 +42,14 @@ export function CheckoutDialog({
 }: CheckoutDialogProps) {
   const { toast } = useToast();
   const [bill, setBill] = useState<BillPreview | null>(null);
+  const [method, setMethod] = useState<PaymentMethod>("CASH");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!open || !orderId) return;
     let cancelled = false;
     setBill(null);
+    setMethod("CASH");
     api
       .get<BillPreview>(`/orders/${orderId}/preview`)
       .then((res) => {
@@ -70,8 +73,11 @@ export function CheckoutDialog({
     if (!orderId) return;
     setSubmitting(true);
     try {
-      await api.post(`/orders/${orderId}/checkout`);
-      toast({ title: "Đã thanh toán", description: `Phòng ${roomName ?? ""} đã trả phòng.` });
+      await api.post(`/orders/${orderId}/checkout`, { paymentMethod: method });
+      toast({
+        title: "Đã thanh toán",
+        description: `Phòng ${roomName ?? ""} đã trả phòng (${PAYMENT_METHOD_LABELS[method].toLowerCase()}).`,
+      });
       onOpenChange(false);
       onCheckedOut();
     } catch (error) {
@@ -87,10 +93,14 @@ export function CheckoutDialog({
 
   const adjustments: [string, number, string][] = bill
     ? [
-        ["Giảm giá dịch vụ", -Number(bill.discountAmount), ""],
-        ["Giảm giá giờ hát", -Number(bill.hourlyDiscountAmount), ""],
-        ["Phí dịch vụ", Number(bill.serviceFeeAmount), ""],
-        ["Thuế", bill.taxAmount, bill.taxPercent ? `${bill.taxPercent}%` : ""],
+        ["Giảm giá món", -bill.discountAmount, bill.discountPercent ? `${bill.discountPercent}%` : ""],
+        [
+          "Giảm giá giờ",
+          -bill.hourlyDiscountAmount,
+          bill.hourlyDiscountPercent ? `${bill.hourlyDiscountPercent}%` : "",
+        ],
+        ["Phí dịch vụ", bill.serviceFeeAmount, bill.serviceFeePercent ? `${bill.serviceFeePercent}%` : ""],
+        ["Thuế (VAT)", bill.taxAmount, bill.taxPercent ? `${bill.taxPercent}%` : ""],
       ]
     : [];
 
@@ -123,7 +133,7 @@ export function CheckoutDialog({
                   <span className="font-medium">{formatMoney(bill.hourlyFee)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>Tiền dịch vụ:</span>
+                  <span>Tiền món:</span>
                   <span className="font-medium">{formatMoney(bill.totalProductPrice)}</span>
                 </div>
               </div>
@@ -142,6 +152,23 @@ export function CheckoutDialog({
                   <span>Thành tiền:</span>
                   <span>{formatMoney(bill.finalAmount)}</span>
                 </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-4 rounded-lg border p-3 text-sm">
+              <span className="font-medium">Hình thức thanh toán</span>
+              <div className="flex gap-2">
+                {(["CASH", "TRANSFER"] as PaymentMethod[]).map((m) => (
+                  <Button
+                    key={m}
+                    type="button"
+                    size="sm"
+                    variant={method === m ? "default" : "outline"}
+                    onClick={() => setMethod(m)}
+                  >
+                    {PAYMENT_METHOD_LABELS[m]}
+                  </Button>
+                ))}
               </div>
             </div>
 

@@ -16,6 +16,9 @@ import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { ListOrdersQuery, StatisticsQuery } from './dto/order-queries';
+import { CheckoutOrderDto } from './dto/checkout-order.dto';
+import { CancelOrderDto } from './dto/cancel-order.dto';
+import { CancelReasonDto } from '../common/dto/cancel-reason.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/auth-user';
@@ -82,14 +85,32 @@ export class OrdersController {
   checkout(
     @CurrentUser() user: AuthUser,
     @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CheckoutOrderDto,
   ) {
-    return this.ordersService.checkout(user, id);
+    return this.ordersService.checkout(user, id, dto.paymentMethod);
   }
 
+  // Drops an open session without billing it.
   @Post(':id/cancel')
   @HttpCode(HttpStatus.OK)
   @Roles(...MANAGERS)
-  cancel(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number) {
-    return this.ordersService.cancel(user, id);
+  cancel(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CancelOrderDto,
+  ) {
+    return this.ordersService.cancel(user, id, dto.reason);
+  }
+
+  // Voids a paid bill: stock goes back, the fund receipt is cancelled.
+  @Post(':id/void')
+  @HttpCode(HttpStatus.OK)
+  @Roles(...MANAGERS)
+  voidPaid(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CancelReasonDto,
+  ) {
+    return this.ordersService.voidPaid(user, id, dto.reason);
   }
 }

@@ -31,6 +31,23 @@ export function toDateInput(date: Date = new Date()) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
+// A business day runs 06:00 → 06:00 next morning (as on the server): before
+// 06:00 still belongs to the previous day. Report filters default to it.
+export const BUSINESS_DAY_START_HOUR = 6;
+
+function businessDay(date: Date) {
+  const day = new Date(date);
+  if (day.getHours() < BUSINESS_DAY_START_HOUR) day.setDate(day.getDate() - 1);
+  return day;
+}
+
+// YYYY-MM-DD of the business day `date` belongs to.
+export function businessDate(date: Date = new Date()) {
+  return toDateInput(businessDay(date));
+}
+
+// First day of the month of the current business day.
 export function firstDayOfMonth(date: Date = new Date()) {
-  return toDateInput(new Date(date.getFullYear(), date.getMonth(), 1));
+  const day = businessDay(date);
+  return toDateInput(new Date(day.getFullYear(), day.getMonth(), 1));
 }

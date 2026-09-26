@@ -49,25 +49,28 @@ enum StaffPosition {
 // Every account is an employee. branchId is null only for CHAIN_MANAGER.
 // password is null until a manager activates the account (cannot log in).
 model User {
-  id               Int               @id @default(autoincrement())
-  username         String            @unique
-  password         String?
-  fullName         String
-  phone            String?
-  role             Role              @default(STAFF)
-  position         StaffPosition?
-  branchId         Int?
-  branch           Branch?           @relation(fields: [branchId], references: [id])
-  active           Boolean           @default(true)
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  ordersAsCSKH     Order[]           @relation("OrderCSKH")
-  ordersAsServer   Order[]           @relation("OrderServer")
-  ordersCreated    Order[]           @relation("OrderCreatedBy")
-  ordersCheckedOut Order[]           @relation("OrderCheckedOutBy")
-  stockDocuments   StockDocument[]
-  stockMovements   StockMovement[]
-  fundTransactions FundTransaction[]
+  id                        Int               @id @default(autoincrement())
+  username                  String            @unique
+  password                  String?
+  fullName                  String
+  phone                     String?
+  role                      Role              @default(STAFF)
+  position                  StaffPosition?
+  branchId                  Int?
+  branch                    Branch?           @relation(fields: [branchId], references: [id])
+  active                    Boolean           @default(true)
+  createdAt                 DateTime          @default(now())
+  updatedAt                 DateTime          @updatedAt
+  ordersAsCSKH              Order[]           @relation("OrderCSKH")
+  ordersAsServer            Order[]           @relation("OrderServer")
+  ordersCreated             Order[]           @relation("OrderCreatedBy")
+  ordersCheckedOut          Order[]           @relation("OrderCheckedOutBy")
+  ordersCancelled           Order[]           @relation("OrderCancelledBy")
+  stockDocuments            StockDocument[]   @relation("StockDocumentCreatedBy")
+  stockDocumentsCancelled   StockDocument[]   @relation("StockDocumentCancelledBy")
+  stockMovements            StockMovement[]
+  fundTransactions          FundTransaction[] @relation("FundTransactionCreatedBy")
+  fundTransactionsCancelled FundTransaction[] @relation("FundTransactionCancelledBy")
 
   @@index([branchId])
 }
@@ -137,6 +140,11 @@ enum OrderStatus {
   CANCELLED
 }
 
+enum PaymentMethod {
+  CASH // Tiền mặt
+  TRANSFER // Chuyển khoản
+}
+
 model Order {
   id       Int         @id @default(autoincrement())
   branchId Int
@@ -160,7 +168,12 @@ model Order {
   startTime DateTime?
   endTime   DateTime?
 
-  // Financials
+  // Hourly rate of the room when the session was opened; later room price
+  // changes do not touch an open session.
+  pricePerHour Decimal @default(0)
+
+  // Financials. A percent > 0 wins over its amount; checkout stores the
+  // amounts it actually applied (see billing.ts).
   totalProductPrice Decimal @default(0)
   hourlyFee         Decimal @default(0)
 
@@ -178,13 +191,24 @@ model Order {
 
   finalAmount Decimal @default(0)
 
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  items          OrderItem[]
-  stockMovements StockMovement[]
+  paymentMethod PaymentMethod?
+
+  // Cancelling an open session, or voiding a paid bill (stock and the
+  // fund receipt are reversed).
+  cancelledAt   DateTime?
+  cancelledById Int?
+  cancelledBy   User?     @relation("OrderCancelledBy", fields: [cancelledById], references: [id])
+  cancelReason  String?
+
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  items           OrderItem[]
+  stockMovements  StockMovement[]
+  fundTransaction FundTransaction?
 
   @@index([branchId, status])
   @@index([branchId, startTime])
+  @@index([branchId, endTime])
 }
 
 model OrderItem {
@@ -203,19 +227,25 @@ enum StockDocType {
 }
 
 model StockDocument {
-  id          Int                 @id @default(autoincrement())
-  branchId    Int
-  branch      Branch              @relation(fields: [branchId], references: [id])
-  type        StockDocType
-  code        String              @unique // PN-cs1-20260926-001 / PX-...
-  supplier    String?
-  note        String?
-  totalAmount Decimal             @default(0)
-  createdById Int
-  createdBy   User                @relation(fields: [createdById], references: [id])
-  createdAt   DateTime            @default(now())
-  lines       StockDocumentLine[]
-  movements   StockMovement[]
+  id              Int                 @id @default(autoincrement())
+  branchId        Int
+  branch          Branch              @relation(fields: [branchId], references: [id])
+  type            StockDocType
+  code            String              @unique // PN-cs1-20260926-001 / PX-...
+  supplier        String?
+  note            String?
+  totalAmount     Decimal             @default(0)
+  createdById     Int
+  createdBy       User                @relation("StockDocumentCreatedBy", fields: [createdById], references: [id])
+  createdAt       DateTime            @default(now())
+  // Cancelling reverses the stock movements and the linked fund payment.
+  cancelledAt     DateTime?
+  cancelledById   Int?
+  cancelledBy     User?               @relation("StockDocumentCancelledBy", fields: [cancelledById], references: [id])
+  cancelReason    String?
+  lines           StockDocumentLine[]
+  movements       StockMovement[]
+  fundTransaction FundTransaction?
 
   @@index([branchId, createdAt])
 }
@@ -235,6 +265,7 @@ enum StockMovementType {
   EXPORT
   SALE
   ADJUSTMENT
+  REVERSAL // undoes a cancelled document / voided bill
 }
 
 // Stock ledger: every change of Product.stockQuantity writes one row.
@@ -263,19 +294,31 @@ enum TransactionType {
   EXPENSE
 }
 
-// Phiếu thu / phiếu chi of a branch's cash fund.
+// Phiếu thu / phiếu chi of a branch's fund. Checkout writes the receipt of a
+// bill (orderId) and an import paid from the fund writes its payment
+// (stockDocumentId); those follow their source and cannot be cancelled here.
 model FundTransaction {
-  id          Int             @id @default(autoincrement())
-  branchId    Int
-  branch      Branch          @relation(fields: [branchId], references: [id])
-  type        TransactionType
-  amount      Decimal
-  category    String?
-  description String?
-  occurredAt  DateTime        @default(now())
-  createdById Int?
-  createdBy   User?           @relation(fields: [createdById], references: [id])
-  createdAt   DateTime        @default(now())
+  id              Int             @id @default(autoincrement())
+  branchId        Int
+  branch          Branch          @relation(fields: [branchId], references: [id])
+  type            TransactionType
+  method          PaymentMethod   @default(CASH)
+  amount          Decimal
+  category        String?
+  description     String?
+  occurredAt      DateTime        @default(now())
+  orderId         Int?            @unique
+  order           Order?          @relation(fields: [orderId], references: [id])
+  stockDocumentId Int?            @unique
+  stockDocument   StockDocument?  @relation(fields: [stockDocumentId], references: [id])
+  createdById     Int?
+  createdBy       User?           @relation("FundTransactionCreatedBy", fields: [createdById], references: [id])
+  createdAt       DateTime        @default(now())
+  // Cancelled entries stay in the book but are left out of every total.
+  cancelledAt     DateTime?
+  cancelledById   Int?
+  cancelledBy     User?           @relation("FundTransactionCancelledBy", fields: [cancelledById], references: [id])
+  cancelReason    String?
 
   @@index([branchId, occurredAt])
 }

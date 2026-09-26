@@ -1,9 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { InventoryService } from '../inventory/inventory.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { AuthUser } from '../auth/auth-user';
@@ -16,6 +18,7 @@ export class ProductsService {
   constructor(
     private prisma: PrismaService,
     private branchScope: BranchScopeService,
+    private inventory: InventoryService,
   ) {}
 
   private async assertCategoryInBranch(
@@ -51,13 +54,22 @@ export class ProductsService {
     });
   }
 
+  // With pendingQuantity: how many are already ordered in open sessions
+  // (stock is only deducted at checkout).
   async findAll(user: AuthUser, branchCode?: string, includeInactive = false) {
     const branchId = await this.branchScope.resolveBranchId(user, branchCode);
-    return this.prisma.product.findMany({
-      where: { branchId, active: includeInactive ? undefined : true },
-      include,
-      orderBy: { name: 'asc' },
-    });
+    const [products, pending] = await Promise.all([
+      this.prisma.product.findMany({
+        where: { branchId, active: includeInactive ? undefined : true },
+        include,
+        orderBy: { name: 'asc' },
+      }),
+      this.inventory.pendingQuantities(branchId),
+    ]);
+    return products.map((p) => ({
+      ...p,
+      pendingQuantity: pending.get(p.id) ?? 0,
+    }));
   }
 
   async findOne(user: AuthUser, id: number) {
@@ -68,6 +80,16 @@ export class ProductsService {
   async update(user: AuthUser, id: number, dto: UpdateProductDto) {
     const product = await this.getProduct(user, id);
     await this.assertCategoryInBranch(dto.categoryId, product.branchId);
+    // Stock of an untracked product would vanish from every report.
+    if (
+      dto.trackStock === false &&
+      product.trackStock &&
+      product.stockQuantity !== 0
+    ) {
+      throw new ConflictException(
+        `"${product.name}" còn tồn kho ${product.stockQuantity} ${product.unit}; hãy lập phiếu xuất cho hết trước khi tắt quản lý tồn kho`,
+      );
+    }
     return this.prisma.product.update({
       where: { id },
       data: { ...dto, name: dto.name?.trim() },

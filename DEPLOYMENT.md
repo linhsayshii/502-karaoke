@@ -318,6 +318,16 @@ Sau khi chuyển:
 - Nhân viên CSKH/phục vụ cũ chưa đăng nhập được: quản lý vào **Quản trị → Tài khoản**, bấm nút chìa khóa để đặt mật khẩu cho người cần đăng nhập (tên đăng nhập `nv<số>`), và sửa họ tên/vai trò nếu cần.
 - Tồn kho các cơ sở `cs2`–`cs4` bắt đầu từ 0: nhập phiếu nhập đầu kỳ.
 
+### 6.6. Bản cập nhật "liên kết bán hàng – kho – quỹ" (migration `20260926120000_linked_flows`)
+
+Migration chỉ thêm cột/bảng, không xoá dữ liệu. Sau khi cập nhật:
+
+- **Thanh toán tự ghi phiếu thu** vào Sổ quỹ (chọn tiền mặt hoặc chuyển khoản khi thanh toán). Hóa đơn đã thanh toán trước bản này **không** được sinh bù phiếu thu. Nếu trước đây cơ sở tự lập phiếu thu doanh thu hằng ngày thì **thôi làm việc đó**, kẻo bị tính hai lần.
+- **Phiếu nhập kho** có thể ghi luôn phiếu chi (đã trả bằng tiền mặt/chuyển khoản), hoặc để "mua nợ" (không ghi quỹ).
+- **Ngày kinh doanh** trong mọi báo cáo (doanh thu, hóa đơn, sổ quỹ, phiếu kho) là từ 06:00 hôm đó đến 06:00 hôm sau; doanh thu tính theo **giờ thanh toán**. Sổ quỹ có tồn đầu kỳ/cuối kỳ.
+- Giá giờ của phiên hát được **chốt lúc mở phòng**; phiên đang mở lúc cập nhật lấy giá phòng hiện tại.
+- Quản lý **hủy được** hóa đơn đã thanh toán, phiếu nhập/xuất và phiếu thu/chi thủ công (bắt buộc ghi lý do). Hủy hóa đơn: hoàn kho + hủy phiếu thu; hủy phiếu kho: đảo tồn kho + hủy phiếu chi đi kèm. Chứng từ đã hủy vẫn được giữ, không tính vào tổng.
+
 ## 7. Xử lý sự cố
 
 | Hiện tượng | Nguyên nhân / cách xử lý |
@@ -328,5 +338,6 @@ Sau khi chuyển:
 | Đăng nhập được nhưng tải lại trang là bị đăng xuất | `COOKIE_SECURE=true` trong khi đang truy cập bằng `http://`. |
 | Nginx báo `502 Bad Gateway` | Container `frontend` chưa chạy, hoặc `proxy_pass` khác cổng `APP_PORT`. |
 | `port is already allocated` | Cổng `APP_PORT` đang bị chương trình khác dùng (ví dụ frontend cũ chạy bằng PM2). |
-| Doanh thu rơi sai ngày | Ngày kinh doanh (11:30 → 06:00) tính theo giờ container, đã cố định `Asia/Ho_Chi_Minh` trong `docker-compose.yml`. Đừng xoá biến `TZ`. |
+| Doanh thu rơi sai ngày | Ngày kinh doanh (06:00 → 06:00 hôm sau, giờ mở cửa 11:30 → 06:00) tính theo giờ container, đã cố định `Asia/Ho_Chi_Minh` trong `docker-compose.yml`. Đừng xoá biến `TZ`. |
+| Doanh thu và phiếu thu bán hàng trong Sổ quỹ lệch nhau | Chỉ xảy ra với hóa đơn thanh toán trước bản cập nhật 6.6 (chưa có phiếu thu tự động), hoặc khi cơ sở vẫn tự lập phiếu thu doanh thu bằng tay. |
 | Hết dung lượng đĩa | `docker system df`, dọn bằng `docker image prune -f` và xoá bớt `backups/` cũ. |

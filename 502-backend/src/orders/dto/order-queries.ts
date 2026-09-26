@@ -10,7 +10,21 @@ export class ListOrdersQuery {
 
   @ApiProperty({
     required: false,
-    description: 'Ngày kinh doanh YYYY-MM-DD (11:30 → 06:00)',
+    description:
+      'Từ ngày kinh doanh YYYY-MM-DD (06:00 → 06:00), theo giờ thanh toán/hủy',
+  })
+  @IsOptional()
+  @IsString()
+  from?: string;
+
+  @ApiProperty({ required: false, description: 'Đến ngày kinh doanh' })
+  @IsOptional()
+  @IsString()
+  to?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'Một ngày kinh doanh (viết tắt của from = to)',
   })
   @IsOptional()
   @IsString()
@@ -28,11 +42,11 @@ export class StatisticsQuery {
   @IsString()
   branch?: string;
 
-  @ApiProperty({ description: 'YYYY-MM-DD' })
+  @ApiProperty({ description: 'Ngày kinh doanh đầu tiên, YYYY-MM-DD' })
   @IsString()
   from: string;
 
-  @ApiProperty({ description: 'YYYY-MM-DD' })
+  @ApiProperty({ description: 'Ngày kinh doanh cuối cùng, YYYY-MM-DD' })
   @IsString()
   to: string;
 }

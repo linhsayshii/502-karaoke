@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { TransactionType } from '@prisma/client';
+import { PaymentMethod, TransactionType } from '@prisma/client';
 import { IsEnum, IsOptional } from 'class-validator';
 import { DateRangeQuery } from '../../inventory/dto/inventory-queries';
 
@@ -8,4 +8,9 @@ export class ListFundTransactionsQuery extends DateRangeQuery {
   @IsOptional()
   @IsEnum(TransactionType)
   type?: TransactionType;
+
+  @ApiProperty({ required: false, enum: PaymentMethod })
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  method?: PaymentMethod;
 }

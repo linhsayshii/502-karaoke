@@ -26,7 +26,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from "@/components/auth-provider";
 import { CheckoutDialog } from "@/components/sales/checkout-dialog";
 import api, { apiErrorMessage } from "@/lib/api";
-import { computeBill, roundUpToThousand } from "@/lib/billing";
+import { computeBill } from "@/lib/billing";
 import { useBranchCode } from "@/lib/branch";
 import { formatNumber, formatTime } from "@/lib/format";
 import { can } from "@/lib/permissions";
@@ -201,15 +201,13 @@ export default function RoomDetailPage() {
     );
   }
 
+  // Room price fixed when the session opened (see Order.pricePerHour).
   const bill = computeBill({
     startTime: new Date(order.startTime),
     endTime: now,
-    pricePerHour: Number(room?.pricePerHour ?? 0),
+    pricePerHour: Number(order.pricePerHour),
     items: order.items.map((i) => ({ price: Number(i.price), quantity: i.quantity })),
-    discountAmount: adjust.discountAmount,
-    hourlyDiscountAmount: adjust.hourlyDiscountAmount,
-    serviceFeeAmount: adjust.serviceFeeAmount,
-    taxPercent: adjust.taxPercent,
+    ...adjust,
   });
 
   const keyword = searchTerm.trim().toLowerCase();
@@ -217,12 +215,12 @@ export default function RoomDetailPage() {
   const cskhStaff = staff.filter((s) => s.position === "CSKH");
   const serverStaff = staff.filter((s) => s.position === "SERVER");
 
-  // A percent field also fills its amount (rounded up to 1,000 VND).
+  // A percent follows the live bill (the server applies it at checkout);
+  // typing an amount turns it into a fixed sum.
   const percentRow = (
     label: string,
-    percentKey: keyof Adjustments,
-    amountKey: keyof Adjustments,
-    base: number,
+    percentKey: "discountPercent" | "hourlyDiscountPercent" | "serviceFeePercent",
+    amountKey: "discountAmount" | "hourlyDiscountAmount" | "serviceFeeAmount",
   ) => (
     <>
       <div className="text-right">{label}</div>
@@ -234,14 +232,9 @@ export default function RoomDetailPage() {
           className="h-7 text-right"
           value={adjust[percentKey]}
           disabled={!canOperate}
-          onChange={(e) => {
-            const percent = Number(e.target.value);
-            setAdjust({
-              ...adjust,
-              [percentKey]: percent,
-              [amountKey]: roundUpToThousand((base * percent) / 100),
-            });
-          }}
+          onChange={(e) =>
+            setAdjust({ ...adjust, [percentKey]: Math.min(100, Math.max(0, Number(e.target.value) || 0)) })
+          }
           onBlur={() => saveAdjustments([percentKey, amountKey])}
         />
         <span>%</span>
@@ -250,10 +243,12 @@ export default function RoomDetailPage() {
         type="number"
         min={0}
         className="h-7 text-right"
-        value={adjust[amountKey]}
+        value={adjust[percentKey] > 0 ? bill[amountKey] : adjust[amountKey]}
         disabled={!canOperate}
-        onChange={(e) => setAdjust({ ...adjust, [amountKey]: Number(e.target.value) })}
-        onBlur={() => saveAdjustments([amountKey])}
+        onChange={(e) =>
+          setAdjust({ ...adjust, [percentKey]: 0, [amountKey]: Math.max(0, Number(e.target.value) || 0) })
+        }
+        onBlur={() => saveAdjustments([percentKey, amountKey])}
       />
     </>
   );
@@ -294,8 +289,16 @@ export default function RoomDetailPage() {
                     <div className="text-center font-bold">{product.name}</div>
                     <div className="text-sm text-muted-foreground">{product.unit}</div>
                     <div className="font-medium text-primary">{formatNumber(product.price)}</div>
-                    {product.trackStock && product.stockQuantity <= 0 && (
-                      <div className="text-xs text-orange-600">Hết hàng trong kho</div>
+                    {product.trackStock && (
+                      <div
+                        className={`text-xs ${
+                          product.stockQuantity - (product.pendingQuantity ?? 0) <= 0
+                            ? "text-orange-600"
+                            : "text-muted-foreground"
+                        }`}
+                      >
+                        Còn {product.stockQuantity - (product.pendingQuantity ?? 0)} {product.unit}
+                      </div>
                     )}
                   </button>
                 ))}
@@ -323,7 +326,8 @@ export default function RoomDetailPage() {
                 <CardTitle className="text-lg">Phòng {room?.name ?? roomId}</CardTitle>
               </div>
               <div className="text-sm text-muted-foreground">
-                Giờ vào: {formatTime(order.startTime)} – Thời lượng: {formatDuration(bill.durationMinutes)}
+                Giờ vào: {formatTime(order.startTime)} – Thời lượng: {formatDuration(bill.durationMinutes)} –{" "}
+                {formatNumber(order.pricePerHour)}/giờ
               </div>
             </div>
             {canOperate ? (
@@ -459,21 +463,11 @@ export default function RoomDetailPage() {
                     {formatNumber(bill.hourlyFee)}
                   </div>
 
-                  {percentRow("Tiền giảm giá", "discountPercent", "discountAmount", bill.totalProductPrice)}
-                  {percentRow(
-                    "Tiền giảm giá giờ",
-                    "hourlyDiscountPercent",
-                    "hourlyDiscountAmount",
-                    bill.hourlyFee,
-                  )}
-                  {percentRow(
-                    "Phí dịch vụ",
-                    "serviceFeePercent",
-                    "serviceFeeAmount",
-                    bill.totalProductPrice - adjust.discountAmount + bill.hourlyFee - adjust.hourlyDiscountAmount,
-                  )}
+                  {percentRow("Giảm giá món", "discountPercent", "discountAmount")}
+                  {percentRow("Giảm giá giờ", "hourlyDiscountPercent", "hourlyDiscountAmount")}
+                  {percentRow("Phí dịch vụ", "serviceFeePercent", "serviceFeeAmount")}
 
-                  <div className="text-right">Tiền thuế</div>
+                  <div className="text-right">Thuế (VAT)</div>
                   <div className="flex items-center gap-1">
                     <Input
                       type="number"
@@ -482,7 +476,9 @@ export default function RoomDetailPage() {
                       className="h-7 text-right"
                       value={adjust.taxPercent}
                       disabled={!canOperate}
-                      onChange={(e) => setAdjust({ ...adjust, taxPercent: Number(e.target.value) })}
+                      onChange={(e) =>
+                        setAdjust({ ...adjust, taxPercent: Math.min(100, Math.max(0, Number(e.target.value) || 0)) })
+                      }
                       onBlur={() => saveAdjustments(["taxPercent"])}
                     />
                     <span>%</span>

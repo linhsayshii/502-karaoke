@@ -2,6 +2,8 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseIntPipe,
   Post,
@@ -13,6 +15,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/auth-user';
 import { MANAGERS } from '../auth/roles';
+import { CancelReasonDto } from '../common/dto/cancel-reason.dto';
 import { CreateStockDocumentDto } from './dto/create-stock-document.dto';
 import {
   ListDocumentsQuery,
@@ -54,6 +57,17 @@ export class InventoryController {
     @Body() dto: CreateStockDocumentDto,
   ) {
     return this.inventoryService.createDocument(user, branch, dto);
+  }
+
+  // Reverses the document's stock movements and its fund payment.
+  @Post('documents/:id/cancel')
+  @HttpCode(HttpStatus.OK)
+  cancelDocument(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CancelReasonDto,
+  ) {
+    return this.inventoryService.cancelDocument(user, id, dto.reason);
   }
 
   @Get('movements')

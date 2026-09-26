@@ -2,32 +2,83 @@ import { BadRequestException } from '@nestjs/common';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+// A business day D runs from 06:00 on D to 06:00 on D+1 (server local time),
+// so every moment belongs to exactly one day: the venue opens at 11:30 and a
+// night that ends at 03:00 still counts for the evening it started. Revenue,
+// bills, the fund and stock documents are all reported by these days.
+export const BUSINESS_DAY_START_HOUR = 6;
+
+// Longest period a report may span.
+export const MAX_REPORT_DAYS = 366;
+
 function parseLocalDate(value: string): Date {
   if (!DATE_RE.test(value)) {
     throw new BadRequestException('Ngày không hợp lệ (định dạng YYYY-MM-DD)');
   }
-  return new Date(`${value}T00:00:00`);
+  const date = new Date(`${value}T00:00:00`);
+  if (isNaN(date.getTime())) {
+    throw new BadRequestException('Ngày không hợp lệ (định dạng YYYY-MM-DD)');
+  }
+  return date;
 }
 
-// Calendar-day range [from 00:00, to+1 00:00) in server local time.
-// Either end may be omitted.
-export function dateRange(from?: string, to?: string) {
+// YYYY-MM-DD of a Date in local time.
+export function toDateString(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function startOfBusinessDay(dateStr: string): Date {
+  const start = parseLocalDate(dateStr);
+  start.setHours(BUSINESS_DAY_START_HOUR, 0, 0, 0);
+  return start;
+}
+
+// [D 06:00, D+1 06:00).
+export function getBusinessDayRange(dateStr: string) {
+  const start = startOfBusinessDay(dateStr);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { start, end };
+}
+
+// Prisma filter for the business days from..to (both included). Either end
+// may be omitted.
+export function businessDayRange(from?: string, to?: string) {
   const range: { gte?: Date; lt?: Date } = {};
-  if (from) range.gte = parseLocalDate(from);
-  if (to) {
-    const end = parseLocalDate(to);
-    end.setDate(end.getDate() + 1);
-    range.lt = end;
+  if (from) range.gte = startOfBusinessDay(from);
+  if (to) range.lt = getBusinessDayRange(to).end;
+  if (range.gte && range.lt && range.gte >= range.lt) {
+    throw new BadRequestException('Ngày bắt đầu phải trước ngày kết thúc');
   }
   return range;
 }
 
-// Business day runs 11:30 -> 06:00 next day, in server local time.
-export function getBusinessDayRange(dateStr: string) {
-  const start = parseLocalDate(dateStr);
-  start.setHours(11, 30, 0, 0);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
-  end.setHours(6, 0, 0, 0);
-  return { start, end };
+// The business day (YYYY-MM-DD) a moment belongs to.
+export function businessDateOf(moment: Date): string {
+  const day = new Date(moment);
+  if (day.getHours() < BUSINESS_DAY_START_HOUR) {
+    day.setDate(day.getDate() - 1);
+  }
+  return toDateString(day);
+}
+
+// Every business date from..to, both included.
+export function businessDatesBetween(from: string, to: string): string[] {
+  const current = parseLocalDate(from);
+  const end = parseLocalDate(to);
+  if (current > end) {
+    throw new BadRequestException('Ngày bắt đầu phải trước ngày kết thúc');
+  }
+  const dates: string[] = [];
+  while (current <= end) {
+    dates.push(toDateString(current));
+    if (dates.length > MAX_REPORT_DAYS) {
+      throw new BadRequestException(
+        `Chỉ xem được tối đa ${MAX_REPORT_DAYS} ngày một lần`,
+      );
+    }
+    current.setDate(current.getDate() + 1);
+  }
+  return dates;
 }

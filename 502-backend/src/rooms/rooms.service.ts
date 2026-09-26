@@ -106,16 +106,22 @@ export class RoomsService {
     return room;
   }
 
+  // The price of an open session is fixed when it opens, so editing the room
+  // never changes a running bill. The status only changes while no session
+  // runs (checked in the same statement, so a room opened meanwhile wins).
   async update(user: AuthUser, id: number, dto: UpdateRoomDto) {
     const room = await this.getRoom(user, id);
-    if (
-      dto.status &&
-      dto.status !== room.status &&
-      room.status === RoomStatus.ACTIVE
-    ) {
-      throw new ConflictException(
-        'Phòng đang có khách, không thể đổi trạng thái',
-      );
+    if (dto.status && dto.status !== room.status) {
+      const { count } = await this.prisma.room.updateMany({
+        where: { id, status: { not: RoomStatus.ACTIVE } },
+        data: dto,
+      });
+      if (count === 0) {
+        throw new ConflictException(
+          'Phòng đang có khách, không thể đổi trạng thái',
+        );
+      }
+      return this.prisma.room.findUniqueOrThrow({ where: { id } });
     }
     return this.prisma.room.update({ where: { id }, data: dto });
   }

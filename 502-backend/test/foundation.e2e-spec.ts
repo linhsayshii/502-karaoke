@@ -413,6 +413,12 @@ describe('Foundation (e2e)', () => {
 
   describe('cash fund', () => {
     it('records receipts and payments per branch', async () => {
+      const before = (await as('ql_cs1').get('/funds/summary').expect(200))
+        .body as Json;
+      // The bill paid earlier in this run is already in the fund.
+      expect(before.salesIncome).toBeGreaterThan(0);
+      expect(before.income).toBe(before.salesIncome);
+
       await as('ql_cs1')
         .post('/funds', {
           type: 'INCOME',
@@ -423,6 +429,7 @@ describe('Foundation (e2e)', () => {
       await as('ql_cs1')
         .post('/funds', {
           type: 'EXPENSE',
+          method: 'TRANSFER',
           amount: 30000,
           description: 'Mua đá',
         })
@@ -431,16 +438,352 @@ describe('Foundation (e2e)', () => {
         .post('/funds', { type: 'EXPENSE', amount: -5 })
         .expect(400);
 
-      const summary = await as('ql_cs1').get('/funds/summary').expect(200);
-      expect(summary.body).toEqual({
-        income: 100000,
+      const summary = (await as('ql_cs1').get('/funds/summary').expect(200))
+        .body as Json;
+      expect(summary).toMatchObject({
+        openingBalance: 0,
+        income: (before.income as number) + 100000,
         expense: 30000,
-        net: 70000,
+        net: (before.income as number) + 70000,
+        closingBalance: (before.income as number) + 70000,
+        salesIncome: before.salesIncome,
+        purchaseExpense: 0,
       });
+      const transfer = (summary.byMethod as Json[]).find(
+        (m) => m.method === 'TRANSFER',
+      )!;
+      expect(transfer).toMatchObject({ income: 0, expense: 30000 });
 
-      const cs2 = await as('ql_cs2').get('/funds/summary').expect(200);
-      expect(cs2.body).toEqual({ income: 0, expense: 0, net: 0 });
+      const cs2 = (await as('ql_cs2').get('/funds/summary').expect(200))
+        .body as Json;
+      expect(cs2).toMatchObject({ income: 0, expense: 0, net: 0 });
       await as('ql_cs2').get('/funds?branch=cs1').expect(403);
+    });
+  });
+
+  // Sales, stock and fund must always tell the same story (cs2 only).
+  describe('linked sales, stock and fund', () => {
+    let roomId: number;
+    let beerId: number;
+    let waterId: number;
+    let paidOrderId: number;
+    let importId: number;
+
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+    const period = `from=${ymd(yesterday)}&to=${ymd(tomorrow)}`;
+
+    const stockOf = async (productId: number) => {
+      const stock = (await as('ql_cs2').get('/inventory/stock').expect(200))
+        .body as Json[];
+      return stock.find((p) => p.id === productId)!;
+    };
+    const summary = async () =>
+      (await as('ql_cs2').get(`/funds/summary?${period}`).expect(200))
+        .body as Json;
+    const revenue = async () => {
+      const days = (
+        await as('ql_cs2').get(`/orders/statistics?${period}`).expect(200)
+      ).body as Json[];
+      return days.reduce((s, d) => s + (d.totalRevenue as number), 0);
+    };
+    const openSession = async (items: Json[]) => {
+      const opened = await as('tn_cs2').post('/orders', { roomId }).expect(201);
+      const id = (opened.body as Json).id as number;
+      await as('tn_cs2').patch(`/orders/${id}`, { items }).expect(200);
+      return id;
+    };
+
+    beforeAll(async () => {
+      const rooms = (await as('tn_cs2').get('/rooms').expect(200))
+        .body as Json[];
+      roomId = rooms.find((r) => r.name === 'P201')!.id as number;
+      const products = (await as('tn_cs2').get('/products').expect(200))
+        .body as Json[];
+      beerId = products.find((p) => p.name === 'Bia Tiger')!.id as number;
+      waterId = products.find((p) => p.name === 'Nước suối')!.id as number;
+    });
+
+    it('writes the phiếu chi of an import paid from the fund', async () => {
+      const res = await as('ql_cs2')
+        .post('/inventory/documents', {
+          type: 'IMPORT',
+          supplier: 'NCC B',
+          paymentMethod: 'CASH',
+          lines: [{ productId: beerId, quantity: 20, unitCost: 12000 }],
+        })
+        .expect(201);
+      const doc = res.body as Json;
+      importId = doc.id as number;
+      expect(doc.fundTransaction).toMatchObject({ method: 'CASH' });
+      expect(Number((doc.fundTransaction as Json).amount)).toBe(240000);
+
+      // Bought on credit: no fund entry.
+      await as('ql_cs2')
+        .post('/inventory/documents', {
+          type: 'IMPORT',
+          lines: [{ productId: waterId, quantity: 10, unitCost: 5000 }],
+        })
+        .expect(201);
+      await as('ql_cs2')
+        .post('/inventory/documents', {
+          type: 'EXPORT',
+          paymentMethod: 'CASH',
+          lines: [{ productId: waterId, quantity: 1 }],
+        })
+        .expect(400);
+
+      const entries = (await as('ql_cs2').get('/funds').expect(200))
+        .body as Json[];
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({
+        type: 'EXPENSE',
+        category: 'Nhập hàng',
+        stockDocument: { code: doc.code },
+      });
+      expect(await summary()).toMatchObject({
+        expense: 240000,
+        purchaseExpense: 240000,
+        closingBalance: -240000,
+      });
+    });
+
+    it('shows what open sessions have ordered but not yet paid', async () => {
+      paidOrderId = await openSession([{ productId: beerId, quantity: 3 }]);
+      expect(await stockOf(beerId)).toMatchObject({
+        stockQuantity: 20,
+        pendingQuantity: 3,
+        availableQuantity: 17,
+      });
+      const products = (await as('tn_cs2').get('/products').expect(200))
+        .body as Json[];
+      expect(products.find((p) => p.id === beerId)!.pendingQuantity).toBe(3);
+    });
+
+    it('keeps the room price of the session and applies live percents', async () => {
+      await as('ql_cs2')
+        .patch(`/rooms/${roomId}`, { pricePerHour: 999000 })
+        .expect(200);
+      await as('tn_cs2')
+        .patch(`/orders/${paidOrderId}`, { discountPercent: 10 })
+        .expect(200);
+
+      let bill = (
+        await as('tn_cs2').get(`/orders/${paidOrderId}/preview`).expect(200)
+      ).body as Json;
+      // 1-2 started minutes at the 120,000 opening price.
+      expect(bill.hourlyFee).toBeLessThanOrEqual(4000);
+      expect(bill.discountAmount).toBe(8000); // 10% of 75,000, rounded up
+
+      await as('tn_cs2')
+        .patch(`/orders/${paidOrderId}`, {
+          items: [{ productId: beerId, quantity: 4 }],
+        })
+        .expect(200);
+      bill = (
+        await as('tn_cs2').get(`/orders/${paidOrderId}/preview`).expect(200)
+      ).body as Json;
+      expect(bill.discountAmount).toBe(10000); // follows the new total
+      await as('ql_cs2')
+        .patch(`/rooms/${roomId}`, { pricePerHour: 120000 })
+        .expect(200);
+    });
+
+    it('writes the fund receipt at checkout and matches revenue', async () => {
+      const res = await as('tn_cs2')
+        .post(`/orders/${paidOrderId}/checkout`, { paymentMethod: 'TRANSFER' })
+        .expect(200);
+      const order = res.body as Json;
+      const finalAmount = Number(order.finalAmount);
+      expect(order).toMatchObject({
+        status: 'COMPLETED',
+        paymentMethod: 'TRANSFER',
+        fundTransaction: { method: 'TRANSFER', cancelledAt: null },
+      });
+      expect(Number(order.discountAmount)).toBe(10000);
+      expect(Number((order.fundTransaction as Json).amount)).toBe(finalAmount);
+      expect(
+        Number(order.totalProductPrice) +
+          Number(order.hourlyFee) -
+          Number(order.discountAmount) -
+          Number(order.hourlyDiscountAmount) +
+          Number(order.serviceFeeAmount) +
+          Number(order.taxAmount),
+      ).toBe(finalAmount);
+
+      expect(await revenue()).toBe(finalAmount);
+      const fund = await summary();
+      expect(fund.salesIncome).toBe(finalAmount);
+      expect(
+        (fund.byMethod as Json[]).find((m) => m.method === 'TRANSFER'),
+      ).toMatchObject({ income: finalAmount });
+      expect((await stockOf(beerId)).stockQuantity).toBe(16);
+
+      const days = (
+        await as('ql_cs2').get(`/orders/statistics?${period}`).expect(200)
+      ).body as Json[];
+      expect(days.reduce((s, d) => s + (d.transfer as number), 0)).toBe(
+        finalAmount,
+      );
+      const bills = (
+        await as('ql_cs2').get(`/orders?${period}&status=COMPLETED`).expect(200)
+      ).body as Json[];
+      expect(bills.map((b) => b.id)).toEqual([paidOrderId]);
+    });
+
+    it('cancels only manual fund entries, with a reason', async () => {
+      const entries = (await as('ql_cs2').get('/funds').expect(200))
+        .body as Json[];
+      const receipt = entries.find((e) => e.order !== null)!;
+      await as('ql_cs2')
+        .post(`/funds/${receipt.id as number}/cancel`, { reason: 'x' })
+        .expect(409);
+
+      const manual = await as('ql_cs2')
+        .post('/funds', { type: 'INCOME', amount: 50000 })
+        .expect(201);
+      const id = (manual.body as Json).id as number;
+      const before = await summary();
+      await as('ql_cs2').post(`/funds/${id}/cancel`, {}).expect(400);
+      await as('tn_cs2')
+        .post(`/funds/${id}/cancel`, { reason: 'Ghi nhầm' })
+        .expect(403);
+      await as('ql_cs2')
+        .post(`/funds/${id}/cancel`, { reason: 'Ghi nhầm' })
+        .expect(200);
+      await as('ql_cs2')
+        .post(`/funds/${id}/cancel`, { reason: 'Ghi nhầm' })
+        .expect(409);
+      expect((await summary()).income).toBe((before.income as number) - 50000);
+    });
+
+    it('voids a paid bill: stock back, receipt cancelled, revenue gone', async () => {
+      await as('tn_cs2')
+        .post(`/orders/${paidOrderId}/void`, { reason: 'Nhập nhầm' })
+        .expect(403);
+      await as('ql_cs2').post(`/orders/${paidOrderId}/void`, {}).expect(400);
+      const res = await as('ql_cs2')
+        .post(`/orders/${paidOrderId}/void`, { reason: 'Nhập nhầm phòng' })
+        .expect(200);
+      expect(res.body).toMatchObject({
+        status: 'CANCELLED',
+        cancelReason: 'Nhập nhầm phòng',
+        cancelledBy: { fullName: 'Quản lý CS2' },
+      });
+      expect((res.body as Json).fundTransaction).not.toMatchObject({
+        cancelledAt: null,
+      });
+      await as('ql_cs2')
+        .post(`/orders/${paidOrderId}/void`, { reason: 'lần nữa' })
+        .expect(409);
+
+      expect((await stockOf(beerId)).stockQuantity).toBe(20);
+      const movements = (
+        await as('ql_cs2')
+          .get(`/inventory/movements?productId=${beerId}`)
+          .expect(200)
+      ).body as Json[];
+      expect(movements[0]).toMatchObject({
+        type: 'REVERSAL',
+        quantity: 4,
+        orderId: paidOrderId,
+      });
+      expect(await revenue()).toBe(0);
+      expect((await summary()).salesIncome).toBe(0);
+    });
+
+    it('never lets an item edit and a checkout disagree', async () => {
+      for (let round = 0; round < 3; round++) {
+        const id = await openSession([{ productId: waterId, quantity: 1 }]);
+        const [edit] = await Promise.all([
+          as('tn_cs2').patch(`/orders/${id}`, {
+            items: [{ productId: waterId, quantity: 5 }],
+          }),
+          as('tn_cs2').post(`/orders/${id}/checkout`).expect(200),
+        ]);
+        expect([200, 409]).toContain(edit.status);
+
+        const order = (await as('ql_cs2').get(`/orders/${id}`).expect(200))
+          .body as Json;
+        const items = order.items as Json[];
+        const billed = items.reduce(
+          (s, i) => s + Number(i.price) * (i.quantity as number),
+          0,
+        );
+        expect(Number(order.totalProductPrice)).toBe(billed);
+        const movements = (
+          await as('ql_cs2')
+            .get(`/inventory/movements?productId=${waterId}`)
+            .expect(200)
+        ).body as Json[];
+        const sale = movements.find(
+          (m) => m.orderId === id && m.type === 'SALE',
+        )!;
+        expect(-(sale.quantity as number)).toBe(items[0].quantity);
+      }
+    });
+
+    it('cancels a stock document by reversing it', async () => {
+      const cancelled = await as('ql_cs2')
+        .post(`/inventory/documents/${importId}/cancel`, {
+          reason: 'Sai số lượng',
+        })
+        .expect(200);
+      expect(cancelled.body).toMatchObject({
+        cancelReason: 'Sai số lượng',
+        fundTransaction: { method: 'CASH' },
+      });
+      expect(
+        (cancelled.body as Json).fundTransaction as Json,
+      ).not.toMatchObject({ cancelledAt: null });
+      await as('ql_cs2')
+        .post(`/inventory/documents/${importId}/cancel`, { reason: 'x' })
+        .expect(409);
+
+      const beer = await stockOf(beerId);
+      expect(beer.stockQuantity).toBe(0);
+      expect(Number(beer.costPrice)).toBe(0);
+      expect(await summary()).toMatchObject({ expense: 0, purchaseExpense: 0 });
+
+      // Goods already sold cannot be taken out of stock again.
+      const water = await stockOf(waterId);
+      const docs = (
+        await as('ql_cs2').get('/inventory/documents?type=IMPORT').expect(200)
+      ).body as Json[];
+      const waterImport = docs.find((d) => d.id !== importId)!;
+      const res = await as('ql_cs2')
+        .post(`/inventory/documents/${waterImport.id as number}/cancel`, {
+          reason: 'x',
+        })
+        .expect(400);
+      expect((res.body as Json).message).toContain('Không thể hủy phiếu');
+      expect((await stockOf(waterId)).stockQuantity).toBe(water.stockQuantity);
+    });
+
+    it('keeps every stock balance equal to its ledger', async () => {
+      for (const productId of [beerId, waterId]) {
+        const movements = (
+          await as('ql_cs2')
+            .get(`/inventory/movements?productId=${productId}`)
+            .expect(200)
+        ).body as Json[];
+        const ledger = movements.reduce(
+          (s, m) => s + (m.quantity as number),
+          0,
+        );
+        expect((await stockOf(productId)).stockQuantity).toBe(ledger);
+        expect(movements[0].balanceAfter).toBe(ledger);
+      }
+    });
+
+    it('refuses to stop tracking a product that still has stock', async () => {
+      const res = await as('ql_cs2')
+        .patch(`/products/${waterId}`, { trackStock: false })
+        .expect(409);
+      expect((res.body as Json).message).toContain('còn tồn kho');
     });
   });
 });

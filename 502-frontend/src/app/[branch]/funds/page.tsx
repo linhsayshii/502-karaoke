@@ -30,24 +30,30 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowDownCircle, ArrowUpCircle, Plus } from "lucide-react";
+import { ArrowDownCircle, ArrowUpCircle, Ban, Plus, Wallet } from "lucide-react";
 import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
-import { firstDayOfMonth, formatDateTime, formatMoney, toDateInput } from "@/lib/format";
-import type { FundTransaction, FundType } from "@/lib/types";
+import { businessDate, firstDayOfMonth, formatDateTime, formatMoney, toDateInput } from "@/lib/format";
+import { BUSINESS_DAY_HINT, DOC_TYPE_LABELS, FUND_TYPE_LABELS, PAYMENT_METHOD_LABELS } from "@/lib/labels";
+import type { FundSummary, FundTransaction, FundType, PaymentMethod } from "@/lib/types";
 
-const TYPE_LABELS: Record<FundType, string> = { INCOME: "Thu", EXPENSE: "Chi" };
 const ALL = "ALL";
 
-interface Summary {
-  income: number;
-  expense: number;
-  net: number;
-}
+const EMPTY_SUMMARY: FundSummary = {
+  openingBalance: 0,
+  income: 0,
+  expense: 0,
+  net: 0,
+  closingBalance: 0,
+  salesIncome: 0,
+  purchaseExpense: 0,
+  byMethod: [],
+};
 
 interface FundForm {
   type: FundType;
+  method: PaymentMethod;
   amount: string;
   category: string;
   description: string;
@@ -61,18 +67,28 @@ function nowInput() {
   return `${toDateInput(now)}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
 }
 
-// Quỹ tiền mặt: phiếu thu / phiếu chi ghi tay của cơ sở.
+// Where an entry comes from: a paid bill, an import, or typed by hand.
+function sourceOf(t: FundTransaction) {
+  if (t.order) return `Hóa đơn #${t.order.id}${t.order.room ? ` – ${t.order.room.name}` : ""}`;
+  if (t.stockDocument) return `${DOC_TYPE_LABELS[t.stockDocument.type]} ${t.stockDocument.code}`;
+  return "Thủ công";
+}
+
+// Sổ quỹ: phiếu thu / phiếu chi of the branch. Bill receipts and import
+// payments are written automatically; manual ones can be cancelled.
 export default function FundsPage() {
   const branch = useBranchCode();
   const notify = useNotify();
   const [from, setFrom] = useState(() => firstDayOfMonth());
-  const [to, setTo] = useState(() => toDateInput());
+  const [to, setTo] = useState(() => businessDate());
   const [type, setType] = useState<FundType | typeof ALL>(ALL);
   const [transactions, setTransactions] = useState<FundTransaction[]>([]);
-  const [summary, setSummary] = useState<Summary>({ income: 0, expense: 0, net: 0 });
+  const [summary, setSummary] = useState<FundSummary>(EMPTY_SUMMARY);
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState<FundForm | null>(null);
   const [saving, setSaving] = useState(false);
+  const [cancelling, setCancelling] = useState<FundTransaction | null>(null);
+  const [reason, setReason] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -81,7 +97,7 @@ export default function FundsPage() {
         api.get<FundTransaction[]>("/funds", {
           params: { branch, from, to, type: type === ALL ? undefined : type },
         }),
-        api.get<Summary>("/funds/summary", { params: { branch, from, to } }),
+        api.get<FundSummary>("/funds/summary", { params: { branch, from, to } }),
       ]);
       setTransactions(listRes.data);
       setSummary(summaryRes.data);
@@ -99,7 +115,14 @@ export default function FundsPage() {
   }, [load]);
 
   const openForm = (fundType: FundType) =>
-    setForm({ type: fundType, amount: "", category: "", description: "", occurredAt: nowInput() });
+    setForm({
+      type: fundType,
+      method: "CASH",
+      amount: "",
+      category: "",
+      description: "",
+      occurredAt: nowInput(),
+    });
 
   const save = async () => {
     if (!form) return;
@@ -114,6 +137,7 @@ export default function FundsPage() {
         "/funds",
         {
           type: form.type,
+          method: form.method,
           amount,
           category: form.category.trim() || undefined,
           description: form.description.trim() || undefined,
@@ -131,10 +155,31 @@ export default function FundsPage() {
     }
   };
 
+  const cancelEntry = async () => {
+    if (!cancelling) return;
+    if (!reason.trim()) {
+      notify.error(null, "Vui lòng nhập lý do hủy");
+      return;
+    }
+    try {
+      await api.post(`/funds/${cancelling.id}/cancel`, { reason: reason.trim() });
+      notify.success("Đã hủy phiếu");
+      setCancelling(null);
+      load();
+    } catch (error) {
+      notify.error(error, "Không thể hủy phiếu");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <h2 className="text-2xl font-bold tracking-tight">Sổ quỹ</h2>
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">Sổ quỹ</h2>
+          <p className="text-sm text-muted-foreground">
+            Phiếu thu tiền hóa đơn và phiếu chi nhập hàng được ghi tự động. {BUSINESS_DAY_HINT}
+          </p>
+        </div>
         <div className="flex gap-2">
           <Button className="bg-green-600 hover:bg-green-700" onClick={() => openForm("INCOME")}>
             <Plus className="mr-2 h-4 w-4" /> Phiếu thu
@@ -169,7 +214,17 @@ export default function FundsPage() {
         </Button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm font-medium">
+              <Wallet className="h-4 w-4" /> Tồn đầu kỳ
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{formatMoney(summary.openingBalance)}</div>
+          </CardContent>
+        </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium">
@@ -178,6 +233,7 @@ export default function FundsPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-green-600">{formatMoney(summary.income)}</div>
+            <p className="text-xs text-muted-foreground">Bán hàng: {formatMoney(summary.salesIncome)}</p>
           </CardContent>
         </Card>
         <Card>
@@ -188,16 +244,22 @@ export default function FundsPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-red-600">{formatMoney(summary.expense)}</div>
+            <p className="text-xs text-muted-foreground">Nhập hàng: {formatMoney(summary.purchaseExpense)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Chênh lệch</CardTitle>
+            <CardTitle className="text-sm font-medium">Tồn cuối kỳ</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-bold ${summary.net < 0 ? "text-red-600" : "text-blue-600"}`}>
-              {formatMoney(summary.net)}
+            <div className={`text-2xl font-bold ${summary.closingBalance < 0 ? "text-red-600" : "text-blue-600"}`}>
+              {formatMoney(summary.closingBalance)}
             </div>
+            <p className="text-xs text-muted-foreground">
+              {summary.byMethod
+                .map((m) => `${PAYMENT_METHOD_LABELS[m.method]}: ${formatMoney(m.closingBalance)}`)
+                .join(" · ")}
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -209,35 +271,65 @@ export default function FundsPage() {
               <TableRow>
                 <TableHead>Thời gian</TableHead>
                 <TableHead>Loại</TableHead>
+                <TableHead>Hình thức</TableHead>
                 <TableHead>Khoản mục</TableHead>
                 <TableHead>Diễn giải</TableHead>
+                <TableHead>Nguồn</TableHead>
                 <TableHead className="text-right">Số tiền</TableHead>
                 <TableHead>Người lập</TableHead>
+                <TableHead />
               </TableRow>
             </TableHeader>
             <TableBody>
               {transactions.map((t) => (
-                <TableRow key={t.id}>
+                <TableRow key={t.id} className={t.cancelledAt ? "opacity-50" : ""}>
                   <TableCell>{formatDateTime(t.occurredAt)}</TableCell>
-                  <TableCell>
+                  <TableCell className="space-x-1">
                     <Badge variant={t.type === "INCOME" ? "default" : "destructive"}>
-                      {TYPE_LABELS[t.type]}
+                      {FUND_TYPE_LABELS[t.type]}
                     </Badge>
+                    {t.cancelledAt && (
+                      <Badge variant="outline" title={t.cancelReason ?? undefined}>
+                        Đã hủy
+                      </Badge>
+                    )}
                   </TableCell>
+                  <TableCell>{PAYMENT_METHOD_LABELS[t.method]}</TableCell>
                   <TableCell>{t.category ?? "—"}</TableCell>
-                  <TableCell className="max-w-[320px] truncate">{t.description ?? ""}</TableCell>
+                  <TableCell className="max-w-[260px] truncate" title={t.cancelReason ?? t.description ?? ""}>
+                    {t.description ?? ""}
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{sourceOf(t)}</TableCell>
                   <TableCell
-                    className={`text-right font-medium ${t.type === "INCOME" ? "text-green-600" : "text-red-600"}`}
+                    className={`text-right font-medium ${t.cancelledAt ? "line-through" : ""} ${
+                      t.type === "INCOME" ? "text-green-600" : "text-red-600"
+                    }`}
                   >
                     {t.type === "INCOME" ? "+" : "-"}
                     {formatMoney(t.amount)}
                   </TableCell>
                   <TableCell>{t.createdBy?.fullName ?? "—"}</TableCell>
+                  <TableCell>
+                    {!t.cancelledAt && !t.order && !t.stockDocument && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Hủy phiếu"
+                        className="text-red-500"
+                        onClick={() => {
+                          setCancelling(t);
+                          setReason("");
+                        }}
+                      >
+                        <Ban className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </TableCell>
                 </TableRow>
               ))}
               {transactions.length === 0 && !loading && (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                  <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
                     Không có phiếu thu/chi nào trong khoảng thời gian này.
                   </TableCell>
                 </TableRow>
@@ -251,7 +343,7 @@ export default function FundsPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{form?.type === "INCOME" ? "Lập phiếu thu" : "Lập phiếu chi"}</DialogTitle>
-            <DialogDescription>Ghi nhận tiền mặt thu vào hoặc chi ra của cơ sở.</DialogDescription>
+            <DialogDescription>Ghi nhận tiền thu vào hoặc chi ra của cơ sở.</DialogDescription>
           </DialogHeader>
           {form && (
             <div className="grid gap-4 py-2">
@@ -266,10 +358,22 @@ export default function FundsPage() {
                 />
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
+                <Label className="text-right">Hình thức</Label>
+                <Select value={form.method} onValueChange={(v) => setForm({ ...form, method: v as PaymentMethod })}>
+                  <SelectTrigger className="col-span-3">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="CASH">{PAYMENT_METHOD_LABELS.CASH}</SelectItem>
+                    <SelectItem value="TRANSFER">{PAYMENT_METHOD_LABELS.TRANSFER}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
                 <Label className="text-right">Khoản mục</Label>
                 <Input
                   className="col-span-3"
-                  placeholder={form.type === "INCOME" ? "Thu khác, góp vốn..." : "Điện nước, lương, mua hàng..."}
+                  placeholder={form.type === "INCOME" ? "Thu khác, góp vốn..." : "Điện nước, lương..."}
                   value={form.category}
                   onChange={(e) => setForm({ ...form, category: e.target.value })}
                 />
@@ -299,6 +403,26 @@ export default function FundsPage() {
             </Button>
             <Button onClick={save} disabled={saving}>
               {saving ? "Đang lưu..." : "Lưu phiếu"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!cancelling} onOpenChange={(open) => !open && setCancelling(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Hủy phiếu {cancelling && FUND_TYPE_LABELS[cancelling.type].toLowerCase()}</DialogTitle>
+            <DialogDescription>
+              Phiếu {formatMoney(cancelling?.amount)} vẫn được giữ trong sổ nhưng không còn tính vào tồn quỹ.
+            </DialogDescription>
+          </DialogHeader>
+          <Input placeholder="Lý do hủy" value={reason} onChange={(e) => setReason(e.target.value)} />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCancelling(null)}>
+              Đóng
+            </Button>
+            <Button variant="destructive" onClick={cancelEntry}>
+              Hủy phiếu
             </Button>
           </DialogFooter>
         </DialogContent>

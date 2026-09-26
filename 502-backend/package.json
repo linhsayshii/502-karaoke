@@ -28,7 +28,6 @@
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/swagger": "^11.2.3",
     "@prisma/client": "5.22.0",
-    "@radix-ui/react-toast": "^1.2.15",
     "@types/cookie-parser": "^1.4.10",
     "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",

@@ -9,12 +9,18 @@ export class DateRangeQuery {
   @IsString()
   branch?: string;
 
-  @ApiProperty({ required: false, description: 'YYYY-MM-DD' })
+  @ApiProperty({
+    required: false,
+    description: 'Từ ngày kinh doanh YYYY-MM-DD (06:00 → 06:00 hôm sau)',
+  })
   @IsOptional()
   @IsString()
   from?: string;
 
-  @ApiProperty({ required: false, description: 'YYYY-MM-DD' })
+  @ApiProperty({
+    required: false,
+    description: 'Đến ngày kinh doanh YYYY-MM-DD',
+  })
   @IsOptional()
   @IsString()
   to?: string;

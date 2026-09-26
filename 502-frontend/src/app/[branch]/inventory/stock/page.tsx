@@ -18,14 +18,9 @@ import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
 import { formatDateTime, formatMoney, formatNumber } from "@/lib/format";
-import type { Product, StockMovement, StockMovementType } from "@/lib/types";
+import { DOC_TYPE_LABELS, MOVEMENT_LABELS } from "@/lib/labels";
+import type { Product, StockMovement } from "@/lib/types";
 
-const MOVEMENT_LABELS: Record<StockMovementType, string> = {
-  IMPORT: "Nhập kho",
-  EXPORT: "Xuất kho",
-  SALE: "Bán hàng",
-  ADJUSTMENT: "Điều chỉnh",
-};
 
 export default function StockPage() {
   const branch = useBranchCode();
@@ -66,7 +61,7 @@ export default function StockPage() {
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold tracking-tight">Tồn kho</h2>
         <div className="text-sm text-muted-foreground">
-          Giá trị tồn (theo giá vốn):{" "}
+          Giá trị tồn (tồn kho × giá vốn):{" "}
           <span className="font-bold text-foreground">{formatMoney(totalValue)}</span>
         </div>
       </div>
@@ -98,6 +93,10 @@ export default function StockPage() {
                   <TableHead>Tên mặt hàng</TableHead>
                   <TableHead>ĐVT</TableHead>
                   <TableHead className="text-right">Tồn kho</TableHead>
+                  <TableHead className="text-right" title="Đã gọi trong các phòng đang mở, trừ kho khi thanh toán">
+                    Đang phục vụ
+                  </TableHead>
+                  <TableHead className="text-right">Khả dụng</TableHead>
                   <TableHead className="text-right">Giá vốn</TableHead>
                   <TableHead className="text-right">Giá bán</TableHead>
                   <TableHead className="w-[50px]"></TableHead>
@@ -108,12 +107,27 @@ export default function StockPage() {
                   <TableRow key={product.id}>
                     <TableCell>{index + 1}</TableCell>
                     <TableCell>SP{product.id}</TableCell>
-                    <TableCell className="font-medium">{product.name}</TableCell>
+                    <TableCell className="font-medium">
+                      {product.name}
+                      {!product.active && (
+                        <Badge variant="outline" className="ml-2">
+                          Ngừng bán
+                        </Badge>
+                      )}
+                    </TableCell>
                     <TableCell>{product.unit}</TableCell>
                     <TableCell
                       className={`text-right font-medium ${product.stockQuantity <= 0 ? "text-red-600" : ""}`}
                     >
                       {formatNumber(product.stockQuantity)}
+                    </TableCell>
+                    <TableCell className="text-right text-muted-foreground">
+                      {product.pendingQuantity ? formatNumber(product.pendingQuantity) : "—"}
+                    </TableCell>
+                    <TableCell
+                      className={`text-right ${(product.availableQuantity ?? 0) <= 0 ? "text-red-600" : ""}`}
+                    >
+                      {formatNumber(product.availableQuantity)}
                     </TableCell>
                     <TableCell className="text-right">{formatNumber(product.costPrice)}</TableCell>
                     <TableCell className="text-right">{formatNumber(product.price)}</TableCell>
@@ -180,7 +194,13 @@ function MovementHistory({ branch, productId }: { branch: string; productId: num
           <TableRow key={m.id}>
             <TableCell>{formatDateTime(m.createdAt)}</TableCell>
             <TableCell>{MOVEMENT_LABELS[m.type]}</TableCell>
-            <TableCell>{m.document?.code ?? (m.orderId ? `HĐ #${m.orderId}` : "—")}</TableCell>
+            <TableCell>
+              {m.document
+                ? `${DOC_TYPE_LABELS[m.document.type]} ${m.document.code}`
+                : m.orderId
+                  ? `Hóa đơn #${m.orderId}`
+                  : "—"}
+            </TableCell>
             <TableCell className={`text-right ${m.quantity < 0 ? "text-red-600" : "text-green-600"}`}>
               {m.quantity > 0 ? "+" : ""}
               {formatNumber(m.quantity)}

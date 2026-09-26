@@ -95,3 +95,24 @@ Dùng chung: `PageHeader`, `ConfirmDialog` (AlertDialog), `ReasonDialog` (hủy 
 
 - Không làm nút đổi ngôn ngữ và bong bóng chat trong ảnh mẫu (ứng dụng chỉ dùng tiếng Việt).
 - Nếu muốn dùng `npx shadcn@latest add …` trực tiếp trong môi trường cloud này, cần cho phép `ui.shadcn.com` trong cài đặt mạng của môi trường; trên máy cá nhân lệnh chạy bình thường.
+
+## Task 3 — Font chữ không chân (sans-serif) Inter (✅ xong)
+
+Yêu cầu: giao diện dùng font sans-serif, ví dụ Inter.
+
+### Nguyên nhân chữ có chân (serif)
+
+Trước đây Inter được tải từ Google Fonts (`next/font/google`) và danh sách font chỉ có `Inter, "Inter Fallback"` (font dự phòng là Arial trên máy). Khi file Inter không tải được (máy không vào được Google Fonts lúc chạy/dựng ứng dụng, mạng chập chờn, hoặc trong lúc font đang tải) trên máy không có Arial (Linux, một số điện thoại), trình duyệt rơi về font mặc định là **Times/Liberation Serif — font có chân**. Đã tái hiện bằng cách chặn file font trong trình duyệt: toàn bộ giao diện chuyển sang Liberation Serif.
+
+### Đã sửa
+
+- **Đóng gói Inter vào ứng dụng** bằng gói `@fontsource-variable/inter` (giấy phép OFL): bản variable đủ độ đậm 100–900, chia theo bộ ký tự; trình duyệt chỉ tải bộ cần dùng (latin ≈ 48 KB, tiếng Việt ≈ 10 KB, latin mở rộng ≈ 85 KB). Font được phục vụ từ chính ứng dụng (`/_next/static/media/…`), không còn gọi Google Fonts lúc dev, lúc build (Docker) hay lúc chạy.
+- **Danh sách font kết thúc bằng font không chân của hệ thống**: `"Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif` (cấu hình ở `--font-sans` trong `globals.css`). Nếu Inter vẫn không tải được, chữ dùng font sans-serif của máy (Segoe UI, San Francisco, Roboto, DejaVu Sans…), không bao giờ ra font có chân.
+- Bỏ Geist Mono (cũng tải từ Google); mã phiếu, mã cơ sở dùng font monospace của hệ thống.
+
+### Kiểm tra
+
+- Trình duyệt dùng đúng Inter (font web) cho tiêu đề, nhãn, ô nhập; số dạng bảng (`tabular-nums`) vẫn thẳng cột. Khi chặn file font: chữ chuyển sang DejaVu Sans (không chân) thay vì Liberation Serif.
+- Bản build production (`npm run build`, chạy thử `server.js` như trong Docker): chỉ tải 3 file Inter từ chính ứng dụng, không gọi máy chủ font bên ngoài, không lỗi console.
+- Không trang nào tràn ngang (360, 390, 768, 1440px); `tsc`, `npm run lint`, `npm run build` sạch.
+

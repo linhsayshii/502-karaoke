@@ -54,5 +54,6 @@ Quy ước giao diện:
 - Mỗi trang bắt đầu bằng `PageHeader`; điều hướng (thanh bên, breadcrumb, tiêu đề) khai báo một chỗ trong `src/lib/navigation.ts`.
 - Bố cục theo bề rộng vùng nội dung (container query `@container/main`), không theo bề rộng cửa sổ. Bảng nhiều cột ẩn bớt cột phụ trên điện thoại bằng `SHOW_FROM` trong `src/lib/responsive.ts`; kiểm tra màn hình mới ở bề rộng 360–390px (không được cuộn ngang).
 - Màu dùng token (`bg-primary`, `text-muted-foreground`, `text-success`…) để chạy đúng cả chế độ sáng và tối.
+- Font Inter được đóng gói sẵn (`@fontsource-variable/inter`, có bộ chữ tiếng Việt), không tải từ Google Fonts nên build không cần internet tới Google; nếu font không tải được, chữ rơi về font không chân của hệ thống. Đừng dùng lại `next/font/google`.
 
 Văn bản giao diện và thông báo lỗi viết bằng tiếng Việt.

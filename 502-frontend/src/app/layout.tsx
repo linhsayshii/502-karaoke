@@ -1,22 +1,13 @@
 import type { Metadata, Viewport } from "next";
-import { Geist_Mono, Inter } from "next/font/google";
+// Inter (variable, with the Vietnamese subset) ships with the app instead of
+// being fetched from Google Fonts, so it shows even when that download fails;
+// the font stack in globals.css falls back to the system sans-serif.
+import "@fontsource-variable/inter";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider } from "@/components/auth-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import { APP_NAME } from "@/components/brand";
-
-// Inter has the Vietnamese subset (Geist does not: stacked diacritics such as
-// "ệ" would fall back to another font).
-const inter = Inter({
-  variable: "--font-inter",
-  subsets: ["latin", "vietnamese"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: { default: APP_NAME, template: `%s · ${APP_NAME}` },
@@ -38,7 +29,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="vi" suppressHydrationWarning>
-      <body className={`${inter.variable} ${geistMono.variable} font-sans antialiased`}>
+      <body className="font-sans antialiased">
         <ThemeProvider>
           <AuthProvider>{children}</AuthProvider>
           <Toaster position="top-right" closeButton />

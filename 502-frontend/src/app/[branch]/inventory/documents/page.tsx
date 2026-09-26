@@ -1,57 +1,51 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { BanIcon, CircleAlertIcon, FileTextIcon } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { TableEmpty, TableSkeleton } from "@/components/data-states";
+import { DateRangePicker, formatDateRange, type DateRangeValue } from "@/components/date-range-picker";
+import { PageHeader } from "@/components/layout/page-header";
+import { LineItemsTable } from "@/components/line-items-table";
+import { ReasonDialog } from "@/components/reason-dialog";
 import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
 import { businessDate, firstDayOfMonth, formatDateTime, formatMoney, formatNumber } from "@/lib/format";
-import { BUSINESS_DAY_HINT, DOC_TYPE_LABELS as TYPE_LABELS, PAYMENT_METHOD_LABELS } from "@/lib/labels";
+import { BUSINESS_DAY_HINT, DOC_TYPE_LABELS, PAYMENT_METHOD_LABELS } from "@/lib/labels";
+import { ONLY_NARROW, SHOW_FROM } from "@/lib/responsive";
 import type { StockDocType, StockDocument } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 const ALL = "ALL";
+
+function paymentOf(doc: StockDocument) {
+  if (doc.type === "EXPORT") return "—";
+  if (!doc.fundTransaction) return "Chưa trả";
+  return PAYMENT_METHOD_LABELS[doc.fundTransaction.method];
+}
 
 export default function StockDocumentsPage() {
   const branch = useBranchCode();
   const notify = useNotify();
+  const [range, setRange] = useState<DateRangeValue>(() => ({ from: firstDayOfMonth(), to: businessDate() }));
   const [type, setType] = useState<StockDocType | typeof ALL>(ALL);
-  const [from, setFrom] = useState(() => firstDayOfMonth());
-  const [to, setTo] = useState(() => businessDate());
-  const [documents, setDocuments] = useState<StockDocument[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [documents, setDocuments] = useState<StockDocument[] | null>(null);
+  const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api.get<StockDocument[]>("/inventory/documents", {
-        params: { branch, from, to, type: type === ALL ? undefined : type },
+        params: { branch, ...range, type: type === ALL ? undefined : type },
       });
       setDocuments(res.data);
     } catch (error) {
@@ -59,226 +53,277 @@ export default function StockDocumentsPage() {
     } finally {
       setLoading(false);
     }
-    // Filters apply on "Xem"; only the branch reloads automatically.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branch, notify]);
+  }, [branch, range, type, notify]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Phiếu kho</CardTitle>
-        <p className="text-sm text-muted-foreground">{BUSINESS_DAY_HINT}</p>
-        <div className="mt-4 flex flex-wrap items-center gap-4">
-          <Select value={type} onValueChange={(v) => setType(v as StockDocType | typeof ALL)}>
-            <SelectTrigger className="w-[160px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>Tất cả phiếu</SelectItem>
-              <SelectItem value="IMPORT">Phiếu nhập</SelectItem>
-              <SelectItem value="EXPORT">Phiếu xuất</SelectItem>
-            </SelectContent>
-          </Select>
-          <div className="flex items-center gap-2">
-            <span>Từ</span>
-            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-[160px]" />
-          </div>
-          <div className="flex items-center gap-2">
-            <span>Đến</span>
-            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-[160px]" />
-          </div>
-          <Button onClick={load} disabled={loading}>
-            {loading ? "Đang tải..." : "Xem"}
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Mã phiếu</TableHead>
-              <TableHead>Loại</TableHead>
-              <TableHead>Thời gian</TableHead>
-              <TableHead>Nhà cung cấp / Ghi chú</TableHead>
-              <TableHead className="text-right">Số dòng</TableHead>
-              <TableHead className="text-right">Tổng tiền</TableHead>
-              <TableHead>Người lập</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {documents.map((doc) => (
-              <TableRow
-                key={doc.id}
-                className={`cursor-pointer hover:bg-slate-50 ${doc.cancelledAt ? "opacity-60" : ""}`}
-                onClick={() => setSelectedId(doc.id)}
-              >
-                <TableCell className={`font-medium ${doc.cancelledAt ? "line-through" : ""}`}>{doc.code}</TableCell>
-                <TableCell className="space-x-1">
-                  <Badge variant={doc.type === "IMPORT" ? "default" : "secondary"}>
-                    {TYPE_LABELS[doc.type]}
-                  </Badge>
-                  {doc.cancelledAt && <Badge variant="outline">Đã hủy</Badge>}
-                </TableCell>
-                <TableCell>{formatDateTime(doc.createdAt)}</TableCell>
-                <TableCell className="max-w-[260px] truncate">
-                  {[doc.supplier, doc.note].filter(Boolean).join(" – ") || "—"}
-                </TableCell>
-                <TableCell className="text-right">{doc._count?.lines ?? 0}</TableCell>
-                <TableCell className="text-right">{formatMoney(doc.totalAmount)}</TableCell>
-                <TableCell>{doc.createdBy.fullName}</TableCell>
-              </TableRow>
-            ))}
-            {documents.length === 0 && !loading && (
-              <TableRow>
-                <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
-                  Không có phiếu nào trong khoảng thời gian này.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </CardContent>
+  const active = (documents ?? []).filter((d) => !d.cancelledAt);
+  const importTotal = active.filter((d) => d.type === "IMPORT").reduce((s, d) => s + Number(d.totalAmount), 0);
+  const exportTotal = active.filter((d) => d.type === "EXPORT").reduce((s, d) => s + Number(d.totalAmount), 0);
 
-      <Dialog open={selectedId !== null} onOpenChange={(open) => !open && setSelectedId(null)}>
-        <DialogContent className="max-h-[80vh] max-w-3xl overflow-y-auto">
-          {selectedId !== null && <DocumentDetail id={selectedId} onChanged={load} />}
-        </DialogContent>
-      </Dialog>
-    </Card>
+  return (
+    <>
+      <PageHeader
+        title="Phiếu kho"
+        description={`Phiếu nhập và phiếu xuất của cơ sở. ${BUSINESS_DAY_HINT}`}
+        actions={<DateRangePicker value={range} onChange={setRange} align="end" />}
+      />
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{formatDateRange(range)}</CardTitle>
+          <CardDescription>
+            Nhập {formatMoney(importTotal)} · xuất {formatMoney(exportTotal)} (theo giá vốn, không tính phiếu đã hủy)
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            size="sm"
+            value={type}
+            onValueChange={(v) => v && setType(v as StockDocType | typeof ALL)}
+            aria-label="Loại phiếu"
+          >
+            <ToggleGroupItem value={ALL}>Tất cả</ToggleGroupItem>
+            <ToggleGroupItem value="IMPORT">{DOC_TYPE_LABELS.IMPORT}</ToggleGroupItem>
+            <ToggleGroupItem value="EXPORT">{DOC_TYPE_LABELS.EXPORT}</ToggleGroupItem>
+          </ToggleGroup>
+
+          <div className={cn("transition-opacity", loading && documents && "opacity-60")}>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Mã phiếu</TableHead>
+                  <TableHead className={SHOW_FROM.sm}>Loại</TableHead>
+                  <TableHead className={SHOW_FROM.sm}>Thời gian</TableHead>
+                  <TableHead className={SHOW_FROM.md}>Nhà cung cấp / ghi chú</TableHead>
+                  <TableHead className={cn("text-right", SHOW_FROM.lg)}>Số dòng</TableHead>
+                  <TableHead className="text-right">Tổng tiền</TableHead>
+                  <TableHead className={SHOW_FROM.md}>Thanh toán</TableHead>
+                  <TableHead className={SHOW_FROM.lg}>Người lập</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {!documents ? (
+                  <TableSkeleton
+                    columns={[
+                      "",
+                      SHOW_FROM.sm,
+                      SHOW_FROM.sm,
+                      SHOW_FROM.md,
+                      SHOW_FROM.lg,
+                      "",
+                      SHOW_FROM.md,
+                      SHOW_FROM.lg,
+                    ]}
+                  />
+                ) : documents.length === 0 ? (
+                  <TableEmpty
+                    colSpan={8}
+                    icon={FileTextIcon}
+                    title="Không có phiếu nào"
+                    description="Không có phiếu nhập/xuất trong khoảng thời gian này."
+                  />
+                ) : (
+                  documents.map((doc) => (
+                    <TableRow
+                      key={doc.id}
+                      className={cn("cursor-pointer", doc.cancelledAt && "text-muted-foreground")}
+                      onClick={() => setSelectedId(doc.id)}
+                    >
+                      <TableCell>
+                        <div className={cn("font-mono text-xs font-medium", doc.cancelledAt && "line-through")}>
+                          {doc.code}
+                        </div>
+                        <div className={cn("text-xs text-muted-foreground", ONLY_NARROW)}>
+                          {DOC_TYPE_LABELS[doc.type]}
+                          {doc.cancelledAt && " (đã hủy)"} · {formatDateTime(doc.createdAt)}
+                        </div>
+                      </TableCell>
+                      <TableCell className={SHOW_FROM.sm}>
+                        <span className="flex items-center gap-1">
+                          <Badge variant={doc.type === "IMPORT" ? "default" : "secondary"}>
+                            {DOC_TYPE_LABELS[doc.type]}
+                          </Badge>
+                          {doc.cancelledAt && <Badge variant="outline">Đã hủy</Badge>}
+                        </span>
+                      </TableCell>
+                      <TableCell className={cn("tabular-nums", SHOW_FROM.sm)}>
+                        {formatDateTime(doc.createdAt)}
+                      </TableCell>
+                      <TableCell className={cn("max-w-56 truncate", SHOW_FROM.md)}>
+                        {[doc.supplier, doc.note].filter(Boolean).join(" – ") || "—"}
+                      </TableCell>
+                      <TableCell className={cn("text-right tabular-nums", SHOW_FROM.lg)}>
+                        {doc._count?.lines ?? 0}
+                      </TableCell>
+                      <TableCell className="text-right font-medium tabular-nums">
+                        {formatNumber(doc.totalAmount)}
+                      </TableCell>
+                      <TableCell className={SHOW_FROM.md}>{paymentOf(doc)}</TableCell>
+                      <TableCell className={SHOW_FROM.lg}>{doc.createdBy.fullName}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+
+      <DocumentSheet id={selectedId} onOpenChange={(open) => !open && setSelectedId(null)} onChanged={load} />
+    </>
+  );
+}
+
+function DocumentSheet({
+  id,
+  onOpenChange,
+  onChanged,
+}: {
+  id: number | null;
+  onOpenChange: (open: boolean) => void;
+  onChanged: () => void;
+}) {
+  // Keep showing the last document while the sheet animates closed.
+  const [shownId, setShownId] = useState(id);
+  if (id !== null && id !== shownId) setShownId(id);
+
+  return (
+    <Sheet open={id !== null} onOpenChange={onOpenChange}>
+      <SheetContent className="w-full gap-0 sm:max-w-xl">
+        {shownId !== null && <DocumentDetail key={shownId} id={shownId} onChanged={onChanged} />}
+      </SheetContent>
+    </Sheet>
   );
 }
 
 function DocumentDetail({ id, onChanged }: { id: number; onChanged: () => void }) {
   const notify = useNotify();
   const [doc, setDoc] = useState<StockDocument | null>(null);
-  const [cancelling, setCancelling] = useState(false);
-  const [reason, setReason] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     api
       .get<StockDocument>(`/inventory/documents/${id}`)
-      .then((res) => setDoc(res.data))
-      .catch((error) => notify.error(error, "Không thể tải phiếu"));
+      .then((res) => !cancelled && setDoc(res.data))
+      .catch((error) => !cancelled && notify.error(error, "Không thể tải phiếu"));
+    return () => {
+      cancelled = true;
+    };
   }, [id, notify]);
 
-  const cancelDocument = async () => {
-    if (!reason.trim()) {
-      notify.error(null, "Vui lòng nhập lý do hủy");
-      return;
-    }
-    setSaving(true);
+  const cancelDocument = async (reason: string) => {
+    if (!doc) return;
     try {
-      const res = await api.post<StockDocument>(`/inventory/documents/${id}/cancel`, { reason: reason.trim() });
+      const res = await api.post<StockDocument>(`/inventory/documents/${doc.id}/cancel`, { reason });
       setDoc(res.data);
-      setCancelling(false);
-      notify.success(`Đã hủy phiếu ${res.data.code}`);
+      notify.success(`Đã hủy phiếu ${res.data.code}, tồn kho đã được đảo lại`);
       onChanged();
     } catch (error) {
       notify.error(error, "Không thể hủy phiếu");
-    } finally {
-      setSaving(false);
+      return false;
     }
   };
 
-  if (!doc) {
-    return (
-      <DialogHeader>
-        <DialogTitle>Đang tải phiếu...</DialogTitle>
-      </DialogHeader>
-    );
-  }
+  const isImport = doc?.type === "IMPORT";
 
   return (
     <>
-      <DialogHeader>
-        <DialogTitle>
-          {TYPE_LABELS[doc.type]} {doc.code}
-        </DialogTitle>
-      </DialogHeader>
-      <div className="grid grid-cols-2 gap-2 text-sm">
-        <div>Thời gian: {formatDateTime(doc.createdAt)}</div>
-        <div>Người lập: {doc.createdBy.fullName}</div>
-        {doc.supplier && <div>Nhà cung cấp: {doc.supplier}</div>}
-        {doc.type === "IMPORT" && (
-          <div>
-            Thanh toán:{" "}
-            {doc.fundTransaction
-              ? `${PAYMENT_METHOD_LABELS[doc.fundTransaction.method]} (đã ghi phiếu chi quỹ${
-                  doc.fundTransaction.cancelledAt ? ", đã hủy" : ""
-                })`
-              : "Chưa trả / mua nợ"}
-          </div>
-        )}
-        {doc.note && <div className="col-span-2">Ghi chú: {doc.note}</div>}
-        {doc.cancelledAt && (
-          <div className="col-span-2 rounded-md border border-red-200 bg-red-50 p-2 text-red-700">
-            Đã hủy lúc {formatDateTime(doc.cancelledAt)} bởi {doc.cancelledBy?.fullName ?? "—"}: {doc.cancelReason}
-          </div>
-        )}
-      </div>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Mặt hàng</TableHead>
-            <TableHead>ĐVT</TableHead>
-            <TableHead className="text-right">Số lượng</TableHead>
-            <TableHead className="text-right">Đơn giá</TableHead>
-            <TableHead className="text-right">Thành tiền</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {doc.lines?.map((line) => (
-            <TableRow key={line.id}>
-              <TableCell>{line.product.name}</TableCell>
-              <TableCell>{line.product.unit}</TableCell>
-              <TableCell className="text-right">{formatNumber(line.quantity)}</TableCell>
-              <TableCell className="text-right">{formatNumber(line.unitCost)}</TableCell>
-              <TableCell className="text-right">
-                {formatNumber(line.quantity * Number(line.unitCost))}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-      <div className="text-right text-lg font-bold">
-        Tổng cộng: <span className="text-red-600">{formatMoney(doc.totalAmount)}</span>
-      </div>
-      {!doc.cancelledAt &&
-        (cancelling ? (
-          <div className="space-y-2 rounded-md border p-3">
-            <DialogDescription>
-              Hủy phiếu sẽ {doc.type === "IMPORT" ? "trừ lại" : "cộng lại"} số lượng vào tồn kho
-              {doc.fundTransaction ? " và hủy phiếu chi quỹ đi kèm" : ""}.
-            </DialogDescription>
-            <Input placeholder="Lý do hủy" value={reason} onChange={(e) => setReason(e.target.value)} />
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setCancelling(false)}>
-                Đóng
-              </Button>
-              <Button variant="destructive" onClick={cancelDocument} disabled={saving}>
-                {saving ? "Đang hủy..." : "Xác nhận hủy phiếu"}
-              </Button>
-            </DialogFooter>
-          </div>
+      <SheetHeader className="border-b">
+        <SheetTitle className="flex flex-wrap items-center gap-2">
+          {doc ? DOC_TYPE_LABELS[doc.type] : "Phiếu kho"}
+          {doc && <span className="font-mono text-sm">{doc.code}</span>}
+          {doc?.cancelledAt && <Badge variant="outline">Đã hủy</Badge>}
+        </SheetTitle>
+        <SheetDescription>
+          {doc ? `${formatDateTime(doc.createdAt)} · lập bởi ${doc.createdBy.fullName}` : "Đang tải..."}
+        </SheetDescription>
+      </SheetHeader>
+
+      <div className="flex flex-1 flex-col gap-5 overflow-y-auto p-4">
+        {!doc ? (
+          <>
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-40 w-full" />
+          </>
         ) : (
-          <DialogFooter>
-            <Button
-              variant="outline"
-              className="text-red-600"
-              onClick={() => {
-                setReason("");
-                setCancelling(true);
-              }}
-            >
-              Hủy phiếu
-            </Button>
-          </DialogFooter>
-        ))}
+          <>
+            {doc.cancelledAt && (
+              <Alert variant="destructive">
+                <CircleAlertIcon />
+                <AlertTitle>
+                  Đã hủy lúc {formatDateTime(doc.cancelledAt)}
+                  {doc.cancelledBy && ` bởi ${doc.cancelledBy.fullName}`}
+                </AlertTitle>
+                <AlertDescription>{doc.cancelReason}</AlertDescription>
+              </Alert>
+            )}
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+              {isImport && (
+                <div className="flex flex-col gap-0.5">
+                  <dt className="text-xs text-muted-foreground">Nhà cung cấp</dt>
+                  <dd>{doc.supplier || "—"}</dd>
+                </div>
+              )}
+              {isImport && (
+                <div className="flex flex-col gap-0.5">
+                  <dt className="text-xs text-muted-foreground">Thanh toán</dt>
+                  <dd>
+                    {doc.fundTransaction
+                      ? `${PAYMENT_METHOD_LABELS[doc.fundTransaction.method]} · phiếu chi ${formatMoney(doc.fundTransaction.amount)}${
+                          doc.fundTransaction.cancelledAt ? " (đã hủy)" : ""
+                        }`
+                      : "Chưa trả / mua nợ"}
+                  </dd>
+                </div>
+              )}
+              <div className="col-span-2 flex flex-col gap-0.5">
+                <dt className="text-xs text-muted-foreground">{isImport ? "Ghi chú" : "Lý do xuất"}</dt>
+                <dd>{doc.note || "—"}</dd>
+              </div>
+            </dl>
+            <LineItemsTable
+              itemLabel="Mặt hàng"
+              items={(doc.lines ?? []).map((line) => ({
+                ...line,
+                name: line.product.name,
+                unit: line.product.unit,
+                price: line.unitCost,
+              }))}
+              total={doc.totalAmount}
+            />
+          </>
+        )}
+      </div>
+
+      {doc && !doc.cancelledAt && (
+        <SheetFooter className="border-t">
+          <Button variant="destructive" onClick={() => setCancelOpen(true)}>
+            <BanIcon data-icon="inline-start" />
+            Hủy phiếu
+          </Button>
+        </SheetFooter>
+      )}
+
+      <ReasonDialog
+        open={cancelOpen}
+        onOpenChange={setCancelOpen}
+        title={`Hủy phiếu ${doc?.code ?? ""}?`}
+        description={
+          isImport
+            ? `Số lượng đã nhập bị trừ lại khỏi tồn kho (chỉ hủy được khi hàng còn trong kho), giá vốn trở về lần nhập trước${
+                doc?.fundTransaction ? " và phiếu chi đi kèm bị hủy" : ""
+              }.`
+            : "Số lượng đã xuất được cộng trả lại vào tồn kho."
+        }
+        confirmLabel="Hủy phiếu"
+        onConfirm={cancelDocument}
+      />
     </>
   );
 }

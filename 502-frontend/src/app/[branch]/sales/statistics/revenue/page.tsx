@@ -1,8 +1,7 @@
-export default function RevenuePage() {
-  return (
-    <div>
-      <h2 className="text-2xl font-bold tracking-tight mb-4">Thống kê Doanh thu</h2>
-      <p>Biểu đồ và báo cáo doanh thu.</p>
-    </div>
-  );
+import { redirect } from "next/navigation";
+
+// Old address; the screen now lives at /sales/statistics.
+export default async function Page({ params }: { params: Promise<{ branch: string }> }) {
+  const { branch } = await params;
+  redirect(`/${branch}/sales/statistics`);
 }

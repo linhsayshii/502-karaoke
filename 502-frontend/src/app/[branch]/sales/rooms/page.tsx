@@ -1,66 +1,86 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  ClockIcon,
+  DoorOpenIcon,
+  EyeIcon,
+  PlayIcon,
+  ReceiptTextIcon,
+  RefreshCwIcon,
+  UserRoundIcon,
+  WrenchIcon,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Clock, PlayCircle, StopCircle, CreditCard, Eye, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Label } from "@/components/ui/label";
-import { useToast } from "@/components/ui/use-toast";
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useAuth } from "@/components/auth-provider";
+import { EmptyState } from "@/components/data-states";
+import { PageHeader } from "@/components/layout/page-header";
 import { CheckoutDialog } from "@/components/sales/checkout-dialog";
-import api, { apiErrorMessage } from "@/lib/api";
+import { OpenRoomDialog } from "@/components/sales/open-room-dialog";
+import { useNotify } from "@/hooks/use-notify";
+import { useNow } from "@/hooks/use-now";
+import api from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
-import { formatTime } from "@/lib/format";
+import { formatDuration, formatMoney, formatTime, minutesBetween } from "@/lib/format";
 import { can } from "@/lib/permissions";
-import type { FloorStaff, Room } from "@/lib/types";
+import type { FloorStaff, Room, RoomStatus } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
-// Rooms grouped by floor = first digit of the room name.
+const ALL = "ALL";
+type Filter = RoomStatus | typeof ALL;
+
+// Columns only when each card stays wide enough (~19rem) for its two buttons.
+const ROOM_GRID =
+  "grid gap-4 @2xl/main:grid-cols-2 @[62rem]/main:grid-cols-3 @[82rem]/main:grid-cols-4 @[102rem]/main:grid-cols-5";
+
+const STATUS: Record<RoomStatus, { label: string; badge: "success" | "destructive" | "secondary" }> = {
+  AVAILABLE: { label: "Trống", badge: "success" },
+  ACTIVE: { label: "Đang hát", badge: "destructive" },
+  MAINTENANCE: { label: "Bảo trì", badge: "secondary" },
+};
+
+// Rooms grouped by floor = first digit of the room name ("P203" -> 2).
 function groupByFloor(rooms: Room[]) {
-  const floors: Record<string, Room[]> = {};
+  const floors = new Map<string, Room[]>();
   for (const room of rooms) {
-    const floor = room.name.match(/(\d)/)?.[1] ?? "Khác";
-    (floors[floor] ??= []).push(room);
+    const floor = room.name.match(/\d/)?.[0] ?? "Khác";
+    floors.set(floor, [...(floors.get(floor) ?? []), room]);
   }
-  return floors;
+  return [...floors].sort(([a], [b]) => a.localeCompare(b));
 }
 
 export default function RoomsPage() {
   const router = useRouter();
   const branch = useBranchCode();
   const { user } = useAuth();
-  const { toast } = useToast();
+  const notify = useNotify();
+  const now = useNow();
   const canOperate = can(user, "sales.operate");
 
   const [rooms, setRooms] = useState<Room[]>([]);
   const [staff, setStaff] = useState<FloorStaff[]>([]);
   const [loading, setLoading] = useState(true);
-
-  const [openDialogRoom, setOpenDialogRoom] = useState<Room | null>(null);
-  const [selectedCskh, setSelectedCskh] = useState("");
-  const [selectedServer, setSelectedServer] = useState("");
-  const [opening, setOpening] = useState(false);
-
+  const [refreshing, setRefreshing] = useState(false);
+  const [filter, setFilter] = useState<Filter>(ALL);
+  const [openingRoom, setOpeningRoom] = useState<Room | null>(null);
   const [checkoutRoom, setCheckoutRoom] = useState<Room | null>(null);
-  const [checkoutOpen, setCheckoutOpen] = useState(false);
 
   const fetchData = useCallback(async () => {
+    setRefreshing(true);
     try {
       const [roomsRes, staffRes] = await Promise.all([
         api.get<Room[]>("/rooms", { params: { branch } }),
@@ -71,15 +91,12 @@ export default function RoomsPage() {
       setRooms(roomsRes.data);
       setStaff(staffRes.data);
     } catch (error) {
-      toast({
-        title: "Lỗi",
-        description: apiErrorMessage(error, "Không tải được sơ đồ phòng"),
-        variant: "destructive",
-      });
+      notify.error(error, "Không tải được sơ đồ phòng");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }, [branch, canOperate, toast]);
+  }, [branch, canOperate, notify]);
 
   useEffect(() => {
     fetchData();
@@ -88,249 +105,191 @@ export default function RoomsPage() {
     return () => clearInterval(timer);
   }, [fetchData]);
 
-  const cskhStaff = staff.filter((s) => s.position === "CSKH");
-  const serverStaff = staff.filter((s) => s.position === "SERVER");
-  const floors = groupByFloor(rooms);
+  const counts = useMemo(() => {
+    const result: Record<Filter, number> = { ALL: rooms.length, AVAILABLE: 0, ACTIVE: 0, MAINTENANCE: 0 };
+    for (const room of rooms) result[room.status] += 1;
+    return result;
+  }, [rooms]);
+
+  const shown = filter === ALL ? rooms : rooms.filter((r) => r.status === filter);
   const detailPath = (room: Room) => `/${branch}/sales/rooms/${room.id}`;
 
-  const startOpenRoom = (room: Room) => {
-    setOpenDialogRoom(room);
-    setSelectedCskh("");
-    setSelectedServer("");
-  };
-
-  const confirmOpenRoom = async () => {
-    if (!openDialogRoom) return;
-    setOpening(true);
-    try {
-      await api.post("/orders", {
-        roomId: openDialogRoom.id,
-        cskhId: selectedCskh ? Number(selectedCskh) : undefined,
-        serverId: selectedServer ? Number(selectedServer) : undefined,
-      });
-      toast({ title: "Đã mở phòng", description: `Phòng ${openDialogRoom.name} bắt đầu tính giờ.` });
-      setOpenDialogRoom(null);
-      fetchData();
-    } catch (error) {
-      toast({
-        title: "Lỗi",
-        description: apiErrorMessage(error, "Có lỗi xảy ra khi mở phòng"),
-        variant: "destructive",
-      });
-    } finally {
-      setOpening(false);
-    }
-  };
-
-  const startCheckout = (room: Room) => {
-    setCheckoutRoom(room);
-    setCheckoutOpen(true);
-  };
-
   return (
-    <div className="space-y-8 p-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <h2 className="text-3xl font-bold tracking-tight text-slate-800">
-          {canOperate ? "Sơ đồ phòng" : "Phòng bạn đang phục vụ"}
-        </h2>
-        <div className="flex items-center gap-4">
-          <div className="flex gap-4 rounded-lg bg-white p-2 shadow-sm">
-            <div className="flex items-center gap-2">
-              <div className="h-3 w-3 rounded-full bg-green-500"></div>
-              <span className="text-sm font-medium text-slate-600">Trống</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="h-3 w-3 animate-pulse rounded-full bg-red-500"></div>
-              <span className="text-sm font-medium text-slate-600">Đang hát</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="h-3 w-3 rounded-full bg-gray-300"></div>
-              <span className="text-sm font-medium text-slate-600">Bảo trì</span>
-            </div>
-          </div>
-          <Button variant="outline" size="icon" onClick={fetchData} title="Tải lại">
-            <RefreshCw className="h-4 w-4" />
+    <>
+      <PageHeader
+        title={canOperate ? "Sơ đồ phòng" : "Phòng đang phục vụ"}
+        description={
+          canOperate
+            ? "Mở phòng, gọi món và thanh toán. Sơ đồ tự cập nhật mỗi 30 giây."
+            : "Các phòng bạn đang được phân công phục vụ (chỉ xem)."
+        }
+        actions={
+          <Button variant="outline" onClick={fetchData} disabled={refreshing}>
+            <RefreshCwIcon data-icon="inline-start" className={cn(refreshing && "animate-spin")} />
+            Tải lại
           </Button>
-        </div>
-      </div>
+        }
+      />
 
-      {!loading && rooms.length === 0 && (
-        <p className="py-12 text-center text-muted-foreground">
-          {canOperate
-            ? "Cơ sở này chưa có phòng nào. Quản lý có thể thêm phòng trong mục Cài đặt."
-            : "Hiện bạn chưa được phân công phục vụ phòng nào."}
-        </p>
+      {canOperate && rooms.length > 0 && (
+        <ToggleGroup
+          type="single"
+          variant="outline"
+          size="sm"
+          spacing={2}
+          value={filter}
+          onValueChange={(value) => value && setFilter(value as Filter)}
+          className="flex-wrap"
+          aria-label="Lọc theo trạng thái"
+        >
+          <ToggleGroupItem value={ALL}>Tất cả · {counts.ALL}</ToggleGroupItem>
+          {(Object.keys(STATUS) as RoomStatus[]).map((status) => (
+            <ToggleGroupItem key={status} value={status}>
+              {STATUS[status].label} · {counts[status]}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
       )}
 
-      {Object.keys(floors)
-        .sort()
-        .map((floor) => (
-          <div key={floor} className="space-y-4">
-            <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-800 font-bold text-white">
-                {floor}
-              </div>
-              <h3 className="text-xl font-semibold text-slate-700">Tầng {floor}</h3>
-            </div>
-            <div className="grid gap-6 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-              {floors[floor].map((room) => (
-                <Card
-                  key={room.id}
-                  onClick={() => room.status === "ACTIVE" && router.push(detailPath(room))}
-                  className={`group cursor-pointer overflow-hidden border-t-4 transition-all duration-200 hover:shadow-xl ${
-                    room.status === "ACTIVE"
-                      ? "border-t-red-500 shadow-red-100"
-                      : room.status === "MAINTENANCE"
-                        ? "border-t-gray-400 bg-gray-50"
-                        : "border-t-green-500 shadow-green-50"
-                  }`}
-                >
-                  <CardHeader className="bg-slate-50/50 pb-2">
-                    <div className="flex items-start justify-between">
-                      <CardTitle className="text-xl font-bold text-slate-800">{room.name}</CardTitle>
-                      <Badge
-                        variant={room.type === "VIP" ? "default" : "secondary"}
-                        className="font-semibold"
-                      >
-                        {room.type}
-                      </Badge>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="pt-4">
-                    <div className="space-y-4">
-                      {room.status === "ACTIVE" ? (
-                        <>
-                          <div className="space-y-1 rounded-md bg-red-50 p-2 text-sm text-slate-600">
-                            <div className="flex items-center">
-                              <Clock className="mr-2 h-4 w-4 text-red-500" />
-                              <span className="font-medium">{formatTime(room.startTime)}</span>
-                            </div>
-                            {room.activeOrder?.server && (
-                              <div className="truncate text-xs">
-                                Phục vụ: {room.activeOrder.server.fullName}
-                              </div>
-                            )}
+      {loading ? (
+        <div className={ROOM_GRID}>
+          {Array.from({ length: 6 }, (_, i) => (
+            <Skeleton key={i} className="h-48 rounded-xl" />
+          ))}
+        </div>
+      ) : rooms.length === 0 ? (
+        <EmptyState
+          icon={DoorOpenIcon}
+          title={canOperate ? "Cơ sở chưa có phòng nào" : "Bạn chưa được phân công phòng nào"}
+          description={
+            canOperate
+              ? "Thêm phòng trong Cài đặt bán hàng để bắt đầu nhận khách."
+              : "Khi thu ngân mở phòng và chọn bạn phục vụ, phòng sẽ hiện ở đây."
+          }
+        >
+          {can(user, "sales.settings") && (
+            <Button asChild>
+              <Link href={`/${branch}/sales/settings`}>Thêm phòng</Link>
+            </Button>
+          )}
+        </EmptyState>
+      ) : (
+        groupByFloor(shown).map(([floor, floorRooms]) => (
+          <section key={floor} className="flex flex-col gap-3">
+            <h2 className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              {floor === "Khác" ? "Khác" : `Tầng ${floor}`}
+              <Badge variant="outline">{floorRooms.length} phòng</Badge>
+            </h2>
+            <div className={ROOM_GRID}>
+              {floorRooms.map((room) => {
+                const status = STATUS[room.status];
+                const active = room.status === "ACTIVE";
+                return (
+                  <Card
+                    key={room.id}
+                    data-status={room.status}
+                    className={cn(
+                      "gap-4 border-t-4 transition-shadow hover:shadow-md",
+                      room.status === "AVAILABLE" && "border-t-success",
+                      active && "border-t-destructive",
+                      room.status === "MAINTENANCE" && "border-t-muted-foreground/30 opacity-75",
+                    )}
+                  >
+                    <CardHeader>
+                      <CardTitle className="text-xl">{room.name}</CardTitle>
+                      <CardDescription>
+                        {room.type === "VIP" ? "VIP" : "Thường"} · {formatMoney(room.pricePerHour)}/giờ
+                      </CardDescription>
+                      <CardAction>
+                        <Badge variant={status.badge}>{status.label}</Badge>
+                      </CardAction>
+                    </CardHeader>
+                    <CardContent className="flex-1 text-sm">
+                      {active && room.startTime ? (
+                        <div className="flex flex-col gap-1.5">
+                          <div className="flex items-center gap-2">
+                            <ClockIcon className="size-4 text-muted-foreground" />
+                            <span className="font-medium tabular-nums">
+                              {formatDuration(minutesBetween(room.startTime, now))}
+                            </span>
+                            <span className="text-muted-foreground">từ {formatTime(room.startTime)}</span>
                           </div>
-                          <div className={`grid gap-2 ${canOperate ? "grid-cols-2" : "grid-cols-1"}`}>
+                          {(room.activeOrder?.server || room.activeOrder?.cskh) && (
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                              <UserRoundIcon className="size-4" />
+                              <span className="truncate">
+                                {[room.activeOrder?.server?.fullName, room.activeOrder?.cskh?.fullName]
+                                  .filter(Boolean)
+                                  .join(" · ")}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      ) : room.status === "MAINTENANCE" ? (
+                        <p className="flex items-center gap-2 text-muted-foreground">
+                          <WrenchIcon className="size-4" /> Đang bảo trì
+                        </p>
+                      ) : (
+                        <p className="text-muted-foreground">Sẵn sàng đón khách</p>
+                      )}
+                    </CardContent>
+                    {(active || (canOperate && room.status === "AVAILABLE")) && (
+                      <CardFooter className="grid grid-cols-2 gap-2">
+                        {active ? (
+                          <>
                             <Button
-                              className="w-full"
                               variant="outline"
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                router.push(detailPath(room));
-                              }}
+                              className={cn("min-w-0", !canOperate && "col-span-2")}
+                              onClick={() => router.push(detailPath(room))}
                             >
-                              <Eye className="mr-2 h-4 w-4" /> Chi tiết
+                              <EyeIcon data-icon="inline-start" />
+                              {canOperate ? "Gọi món" : "Chi tiết"}
                             </Button>
                             {canOperate && (
-                              <Button
-                                className="w-full bg-red-600 text-white hover:bg-red-700"
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  startCheckout(room);
-                                }}
-                              >
-                                <CreditCard className="mr-2 h-4 w-4" /> Thanh toán
+                              <Button className="min-w-0" onClick={() => setCheckoutRoom(room)}>
+                                <ReceiptTextIcon data-icon="inline-start" />
+                                Thanh toán
                               </Button>
                             )}
-                          </div>
-                        </>
-                      ) : room.status === "MAINTENANCE" ? (
-                        <div className="flex h-[88px] flex-col items-center justify-center text-muted-foreground">
-                          <StopCircle className="mb-2 h-8 w-8 opacity-50" />
-                          <span className="italic">Đang bảo trì</span>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="flex h-[52px] items-center justify-center rounded-md border border-green-100 bg-green-50 font-medium text-green-600">
-                            Sẵn sàng đón khách
-                          </div>
-                          {canOperate && (
-                            <Button
-                              className="mt-2 w-full bg-green-600 hover:bg-green-700"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                startOpenRoom(room);
-                              }}
-                            >
-                              <PlayCircle className="mr-2 h-4 w-4" /> Mở phòng
-                            </Button>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                          </>
+                        ) : (
+                          <Button variant="secondary" className="col-span-2" onClick={() => setOpeningRoom(room)}>
+                            <PlayIcon data-icon="inline-start" />
+                            Mở phòng
+                          </Button>
+                        )}
+                      </CardFooter>
+                    )}
+                  </Card>
+                );
+              })}
             </div>
-          </div>
-        ))}
+          </section>
+        ))
+      )}
 
-      <Dialog open={!!openDialogRoom} onOpenChange={(open) => !open && setOpenDialogRoom(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Mở phòng {openDialogRoom?.name}</DialogTitle>
-            <DialogDescription>
-              Chọn nhân viên phụ trách (có thể đổi sau trong chi tiết phòng).
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label className="text-right">CSKH</Label>
-              <Select value={selectedCskh} onValueChange={setSelectedCskh}>
-                <SelectTrigger className="col-span-3">
-                  <SelectValue placeholder="Chọn nhân viên CSKH" />
-                </SelectTrigger>
-                <SelectContent>
-                  {cskhStaff.map((s) => (
-                    <SelectItem key={s.id} value={String(s.id)}>
-                      {s.fullName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label className="text-right">Phục vụ</Label>
-              <Select value={selectedServer} onValueChange={setSelectedServer}>
-                <SelectTrigger className="col-span-3">
-                  <SelectValue placeholder="Chọn nhân viên phục vụ" />
-                </SelectTrigger>
-                <SelectContent>
-                  {serverStaff.map((s) => (
-                    <SelectItem key={s.id} value={String(s.id)}>
-                      {s.fullName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            {staff.length === 0 && (
-              <p className="text-sm text-muted-foreground">
-                Cơ sở chưa có nhân viên CSKH/phục vụ. Quản lý có thể thêm trong mục Quản trị.
-              </p>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setOpenDialogRoom(null)}>
-              Hủy
-            </Button>
-            <Button onClick={confirmOpenRoom} disabled={opening}>
-              {opening ? "Đang mở..." : "Xác nhận mở phòng"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {!loading && rooms.length > 0 && shown.length === 0 && (
+        <EmptyState icon={DoorOpenIcon} title="Không có phòng nào ở trạng thái này" />
+      )}
+
+      <OpenRoomDialog
+        room={openingRoom}
+        staff={staff}
+        onOpenChange={(open) => !open && setOpeningRoom(null)}
+        onOpened={() => {
+          // Straight to ordering, as the cashier usually does next.
+          if (openingRoom) router.push(detailPath(openingRoom));
+          setOpeningRoom(null);
+        }}
+      />
 
       <CheckoutDialog
         orderId={checkoutRoom?.activeOrderId ?? null}
         roomName={checkoutRoom?.name}
-        open={checkoutOpen}
-        onOpenChange={setCheckoutOpen}
+        open={!!checkoutRoom}
+        onOpenChange={(open) => !open && setCheckoutRoom(null)}
         onCheckedOut={fetchData}
       />
-    </div>
+    </>
   );
 }

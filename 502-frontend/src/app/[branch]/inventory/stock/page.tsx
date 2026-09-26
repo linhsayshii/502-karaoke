@@ -1,163 +1,287 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { BoxesIcon, HistoryIcon, PackageMinusIcon, PackagePlusIcon, SearchIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { History } from "lucide-react";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { TableEmpty, TableSkeleton } from "@/components/data-states";
+import { PageHeader } from "@/components/layout/page-header";
+import { useApiData } from "@/hooks/use-api-data";
 import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
 import { formatDateTime, formatMoney, formatNumber } from "@/lib/format";
 import { DOC_TYPE_LABELS, MOVEMENT_LABELS } from "@/lib/labels";
-import type { Product, StockMovement } from "@/lib/types";
+import { SHOW_FROM } from "@/lib/responsive";
+import type { Product, StockMovement, StockMovementType } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
+const ALL = "all";
+const OUT = "out";
+const NO_CATEGORY = "none";
 
+const MOVEMENT_BADGE: Record<StockMovementType, "default" | "secondary" | "outline" | "destructive"> = {
+  IMPORT: "default",
+  EXPORT: "secondary",
+  SALE: "outline",
+  ADJUSTMENT: "secondary",
+  REVERSAL: "destructive",
+};
+
+function StatTile({ label, value, footer }: { label: string; value: string; footer: string }) {
+  return (
+    <Card className="gap-2">
+      <CardHeader>
+        <CardDescription>{label}</CardDescription>
+        <CardTitle className="text-2xl font-semibold">{value}</CardTitle>
+      </CardHeader>
+      <CardFooter className="text-sm text-muted-foreground">{footer}</CardFooter>
+    </Card>
+  );
+}
+
+// Stock of the branch: on hand (after paid bills), still to be served in open
+// rooms, and what is really available.
 export default function StockPage() {
   const branch = useBranchCode();
-  const notify = useNotify();
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: list, loading } = useApiData<Product[]>("/inventory/stock", { branch }, [], "Không thể tải tồn kho");
+  const products = loading && list.length === 0 ? null : list;
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState(ALL);
+  const [view, setView] = useState(ALL);
   const [historyOf, setHistoryOf] = useState<Product | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const res = await api.get<Product[]>("/inventory/stock", { params: { branch } });
-      setProducts(res.data);
-    } catch (error) {
-      notify.error(error, "Không thể tải tồn kho");
-    } finally {
-      setLoading(false);
-    }
-  }, [branch, notify]);
+  const categories = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const p of list) if (p.category) names.set(String(p.category.id), p.category.name);
+    return [...names].sort(([, a], [, b]) => a.localeCompare(b, "vi"));
+  }, [list]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const grouped = products.reduce<Record<string, Product[]>>((acc, product) => {
-    const category = product.category?.name ?? "Chưa phân loại";
-    (acc[category] ??= []).push(product);
-    return acc;
-  }, {});
-  const totalValue = products.reduce(
-    (sum, p) => sum + Math.max(0, p.stockQuantity) * Number(p.costPrice),
-    0,
+  const keyword = search.trim().toLowerCase();
+  const shown = list.filter(
+    (p) =>
+      p.name.toLowerCase().includes(keyword) &&
+      (category === ALL || (category === NO_CATEGORY ? !p.categoryId : String(p.categoryId) === category)) &&
+      (view === ALL || (p.availableQuantity ?? p.stockQuantity) <= 0),
   );
 
-  if (loading) return <div>Đang tải...</div>;
+  const value = list.reduce((sum, p) => sum + Math.max(0, p.stockQuantity) * Number(p.costPrice), 0);
+  const outOfStock = list.filter((p) => (p.availableQuantity ?? p.stockQuantity) <= 0).length;
+  const pendingUnits = list.reduce((sum, p) => sum + (p.pendingQuantity ?? 0), 0);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold tracking-tight">Tồn kho</h2>
-        <div className="text-sm text-muted-foreground">
-          Giá trị tồn (tồn kho × giá vốn):{" "}
-          <span className="font-bold text-foreground">{formatMoney(totalValue)}</span>
-        </div>
-      </div>
+    <>
+      <PageHeader
+        title="Tồn kho"
+        description="Tồn kho trừ khi hóa đơn được thanh toán; phần đã gọi trong phòng đang mở hiện ở cột Đang phục vụ."
+        actions={
+          <>
+            <Button variant="outline" asChild>
+              <Link href={`/${branch}/inventory/export`}>
+                <PackageMinusIcon data-icon="inline-start" />
+                Xuất hàng
+              </Link>
+            </Button>
+            <Button asChild>
+              <Link href={`/${branch}/inventory/import`}>
+                <PackagePlusIcon data-icon="inline-start" />
+                Nhập hàng
+              </Link>
+            </Button>
+          </>
+        }
+      />
 
-      {products.length === 0 && (
-        <p className="py-12 text-center text-muted-foreground">
-          Chưa có mặt hàng nào quản lý tồn kho.
-        </p>
+      {!products ? (
+        <div className="grid gap-4 @xl/main:grid-cols-2 @5xl/main:grid-cols-4">
+          {Array.from({ length: 4 }, (_, i) => (
+            <Skeleton key={i} className="h-28 rounded-xl" />
+          ))}
+        </div>
+      ) : (
+        <div className="grid gap-4 @xl/main:grid-cols-2 @5xl/main:grid-cols-4">
+          <StatTile
+            label="Mặt hàng quản lý tồn"
+            value={formatNumber(list.length)}
+            footer={`${categories.length} danh mục`}
+          />
+          <StatTile label="Giá trị tồn kho" value={formatMoney(value)} footer="Tồn kho × giá vốn (lần nhập gần nhất)" />
+          <StatTile
+            label="Đang phục vụ"
+            value={formatNumber(pendingUnits)}
+            footer="Đơn vị đã gọi trong phòng đang mở"
+          />
+          <StatTile label="Hết hàng" value={formatNumber(outOfStock)} footer="Mặt hàng không còn khả dụng" />
+        </div>
       )}
 
-      {Object.entries(grouped).map(([category, items]) => (
-        <Card key={category}>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Badge variant="secondary" className="px-3 py-1 text-base">
-                {category}
-              </Badge>
-              <span className="text-sm font-normal text-muted-foreground">
-                ({items.length} mặt hàng)
-              </span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[50px]">STT</TableHead>
-                  <TableHead>Mã hàng</TableHead>
-                  <TableHead>Tên mặt hàng</TableHead>
-                  <TableHead>ĐVT</TableHead>
-                  <TableHead className="text-right">Tồn kho</TableHead>
-                  <TableHead className="text-right" title="Đã gọi trong các phòng đang mở, trừ kho khi thanh toán">
-                    Đang phục vụ
-                  </TableHead>
-                  <TableHead className="text-right">Khả dụng</TableHead>
-                  <TableHead className="text-right">Giá vốn</TableHead>
-                  <TableHead className="text-right">Giá bán</TableHead>
-                  <TableHead className="w-[50px]"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items.map((product, index) => (
-                  <TableRow key={product.id}>
-                    <TableCell>{index + 1}</TableCell>
-                    <TableCell>SP{product.id}</TableCell>
-                    <TableCell className="font-medium">
-                      {product.name}
-                      {!product.active && (
-                        <Badge variant="outline" className="ml-2">
-                          Ngừng bán
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>{product.unit}</TableCell>
-                    <TableCell
-                      className={`text-right font-medium ${product.stockQuantity <= 0 ? "text-red-600" : ""}`}
-                    >
-                      {formatNumber(product.stockQuantity)}
-                    </TableCell>
-                    <TableCell className="text-right text-muted-foreground">
-                      {product.pendingQuantity ? formatNumber(product.pendingQuantity) : "—"}
-                    </TableCell>
-                    <TableCell
-                      className={`text-right ${(product.availableQuantity ?? 0) <= 0 ? "text-red-600" : ""}`}
-                    >
-                      {formatNumber(product.availableQuantity)}
-                    </TableCell>
-                    <TableCell className="text-right">{formatNumber(product.costPrice)}</TableCell>
-                    <TableCell className="text-right">{formatNumber(product.price)}</TableCell>
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="Lịch sử xuất nhập"
-                        onClick={() => setHistoryOf(product)}
-                      >
-                        <History className="h-4 w-4" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      ))}
+      <Card>
+        <CardHeader>
+          <CardTitle>Danh sách tồn kho</CardTitle>
+          <CardDescription>Bấm vào một mặt hàng để xem sổ kho (nhập, xuất, bán) của nó.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center">
+            <InputGroup className="md:max-w-64">
+              <InputGroupAddon>
+                <SearchIcon />
+              </InputGroupAddon>
+              <InputGroupInput
+                placeholder="Tìm mặt hàng"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                aria-label="Tìm mặt hàng"
+              />
+            </InputGroup>
+            <Select value={category} onValueChange={setCategory}>
+              <SelectTrigger className="md:w-48" aria-label="Danh mục">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value={ALL}>Tất cả danh mục</SelectItem>
+                  {categories.map(([id, name]) => (
+                    <SelectItem key={id} value={id}>
+                      {name}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value={NO_CATEGORY}>Chưa phân loại</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            <ToggleGroup
+              type="single"
+              variant="outline"
+              size="sm"
+              value={view}
+              onValueChange={(v) => v && setView(v)}
+              className="md:ml-auto"
+              aria-label="Lọc tồn kho"
+            >
+              <ToggleGroupItem value={ALL}>Tất cả</ToggleGroupItem>
+              <ToggleGroupItem value={OUT}>Hết hàng · {outOfStock}</ToggleGroupItem>
+            </ToggleGroup>
+          </div>
 
-      <Dialog open={!!historyOf} onOpenChange={(open) => !open && setHistoryOf(null)}>
-        <DialogContent className="max-h-[80vh] max-w-3xl overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Lịch sử xuất nhập – {historyOf?.name}</DialogTitle>
-          </DialogHeader>
-          {historyOf && <MovementHistory branch={branch} productId={historyOf.id} />}
-        </DialogContent>
-      </Dialog>
-    </div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Mặt hàng</TableHead>
+                <TableHead className={SHOW_FROM.md}>Danh mục</TableHead>
+                <TableHead className={SHOW_FROM.sm}>ĐVT</TableHead>
+                <TableHead className="text-right">Tồn kho</TableHead>
+                <TableHead className={cn("text-right", SHOW_FROM.sm)}>Đang phục vụ</TableHead>
+                <TableHead className="text-right">Khả dụng</TableHead>
+                <TableHead className={cn("text-right", SHOW_FROM.lg)}>Giá vốn</TableHead>
+                <TableHead className={cn("text-right", SHOW_FROM.md)}>Giá trị tồn</TableHead>
+                <TableHead className={cn("w-12", SHOW_FROM.xs)} />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {!products ? (
+                <TableSkeleton
+                  columns={[
+                    "",
+                    SHOW_FROM.md,
+                    SHOW_FROM.sm,
+                    "",
+                    SHOW_FROM.sm,
+                    "",
+                    SHOW_FROM.lg,
+                    SHOW_FROM.md,
+                    SHOW_FROM.xs,
+                  ]}
+                />
+              ) : shown.length === 0 ? (
+                <TableEmpty
+                  colSpan={9}
+                  icon={BoxesIcon}
+                  title={list.length === 0 ? "Chưa có mặt hàng quản lý tồn" : "Không có mặt hàng phù hợp"}
+                  description={
+                    list.length === 0 ? "Thêm mặt hàng trong Danh mục hàng rồi lập phiếu nhập." : "Thử bộ lọc khác."
+                  }
+                />
+              ) : (
+                shown.map((product) => {
+                  const available = product.availableQuantity ?? product.stockQuantity;
+                  return (
+                    <TableRow key={product.id} className="cursor-pointer" onClick={() => setHistoryOf(product)}>
+                      <TableCell className="font-medium whitespace-normal">
+                        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          {product.name}
+                          {!product.active && <Badge variant="outline">Ngừng bán</Badge>}
+                        </span>
+                      </TableCell>
+                      <TableCell className={SHOW_FROM.md}>{product.category?.name ?? "Chưa phân loại"}</TableCell>
+                      <TableCell className={SHOW_FROM.sm}>{product.unit}</TableCell>
+                      <TableCell
+                        className={cn(
+                          "text-right font-medium tabular-nums",
+                          product.stockQuantity < 0 && "text-destructive",
+                        )}
+                      >
+                        {product.stockQuantity < 0 ? (
+                          <Tooltip>
+                            <TooltipTrigger className="cursor-help underline decoration-dotted">
+                              {formatNumber(product.stockQuantity)}
+                            </TooltipTrigger>
+                            <TooltipContent>Bán vượt tồn — hãy lập phiếu nhập bổ sung</TooltipContent>
+                          </Tooltip>
+                        ) : (
+                          formatNumber(product.stockQuantity)
+                        )}
+                      </TableCell>
+                      <TableCell className={cn("text-right text-muted-foreground tabular-nums", SHOW_FROM.sm)}>
+                        {product.pendingQuantity ? formatNumber(product.pendingQuantity) : "—"}
+                      </TableCell>
+                      <TableCell className={cn("text-right tabular-nums", available <= 0 && "text-destructive")}>
+                        {formatNumber(available)}
+                      </TableCell>
+                      <TableCell className={cn("text-right tabular-nums", SHOW_FROM.lg)}>
+                        {formatNumber(product.costPrice)}
+                      </TableCell>
+                      <TableCell className={cn("text-right tabular-nums", SHOW_FROM.md)}>
+                        {formatNumber(Math.max(0, product.stockQuantity) * Number(product.costPrice))}
+                      </TableCell>
+                      <TableCell className={SHOW_FROM.xs}>
+                        {/* The click reaches the row, which opens the ledger. */}
+                        <Button variant="ghost" size="icon-sm" aria-label={`Sổ kho ${product.name}`}>
+                          <HistoryIcon />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Sheet open={!!historyOf} onOpenChange={(open) => !open && setHistoryOf(null)}>
+        <SheetContent className="w-full gap-0 sm:max-w-2xl">
+          <SheetHeader className="border-b">
+            <SheetTitle>Sổ kho – {historyOf?.name}</SheetTitle>
+            <SheetDescription>
+              Tồn hiện tại {formatNumber(historyOf?.stockQuantity)} {historyOf?.unit}. Mỗi dòng là một lần tồn kho thay
+              đổi; cột &quot;Tồn sau&quot; luôn khớp với tồn kho.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto p-4">
+            {historyOf && <MovementHistory branch={branch} productId={historyOf.id} />}
+          </div>
+        </SheetContent>
+      </Sheet>
+    </>
   );
 }
 
@@ -170,12 +294,13 @@ function MovementHistory({ branch, productId }: { branch: string; productId: num
       .get<StockMovement[]>("/inventory/movements", { params: { branch, productId } })
       .then((res) => setMovements(res.data))
       .catch((error) => {
-        notify.error(error, "Không thể tải lịch sử kho");
+        notify.error(error, "Không thể tải sổ kho");
         setMovements([]);
       });
   }, [branch, productId, notify]);
 
-  if (!movements) return <div>Đang tải...</div>;
+  const source = (m: StockMovement) =>
+    m.document ? `${DOC_TYPE_LABELS[m.document.type]} ${m.document.code}` : m.orderId ? `Hóa đơn #${m.orderId}` : "—";
 
   return (
     <Table>
@@ -183,38 +308,33 @@ function MovementHistory({ branch, productId }: { branch: string; productId: num
         <TableRow>
           <TableHead>Thời gian</TableHead>
           <TableHead>Loại</TableHead>
-          <TableHead>Chứng từ</TableHead>
+          <TableHead className="hidden sm:table-cell">Chứng từ</TableHead>
           <TableHead className="text-right">Số lượng</TableHead>
           <TableHead className="text-right">Tồn sau</TableHead>
-          <TableHead>Người thực hiện</TableHead>
+          <TableHead className="hidden sm:table-cell">Người thực hiện</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {movements.map((m) => (
-          <TableRow key={m.id}>
-            <TableCell>{formatDateTime(m.createdAt)}</TableCell>
-            <TableCell>{MOVEMENT_LABELS[m.type]}</TableCell>
-            <TableCell>
-              {m.document
-                ? `${DOC_TYPE_LABELS[m.document.type]} ${m.document.code}`
-                : m.orderId
-                  ? `Hóa đơn #${m.orderId}`
-                  : "—"}
-            </TableCell>
-            <TableCell className={`text-right ${m.quantity < 0 ? "text-red-600" : "text-green-600"}`}>
-              {m.quantity > 0 ? "+" : ""}
-              {formatNumber(m.quantity)}
-            </TableCell>
-            <TableCell className="text-right">{formatNumber(m.balanceAfter)}</TableCell>
-            <TableCell>{m.createdBy?.fullName ?? "—"}</TableCell>
-          </TableRow>
-        ))}
-        {movements.length === 0 && (
-          <TableRow>
-            <TableCell colSpan={6} className="text-center text-muted-foreground">
-              Chưa có biến động kho.
-            </TableCell>
-          </TableRow>
+        {!movements ? (
+          <TableSkeleton columns={["", "", "hidden sm:table-cell", "", "", "hidden sm:table-cell"]} rows={4} />
+        ) : movements.length === 0 ? (
+          <TableEmpty colSpan={6} icon={HistoryIcon} title="Chưa có biến động kho" />
+        ) : (
+          movements.map((m) => (
+            <TableRow key={m.id}>
+              <TableCell className="whitespace-normal tabular-nums">{formatDateTime(m.createdAt)}</TableCell>
+              <TableCell>
+                <Badge variant={MOVEMENT_BADGE[m.type]}>{MOVEMENT_LABELS[m.type]}</Badge>
+              </TableCell>
+              <TableCell className="hidden max-w-44 truncate sm:table-cell">{source(m)}</TableCell>
+              <TableCell className={cn("text-right font-medium tabular-nums", m.quantity < 0 && "text-destructive")}>
+                {m.quantity > 0 ? "+" : ""}
+                {formatNumber(m.quantity)}
+              </TableCell>
+              <TableCell className="text-right tabular-nums">{formatNumber(m.balanceAfter)}</TableCell>
+              <TableCell className="hidden sm:table-cell">{m.createdBy?.fullName ?? "—"}</TableCell>
+            </TableRow>
+          ))
         )}
       </TableBody>
     </Table>

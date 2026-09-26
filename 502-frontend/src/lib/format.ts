@@ -3,6 +3,15 @@ export const formatMoney = (amount: number | string | null | undefined) =>
     Number(amount ?? 0),
   );
 
+// Avatar initials: first and last word of a name ("Nguyễn Văn An" -> "NA").
+export function initials(fullName: string) {
+  const words = fullName.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "?";
+  const first = words[0][0];
+  const last = words.length > 1 ? words[words.length - 1][0] : "";
+  return `${first}${last}`.toUpperCase();
+}
+
 export const formatNumber = (value: number | string | null | undefined) =>
   Number(value ?? 0).toLocaleString("vi-VN");
 
@@ -16,6 +25,27 @@ export const formatDateTime = (value: string | Date | null | undefined) =>
         year: "numeric",
       })
     : "";
+
+export const formatDate = (value: string | Date | null | undefined) =>
+  value
+    ? new Date(typeof value === "string" && value.length === 10 ? `${value}T00:00:00` : value).toLocaleDateString(
+        "vi-VN",
+        { day: "2-digit", month: "2-digit", year: "numeric" },
+      )
+    : "";
+
+// "2 giờ 05 phút" / "45 phút".
+export function formatDuration(minutes: number) {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours === 0) return `${rest} phút`;
+  return `${hours} giờ ${String(rest).padStart(2, "0")} phút`;
+}
+
+// Minutes started between two moments (as the bill counts them).
+export function minutesBetween(start: string | Date, end: Date = new Date()) {
+  return Math.max(0, Math.ceil((end.getTime() - new Date(start).getTime()) / 60000));
+}
 
 export const formatTime = (value: string | Date | null | undefined) =>
   value

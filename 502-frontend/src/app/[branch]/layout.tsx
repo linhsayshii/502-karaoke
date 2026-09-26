@@ -1,17 +1,9 @@
-import { TopBar } from "@/components/layout/TopBar";
-import { RouteGuard } from "@/components/route-guard";
+import { cookies } from "next/headers";
+import { AppShell } from "@/components/layout/app-shell";
 
-export default function BranchLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="min-h-screen flex flex-col">
-      <TopBar />
-      <div className="flex-1 flex flex-col">
-        <RouteGuard>{children}</RouteGuard>
-      </div>
-    </div>
-  );
+export default async function BranchLayout({ children }: { children: React.ReactNode }) {
+  // Keep the sidebar open/collapsed as the user left it (cookie set by SidebarProvider).
+  const cookieStore = await cookies();
+  const defaultOpen = cookieStore.get("sidebar_state")?.value !== "false";
+  return <AppShell defaultOpen={defaultOpen}>{children}</AppShell>;
 }

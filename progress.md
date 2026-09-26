@@ -47,3 +47,51 @@ Mục tiêu: các chức năng thanh toán, trừ kho, cộng kho chạy hoàn c
 
 - Hóa đơn đã thanh toán **trước** bản cập nhật không được sinh bù phiếu thu (tránh cộng trùng nếu trước đây cơ sở tự ghi tay). Nếu cơ sở vẫn tự lập phiếu thu doanh thu hằng ngày thì cần dừng việc đó.
 - Giao diện ở Task 1 chỉ nối chức năng; việc làm lại giao diện theo shadcn/ui là Task 2.
+
+## Task 2 — Giao diện thống nhất theo shadcn/ui (✅ xong)
+
+Mục tiêu: toàn bộ giao diện dùng đúng component/template của shadcn/ui, không vỡ bố cục, không lỗi hiển thị (desktop lẫn điện thoại, sáng lẫn tối), có hiệu ứng chuyển trang nhẹ; màn hình đăng nhập theo mẫu; đổi favicon và tiêu đề web.
+
+### Nền tảng
+
+- **Component shadcn/ui bản chính thức** (style new-york, bản v4 mới nhất): alert, alert-dialog, avatar, badge (thêm biến thể `success`/`warning`), breadcrumb, button, calendar, card, chart, checkbox, collapsible, dialog, dropdown-menu, empty, field, input, input-group, item, label, popover, scroll-area, select, separator, sheet, sidebar, skeleton, sonner, spinner, switch, table, tabs, textarea, toggle, toggle-group, tooltip. Chữ ẩn cho trình đọc màn hình (sr-only) đã dịch sang tiếng Việt.
+  - Trang `ui.shadcn.com` bị chặn bởi chính sách mạng của môi trường làm việc nên CLI không tải được registry; các component được lấy từ **repo chính thức `shadcn-ui/ui`** (thư mục `registry/new-york-v4`) và đổi đường dẫn import giống hệt CLI.
+  - Bỏ component cũ không dùng (`toast`/`toaster`/`use-toast` → thay bằng `sonner`; `navigation-menu`), gom các gói `@radix-ui/react-*` lẻ thành gói `radix-ui`. Thêm `date-fns`, `react-day-picker` (lịch tiếng Việt), `recharts` (biểu đồ), `next-themes` (giao diện tối), `sonner` (thông báo).
+- **Theme**: màu nền `slate`, thêm token `success`/`warning`; font **Inter** có bộ chữ tiếng Việt (Geist cũ thiếu dấu chồng như "ệ"); **giao diện tối** (nút chuyển ở góc trên, nhớ lựa chọn, mặc định theo hệ điều hành). Màu biểu đồ (tiền mặt/chuyển khoản) đã kiểm tra độ tương phản và phân biệt cho người mù màu ở cả hai chế độ.
+- **Khung ứng dụng** theo template dashboard-01/sidebar-07: thanh bên (thu gọn thành biểu tượng, trên điện thoại là ngăn kéo; nhớ trạng thái bằng cookie) chia nhóm Bán hàng / Kho / Kế toán / Quản trị, chỉ hiện trang mà vai trò được dùng; chọn cơ sở (quản lý hệ thống); menu tài khoản (đổi mật khẩu, đăng xuất); thanh tiêu đề có breadcrumb, **ngày kinh doanh hiện tại** và nút sáng/tối.
+- **Hiệu ứng chuyển trang**: mỗi trang hiện ra bằng hiệu ứng mờ + trượt nhẹ 300ms (tắt khi hệ điều hành bật "giảm chuyển động"); dialog, sheet, popover dùng hiệu ứng mặc định của shadcn.
+- **Đăng nhập** theo mẫu: thẻ chia đôi (bên trái khối thương hiệu nền tối: logo, "Hệ thống quản lý", tiêu đề lớn, mô tả, ©; bên phải form "Đăng nhập hệ thống" với nút hiện/ẩn mật khẩu, nút "Đăng nhập" có biểu tượng); trên điện thoại: logo + tên ở trên, form dạng thẻ, © ở dưới; có nút sáng/tối.
+- **Favicon và tiêu đề web**: biểu tượng micro mới (`app/icon.svg`, `favicon.ico`, `apple-icon.png`); tiêu đề tab dạng "Sơ đồ phòng · Karaoke 502", trang chi tiết phòng là "Phòng P101 · Karaoke 502".
+
+### Các trang đã làm lại
+
+| Trang | Nội dung chính |
+|---|---|
+| Sơ đồ phòng | Thẻ phòng theo tầng, lọc theo trạng thái (kèm số lượng), đồng hồ thời gian hát chạy trực tiếp, dialog mở phòng (chọn CSKH/phục vụ), dialog thanh toán (chọn tiền mặt/chuyển khoản); nhân viên chỉ thấy phòng mình phục vụ |
+| Chi tiết phòng | Thực đơn có tìm kiếm, lọc danh mục, hiện "Còn X" theo tồn khả dụng; hóa đơn với nút +/−, sửa số lượng, xóa món; giảm giá/phí dịch vụ/thuế (theo % hoặc số tiền); tổng tạm tính chạy trực tiếp |
+| Doanh thu | Thẻ số liệu, biểu đồ cột chồng tiền mặt/chuyển khoản theo ngày, bảng chi tiết theo ngày (bấm để xem hóa đơn ngày đó), chọn khoảng ngày có sẵn "Hôm nay, Hôm qua, 7 ngày qua, Tháng này, Tháng trước" |
+| Hóa đơn | Lọc trạng thái, tìm theo phòng/mã; bấm dòng mở ngăn chi tiết hóa đơn và hủy hóa đơn (bắt buộc lý do) |
+| Cài đặt bán hàng / Danh mục hàng | Tab Phòng / Mặt hàng / Danh mục (ở Kho: Mặt hàng / Danh mục); thêm, sửa, ngừng bán, bảo trì phòng qua dialog và menu thao tác |
+| Tồn kho | Thẻ số liệu, lọc danh mục/hết hàng, cột Đang phục vụ/Khả dụng; bấm mặt hàng mở **sổ kho** |
+| Nhập hàng / Xuất hàng | Form nhiều dòng, gợi ý giá vốn, tổng tiền; hình thức trả tiền nhập hàng (tiền mặt / CK / chưa trả) |
+| Phiếu kho | Lọc loại, khoảng ngày; ngăn chi tiết phiếu và hủy phiếu |
+| Sổ quỹ | Tồn đầu kỳ, tổng thu, tổng chi, tồn cuối kỳ; lọc loại/hình thức; lập phiếu thu/chi; hủy phiếu thủ công |
+| Tài khoản / Cơ sở | Tìm kiếm, hiện tài khoản đã khóa, thêm/sửa, đặt mật khẩu, khóa/mở khóa; quản lý cơ sở |
+
+Dùng chung: `PageHeader`, `ConfirmDialog` (AlertDialog), `ReasonDialog` (hủy có lý do), trạng thái rỗng (`Empty`) và khung chờ (`Skeleton`) cho mọi bảng/trang, `DateRangePicker`, `LineItemsTable`, `BillSummary`, thông báo `sonner`. Các trang cũ bỏ trống (`sales/catalog/*`, `sales/room-management`, `sales/overview`, `sales/statistics/{cskh,revenue}`) chuyển hướng sang trang mới.
+
+### Chống vỡ giao diện
+
+- Bảng trên điện thoại chỉ giữ cột chính, cột phụ hiện dần khi màn hình rộng hơn (`lib/responsive.ts`), thông tin phụ hiện dưới tên (VD: loại phiếu + thời gian dưới mã phiếu); chi tiết đầy đủ nằm trong ngăn/dialog. Dòng nhập/xuất hàng xếp thành khối có nhãn trên điện thoại. Hóa đơn trong phòng dùng danh sách `Item` thay cho bảng.
+- Kiểm tra tự động bằng Playwright: **4 vai trò × 6 độ rộng (360, 390, 768, 1024, 1280, 1440px) × mọi trang**: không trang nào bị tràn ngang, không bảng nào phải cuộn ngang, không lỗi console. Chụp và soát ảnh từng trang ở desktop/điện thoại, sáng/tối, cùng các dialog, ngăn chi tiết, lịch chọn ngày, thanh bên thu gọn và ngăn kéo điện thoại.
+- Lỗi hiển thị tìm thấy khi soát và đã sửa: nút "Thanh toán" tràn chữ khi thẻ phòng hẹp (đổi số cột theo bề rộng), lịch chọn ngày rộng hơn màn hình điện thoại, nhãn ẩn của form nhập hàng làm trang rộng ra 1870px, tên món bị bóp còn vài chữ trong hóa đơn trên điện thoại, bộ lọc trạng thái phòng bị cắt, bảng doanh thu liệt kê cả những ngày 0đ, tiêu đề thanh trên trống ở trang không có quyền.
+
+### Kiểm tra
+
+- `tsc --noEmit`, `npm run lint` (0 lỗi, 0 cảnh báo), `npm run build` đều sạch.
+- Backend không đổi ở Task 2; unit test 38/38 và e2e 32/32 vẫn qua.
+
+### Lưu ý
+
+- Không làm nút đổi ngôn ngữ và bong bóng chat trong ảnh mẫu (ứng dụng chỉ dùng tiếng Việt).
+- Nếu muốn dùng `npx shadcn@latest add …` trực tiếp trong môi trường cloud này, cần cho phép `ui.shadcn.com` trong cài đặt mạng của môi trường; trên máy cá nhân lệnh chạy bình thường.

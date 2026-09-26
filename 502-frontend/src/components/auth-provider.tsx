@@ -2,8 +2,10 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
+import { toast } from "sonner";
 import api, { setAccessToken } from "@/lib/api";
-import { useToast } from "@/components/ui/use-toast";
+import { BrandMark } from "@/components/brand";
+import { Spinner } from "@/components/ui/spinner";
 import type { Branch, User } from "@/lib/types";
 
 interface LoginData {
@@ -43,7 +45,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
-  const { toast } = useToast();
 
   const fetchBranches = async () => {
     const res = await api.get<Branch[]>("/branches");
@@ -100,10 +101,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const list = await fetchBranches();
     setUser(loggedIn);
     router.push(homePath(loggedIn, list));
-    toast({
-      title: "Thành công",
-      description: `Xin chào ${loggedIn.fullName}!`,
-    });
+    toast.success(`Xin chào ${loggedIn.fullName}!`);
   };
 
   const logout = useCallback(async () => {
@@ -116,11 +114,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setBranches([]);
     router.push("/");
-    toast({
-      title: "Đã đăng xuất",
-      description: "Hẹn gặp lại bạn!",
-    });
-  }, [router, toast]);
+    toast("Đã đăng xuất. Hẹn gặp lại!");
+  }, [router]);
 
   // Auto logout after 15 hours without activity.
   useEffect(() => {
@@ -131,11 +126,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const handleLogout = () => {
       logout();
-      toast({
-        title: "Hết phiên đăng nhập",
-        description: "Bạn đã bị đăng xuất do không hoạt động trong 15 giờ.",
-        variant: "destructive",
-      });
+      toast.error("Bạn đã bị đăng xuất do không hoạt động trong 15 giờ.");
     };
 
     const resetTimer = () => {
@@ -162,7 +153,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clearTimeout(timeoutId);
       events.forEach((event) => window.removeEventListener(event, handleActivity));
     };
-  }, [user, logout, toast]);
+  }, [user, logout]);
 
   const reloadBranches = async () => {
     await fetchBranches();
@@ -170,8 +161,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider value={{ user, branches, loading, login, logout, checkAuth, reloadBranches }}>
-      {!loading && children}
+      {loading ? <SessionLoading /> : children}
     </AuthContext.Provider>
+  );
+}
+
+// Shown while the session is restored on page load.
+function SessionLoading() {
+  return (
+    <div className="flex min-h-svh flex-col items-center justify-center gap-4 bg-background">
+      <BrandMark className="size-10 animate-in fade-in-0 zoom-in-95 duration-500" />
+      <Spinner className="text-muted-foreground" />
+    </div>
   );
 }
 

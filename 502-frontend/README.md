@@ -41,10 +41,18 @@ Chưa có test tự động cho frontend.
 
 ## Thêm component giao diện
 
-Component nền nằm trong `src/components/ui` (shadcn, style new-york, icon lucide). Thêm mới bằng CLI để giữ đúng cấu hình `components.json`:
+Component nền nằm trong `src/components/ui` (shadcn/ui style new-york bản v4, dùng gói `radix-ui`, icon lucide; chữ cho trình đọc màn hình đã dịch sang tiếng Việt). Thêm mới bằng CLI để giữ đúng cấu hình `components.json`:
 
 ```bash
 npx shadcn@latest add <ten-component>
 ```
+
+Sau khi thêm, kiểm tra CLI không cài thêm gói thừa và dịch các chữ `sr-only` sang tiếng Việt.
+
+Quy ước giao diện:
+
+- Mỗi trang bắt đầu bằng `PageHeader`; điều hướng (thanh bên, breadcrumb, tiêu đề) khai báo một chỗ trong `src/lib/navigation.ts`.
+- Bố cục theo bề rộng vùng nội dung (container query `@container/main`), không theo bề rộng cửa sổ. Bảng nhiều cột ẩn bớt cột phụ trên điện thoại bằng `SHOW_FROM` trong `src/lib/responsive.ts`; kiểm tra màn hình mới ở bề rộng 360–390px (không được cuộn ngang).
+- Màu dùng token (`bg-primary`, `text-muted-foreground`, `text-success`…) để chạy đúng cả chế độ sáng và tối.
 
 Văn bản giao diện và thông báo lỗi viết bằng tiếng Việt.

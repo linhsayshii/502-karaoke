@@ -1,8 +1,7 @@
-export default function RoomsPage() {
-  return (
-    <div>
-      <h2 className="text-2xl font-bold tracking-tight mb-4">Quản lý Phòng hát</h2>
-      <p>Danh sách phòng và cấu hình giá sẽ hiển thị ở đây.</p>
-    </div>
-  );
+import { redirect } from "next/navigation";
+
+// Old address; the screen now lives at /sales/settings.
+export default async function Page({ params }: { params: Promise<{ branch: string }> }) {
+  const { branch } = await params;
+  redirect(`/${branch}/sales/settings`);
 }

@@ -7,6 +7,7 @@ Hệ thống quản lý chuỗi quán karaoke nhiều cơ sở (`cs1`–`cs4`):
 - **Quỹ**: phiếu thu/chi, tồn đầu kỳ/cuối kỳ; thanh toán tự ghi phiếu thu, nhập hàng đã trả tự ghi phiếu chi.
 - **Thống kê**: doanh thu theo ngày kinh doanh (06:00 → 06:00 hôm sau, giờ mở cửa 11:30 → 06:00), khớp với phiếu thu bán hàng trong Sổ quỹ.
 - **Phân quyền**: Quản lý hệ thống, Quản lý cơ sở, Thu ngân, Nhân viên. Mỗi tài khoản (trừ quản lý hệ thống) chỉ thao tác trong cơ sở của mình.
+- **Giao diện**: shadcn/ui, chế độ sáng/tối, dùng được trên máy tính, máy tính bảng và điện thoại.
 
 ## Cấu trúc
 

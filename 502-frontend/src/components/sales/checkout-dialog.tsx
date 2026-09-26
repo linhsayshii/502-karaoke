@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { BanknoteIcon, CreditCardIcon, LandmarkIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,17 +11,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { useToast } from "@/components/ui/use-toast";
-import api, { apiErrorMessage } from "@/lib/api";
-import { formatMoney, formatTime } from "@/lib/format";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { LineItemsTable } from "@/components/line-items-table";
+import { BillSummary } from "@/components/sales/bill-summary";
+import { useNotify } from "@/hooks/use-notify";
+import api from "@/lib/api";
+import { formatDuration, formatMoney, formatTime } from "@/lib/format";
 import { PAYMENT_METHOD_LABELS } from "@/lib/labels";
 import type { BillPreview, PaymentMethod } from "@/lib/types";
 
@@ -32,15 +32,10 @@ interface CheckoutDialogProps {
   onCheckedOut: () => void;
 }
 
-// Shows the live bill from the server and closes it on confirmation.
-export function CheckoutDialog({
-  orderId,
-  roomName,
-  open,
-  onOpenChange,
-  onCheckedOut,
-}: CheckoutDialogProps) {
-  const { toast } = useToast();
+// Shows the bill computed by the server and closes it: the server bills the
+// same numbers, deducts stock and writes the fund receipt.
+export function CheckoutDialog({ orderId, roomName, open, onOpenChange, onCheckedOut }: CheckoutDialogProps) {
+  const notify = useNotify();
   const [bill, setBill] = useState<BillPreview | null>(null);
   const [method, setMethod] = useState<PaymentMethod>("CASH");
   const [submitting, setSubmitting] = useState(false);
@@ -57,165 +52,90 @@ export function CheckoutDialog({
       })
       .catch((error) => {
         if (cancelled) return;
-        toast({
-          title: "Lỗi",
-          description: apiErrorMessage(error, "Không thể lấy thông tin thanh toán"),
-          variant: "destructive",
-        });
+        notify.error(error, "Không thể lấy thông tin thanh toán");
         onOpenChange(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [open, orderId, toast, onOpenChange]);
+  }, [open, orderId, notify, onOpenChange]);
 
   const confirm = async () => {
     if (!orderId) return;
     setSubmitting(true);
     try {
       await api.post(`/orders/${orderId}/checkout`, { paymentMethod: method });
-      toast({
-        title: "Đã thanh toán",
-        description: `Phòng ${roomName ?? ""} đã trả phòng (${PAYMENT_METHOD_LABELS[method].toLowerCase()}).`,
-      });
+      notify.success(`Đã thanh toán phòng ${roomName ?? ""} (${PAYMENT_METHOD_LABELS[method].toLowerCase()})`);
       onOpenChange(false);
       onCheckedOut();
     } catch (error) {
-      toast({
-        title: "Lỗi thanh toán",
-        description: apiErrorMessage(error, "Không thể thanh toán hóa đơn"),
-        variant: "destructive",
-      });
+      notify.error(error, "Không thể thanh toán hóa đơn");
     } finally {
       setSubmitting(false);
     }
   };
 
-  const adjustments: [string, number, string][] = bill
-    ? [
-        ["Giảm giá món", -bill.discountAmount, bill.discountPercent ? `${bill.discountPercent}%` : ""],
-        [
-          "Giảm giá giờ",
-          -bill.hourlyDiscountAmount,
-          bill.hourlyDiscountPercent ? `${bill.hourlyDiscountPercent}%` : "",
-        ],
-        ["Phí dịch vụ", bill.serviceFeeAmount, bill.serviceFeePercent ? `${bill.serviceFeePercent}%` : ""],
-        ["Thuế (VAT)", bill.taxAmount, bill.taxPercent ? `${bill.taxPercent}%` : ""],
-      ]
-    : [];
-
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
+    <Dialog open={open} onOpenChange={(next) => !submitting && onOpenChange(next)}>
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Thanh toán phòng {roomName}</DialogTitle>
-          <DialogDescription>Kiểm tra lại hóa đơn trước khi thanh toán.</DialogDescription>
+          <DialogDescription>
+            {bill
+              ? `Giờ vào ${formatTime(bill.startTime)} · giờ ra ${formatTime(bill.endTime)} · ${formatDuration(bill.durationMinutes)}`
+              : "Đang tính tiền..."}
+          </DialogDescription>
         </DialogHeader>
 
         {!bill ? (
-          <p className="py-8 text-center text-muted-foreground">Đang tính tiền...</p>
+          <div className="flex flex-col gap-3">
+            <Skeleton className="h-32 w-full" />
+            <Skeleton className="h-24 w-full" />
+          </div>
         ) : (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div className="rounded-lg bg-slate-50 p-4 space-y-1">
-                <div className="flex justify-between">
-                  <span>Giờ vào – ra:</span>
-                  <span className="font-medium">
-                    {formatTime(bill.startTime)} – {formatTime(bill.endTime)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Thời gian:</span>
-                  <span className="font-medium">{bill.durationMinutes} phút</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Tiền giờ:</span>
-                  <span className="font-medium">{formatMoney(bill.hourlyFee)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Tiền món:</span>
-                  <span className="font-medium">{formatMoney(bill.totalProductPrice)}</span>
-                </div>
-              </div>
-              <div className="rounded-lg bg-slate-50 p-4 space-y-1">
-                {adjustments
-                  .filter(([, amount]) => amount !== 0)
-                  .map(([label, amount, note]) => (
-                    <div key={label} className="flex justify-between">
-                      <span>
-                        {label} {note && <span className="text-muted-foreground">({note})</span>}:
-                      </span>
-                      <span className="font-medium">{formatMoney(amount)}</span>
-                    </div>
-                  ))}
-                <div className="flex justify-between pt-2 text-lg font-bold text-red-600">
-                  <span>Thành tiền:</span>
-                  <span>{formatMoney(bill.finalAmount)}</span>
-                </div>
-              </div>
-            </div>
+          <div className="flex min-w-0 flex-col gap-4">
+            <LineItemsTable
+              className="max-h-56 overflow-auto"
+              items={bill.items.map((item) => ({ ...item, name: item.product.name, unit: item.product.unit }))}
+              emptyText="Không gọi món nào"
+            />
 
-            <div className="flex items-center justify-between gap-4 rounded-lg border p-3 text-sm">
-              <span className="font-medium">Hình thức thanh toán</span>
-              <div className="flex gap-2">
-                {(["CASH", "TRANSFER"] as PaymentMethod[]).map((m) => (
-                  <Button
-                    key={m}
-                    type="button"
-                    size="sm"
-                    variant={method === m ? "default" : "outline"}
-                    onClick={() => setMethod(m)}
-                  >
-                    {PAYMENT_METHOD_LABELS[m]}
-                  </Button>
-                ))}
-              </div>
-            </div>
+            <BillSummary bill={bill} percents={bill} pricePerHour={Number(bill.pricePerHour)} />
 
-            <div className="max-h-[40vh] overflow-auto rounded-lg border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Tên món</TableHead>
-                    <TableHead className="text-right">Đơn giá</TableHead>
-                    <TableHead className="text-right">SL</TableHead>
-                    <TableHead className="text-right">Thành tiền</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {bill.items.map((item) => (
-                    <TableRow key={item.id}>
-                      <TableCell>{item.product.name}</TableCell>
-                      <TableCell className="text-right">{formatMoney(item.price)}</TableCell>
-                      <TableCell className="text-right">{item.quantity}</TableCell>
-                      <TableCell className="text-right">
-                        {formatMoney(Number(item.price) * item.quantity)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {bill.items.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={4} className="text-center text-muted-foreground">
-                        Không có dịch vụ nào
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+            <Separator />
+
+            <Field orientation="horizontal" className="flex-wrap justify-between gap-3">
+              <FieldLabel className="flex-none">
+                <CreditCardIcon className="size-4 text-muted-foreground" />
+                Hình thức thanh toán
+              </FieldLabel>
+              <ToggleGroup
+                type="single"
+                variant="outline"
+                value={method}
+                onValueChange={(value) => value && setMethod(value as PaymentMethod)}
+                aria-label="Hình thức thanh toán"
+              >
+                <ToggleGroupItem value="CASH">
+                  <BanknoteIcon />
+                  {PAYMENT_METHOD_LABELS.CASH}
+                </ToggleGroupItem>
+                <ToggleGroupItem value="TRANSFER">
+                  <LandmarkIcon />
+                  {PAYMENT_METHOD_LABELS.TRANSFER}
+                </ToggleGroupItem>
+              </ToggleGroup>
+            </Field>
           </div>
         )}
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             Đóng
           </Button>
-          <Button
-            onClick={confirm}
-            disabled={!bill || submitting}
-            className="bg-red-600 hover:bg-red-700"
-          >
-            {submitting ? "Đang xử lý..." : "Xác nhận thanh toán"}
+          <Button onClick={confirm} disabled={!bill || submitting}>
+            {submitting && <Spinner data-icon="inline-start" />}
+            Thu {bill ? formatMoney(bill.finalAmount) : ""}
           </Button>
         </DialogFooter>
       </DialogContent>

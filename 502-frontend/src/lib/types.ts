@@ -107,6 +107,7 @@ export interface Order {
   cancelledBy?: StaffRef | null;
   startTime: string;
   endTime: string | null;
+  updatedAt: string;
   // Hourly price fixed when the session opened.
   pricePerHour: string | number;
   paymentMethod: PaymentMethod | null;

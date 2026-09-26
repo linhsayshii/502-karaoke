@@ -1,10 +1,4 @@
-import type {
-  FundType,
-  OrderStatus,
-  PaymentMethod,
-  StockDocType,
-  StockMovementType,
-} from "@/lib/types";
+import type { FundType, OrderStatus, PaymentMethod, StockDocType, StockMovementType } from "@/lib/types";
 
 // Vietnamese labels of the business enums.
 
@@ -38,5 +32,4 @@ export const MOVEMENT_LABELS: Record<StockMovementType, string> = {
 };
 
 // Business day as the backend counts it (06:00 → 06:00 next morning).
-export const BUSINESS_DAY_HINT =
-  "Ngày kinh doanh tính từ 06:00 đến 06:00 sáng hôm sau (giờ mở cửa 11:30 – 06:00).";
+export const BUSINESS_DAY_HINT = "Ngày kinh doanh tính từ 06:00 đến 06:00 sáng hôm sau (giờ mở cửa 11:30 – 06:00).";

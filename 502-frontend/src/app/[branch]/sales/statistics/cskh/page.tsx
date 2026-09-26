@@ -1,8 +1,7 @@
-export default function CskhPage() {
-  return (
-    <div>
-      <h2 className="text-2xl font-bold tracking-tight mb-4">Chăm sóc Khách hàng</h2>
-      <p>Thống kê khách hàng và lịch sử chi tiêu.</p>
-    </div>
-  );
+import { redirect } from "next/navigation";
+
+// Old address; the screen now lives at /sales/statistics.
+export default async function Page({ params }: { params: Promise<{ branch: string }> }) {
+  const { branch } = await params;
+  redirect(`/${branch}/sales/statistics`);
 }

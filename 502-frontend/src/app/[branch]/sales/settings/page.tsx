@@ -1,25 +1,33 @@
 "use client";
 
+import { DoorOpenIcon, PackageIcon, TagsIcon } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CategoryManager } from "@/components/catalog/category-manager";
 import { ProductManager } from "@/components/catalog/product-manager";
 import { RoomManager } from "@/components/catalog/room-manager";
+import { PageHeader } from "@/components/layout/page-header";
 
 export default function SalesSettingsPage() {
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight">Cài đặt Bán hàng</h2>
-        <p className="text-muted-foreground">
-          Quản lý phòng, danh mục và mặt hàng của cơ sở. Nhân viên được quản lý ở mục Quản trị.
-        </p>
-      </div>
-
-      <Tabs defaultValue="rooms" className="space-y-4">
+    <>
+      <PageHeader
+        title="Cài đặt bán hàng"
+        description="Phòng, mặt hàng và danh mục của cơ sở. Nhân viên được quản lý trong Quản trị → Tài khoản."
+      />
+      <Tabs defaultValue="rooms" className="gap-4">
         <TabsList>
-          <TabsTrigger value="rooms">Phòng</TabsTrigger>
-          <TabsTrigger value="products">Mặt hàng</TabsTrigger>
-          <TabsTrigger value="categories">Danh mục</TabsTrigger>
+          <TabsTrigger value="rooms">
+            <DoorOpenIcon />
+            Phòng
+          </TabsTrigger>
+          <TabsTrigger value="products">
+            <PackageIcon />
+            Mặt hàng
+          </TabsTrigger>
+          <TabsTrigger value="categories">
+            <TagsIcon />
+            Danh mục
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="rooms">
           <RoomManager />
@@ -31,6 +39,6 @@ export default function SalesSettingsPage() {
           <CategoryManager />
         </TabsContent>
       </Tabs>
-    </div>
+    </>
   );
 }

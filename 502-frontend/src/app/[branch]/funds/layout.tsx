@@ -1,7 +1,7 @@
-export default function FundsLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return <main className="flex-1 bg-slate-50 p-6">{children}</main>;
+import type { Metadata } from "next";
+
+export const metadata: Metadata = { title: "Sổ quỹ" };
+
+export default function Layout({ children }: { children: React.ReactNode }) {
+  return children;
 }

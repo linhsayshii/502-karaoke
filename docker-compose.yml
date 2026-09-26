@@ -1,0 +1,52 @@
+# Karaoke 502 — chạy toàn bộ hệ thống bằng Docker.
+#   cp .env.docker.example .env   # rồi sửa mật khẩu / secret
+#   docker compose up -d --build
+# Dữ liệu PostgreSQL nằm ở ./data/postgres (bind mount), không mất khi xoá container.
+
+name: karaoke502
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-karaoke_db}
+      POSTGRES_USER: ${POSTGRES_USER:-karaoke_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Đặt POSTGRES_PASSWORD trong .env}
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./502-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-karaoke_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-karaoke_db}?schema=public
+      JWT_SECRET: ${JWT_SECRET:?Đặt JWT_SECRET trong .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Đặt JWT_REFRESH_SECRET trong .env}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      TZ: Asia/Ho_Chi_Minh
+    # Không mở cổng ra ngoài: trình duyệt gọi /api qua frontend.
+    # Cần gọi trực tiếp (Swagger, debug) thì bỏ comment:
+    # ports:
+    #   - "127.0.0.1:4000:4000"
+
+  frontend:
+    build:
+      context: ./502-frontend
+      args:
+        NEXT_PUBLIC_API_URL: /api
+        API_PROXY_TARGET: http://backend:4000
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${APP_PORT:-3000}:3000"

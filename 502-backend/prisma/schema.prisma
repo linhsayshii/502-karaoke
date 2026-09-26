@@ -1,0 +1,281 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+//
+// Schema changes go through `npx prisma migrate dev --name <change>`;
+// never `db push` against a database that holds real data.
+
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "binary"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Cơ sở. `code` ("cs1", ...) is what URLs and the `?branch=` API param use.
+model Branch {
+  id               Int               @id @default(autoincrement())
+  code             String            @unique
+  name             String
+  address          String?
+  active           Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  users            User[]
+  rooms            Room[]
+  orders           Order[]
+  categories       Category[]
+  products         Product[]
+  stockDocuments   StockDocument[]
+  stockMovements   StockMovement[]
+  fundTransactions FundTransaction[]
+}
+
+enum Role {
+  CHAIN_MANAGER // Quản lý cao nhất — all branches
+  BRANCH_MANAGER // Quản lý cơ sở
+  CASHIER // Thu ngân
+  STAFF // Nhân viên
+}
+
+// Floor duty of an employee; who can be picked as CSKH / phục vụ on a room.
+enum StaffPosition {
+  CSKH
+  SERVER
+}
+
+// Every account is an employee. branchId is null only for CHAIN_MANAGER.
+// password is null until a manager activates the account (cannot log in).
+model User {
+  id               Int               @id @default(autoincrement())
+  username         String            @unique
+  password         String?
+  fullName         String
+  phone            String?
+  role             Role              @default(STAFF)
+  position         StaffPosition?
+  branchId         Int?
+  branch           Branch?           @relation(fields: [branchId], references: [id])
+  active           Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  ordersAsCSKH     Order[]           @relation("OrderCSKH")
+  ordersAsServer   Order[]           @relation("OrderServer")
+  ordersCreated    Order[]           @relation("OrderCreatedBy")
+  ordersCheckedOut Order[]           @relation("OrderCheckedOutBy")
+  stockDocuments   StockDocument[]
+  stockMovements   StockMovement[]
+  fundTransactions FundTransaction[]
+
+  @@index([branchId])
+}
+
+model Category {
+  id        Int       @id @default(autoincrement())
+  branchId  Int
+  branch    Branch    @relation(fields: [branchId], references: [id])
+  name      String
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([branchId])
+}
+
+model Product {
+  id                 Int                 @id @default(autoincrement())
+  branchId           Int
+  branch             Branch              @relation(fields: [branchId], references: [id])
+  name               String
+  categoryId         Int?
+  category           Category?           @relation(fields: [categoryId], references: [id])
+  price              Decimal
+  // Latest import unit cost (giá vốn); updated by import receipts.
+  costPrice          Decimal             @default(0)
+  // Only changed through StockMovement (inventory documents, checkout).
+  stockQuantity      Int                 @default(0)
+  unit               String // e.g., lon, dia, gio
+  // false for services (no stock deduction on checkout).
+  trackStock         Boolean             @default(true)
+  // Soft delete: OrderItem and stock history keep referencing the product.
+  active             Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  orderItems         OrderItem[]
+  stockDocumentLines StockDocumentLine[]
+  stockMovements     StockMovement[]
+
+  @@index([branchId])
+}
+
+enum RoomStatus {
+  AVAILABLE
+  ACTIVE
+  MAINTENANCE
+}
+
+model Room {
+  id           Int        @id @default(autoincrement())
+  branchId     Int
+  branch       Branch     @relation(fields: [branchId], references: [id])
+  name         String
+  type         String // "VIP", "NORMAL"
+  pricePerHour Decimal
+  status       RoomStatus @default(AVAILABLE)
+  orders       Order[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([branchId])
+}
+
+enum OrderStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+model Order {
+  id       Int         @id @default(autoincrement())
+  branchId Int
+  branch   Branch      @relation(fields: [branchId], references: [id])
+  status   OrderStatus @default(PENDING)
+
+  roomId Int?
+  room   Room? @relation(fields: [roomId], references: [id])
+
+  cskhId Int?
+  cskh   User? @relation("OrderCSKH", fields: [cskhId], references: [id])
+
+  serverId Int?
+  server   User? @relation("OrderServer", fields: [serverId], references: [id])
+
+  createdById    Int?
+  createdBy      User? @relation("OrderCreatedBy", fields: [createdById], references: [id])
+  checkedOutById Int?
+  checkedOutBy   User? @relation("OrderCheckedOutBy", fields: [checkedOutById], references: [id])
+
+  startTime DateTime?
+  endTime   DateTime?
+
+  // Financials
+  totalProductPrice Decimal @default(0)
+  hourlyFee         Decimal @default(0)
+
+  discountPercent Float   @default(0)
+  discountAmount  Decimal @default(0)
+
+  hourlyDiscountPercent Float   @default(0)
+  hourlyDiscountAmount  Decimal @default(0)
+
+  serviceFeePercent Float   @default(0)
+  serviceFeeAmount  Decimal @default(0)
+
+  taxPercent Float   @default(0)
+  taxAmount  Decimal @default(0)
+
+  finalAmount Decimal @default(0)
+
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  items          OrderItem[]
+  stockMovements StockMovement[]
+
+  @@index([branchId, status])
+  @@index([branchId, startTime])
+}
+
+model OrderItem {
+  id        Int     @id @default(autoincrement())
+  orderId   Int
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId Int
+  product   Product @relation(fields: [productId], references: [id])
+  quantity  Int
+  price     Decimal // Price at the time of order
+}
+
+enum StockDocType {
+  IMPORT // Phiếu nhập
+  EXPORT // Phiếu xuất
+}
+
+model StockDocument {
+  id          Int                 @id @default(autoincrement())
+  branchId    Int
+  branch      Branch              @relation(fields: [branchId], references: [id])
+  type        StockDocType
+  code        String              @unique // PN-cs1-20260926-001 / PX-...
+  supplier    String?
+  note        String?
+  totalAmount Decimal             @default(0)
+  createdById Int
+  createdBy   User                @relation(fields: [createdById], references: [id])
+  createdAt   DateTime            @default(now())
+  lines       StockDocumentLine[]
+  movements   StockMovement[]
+
+  @@index([branchId, createdAt])
+}
+
+model StockDocumentLine {
+  id         Int           @id @default(autoincrement())
+  documentId Int
+  document   StockDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  productId  Int
+  product    Product       @relation(fields: [productId], references: [id])
+  quantity   Int
+  unitCost   Decimal       @default(0)
+}
+
+enum StockMovementType {
+  IMPORT
+  EXPORT
+  SALE
+  ADJUSTMENT
+}
+
+// Stock ledger: every change of Product.stockQuantity writes one row.
+model StockMovement {
+  id           Int               @id @default(autoincrement())
+  branchId     Int
+  branch       Branch            @relation(fields: [branchId], references: [id])
+  productId    Int
+  product      Product           @relation(fields: [productId], references: [id])
+  type         StockMovementType
+  quantity     Int // signed: + in, - out
+  balanceAfter Int
+  documentId   Int?
+  document     StockDocument?    @relation(fields: [documentId], references: [id])
+  orderId      Int?
+  order        Order?            @relation(fields: [orderId], references: [id])
+  createdById  Int?
+  createdBy    User?             @relation(fields: [createdById], references: [id])
+  createdAt    DateTime          @default(now())
+
+  @@index([branchId, productId, createdAt])
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+}
+
+// Phiếu thu / phiếu chi of a branch's cash fund.
+model FundTransaction {
+  id          Int             @id @default(autoincrement())
+  branchId    Int
+  branch      Branch          @relation(fields: [branchId], references: [id])
+  type        TransactionType
+  amount      Decimal
+  category    String?
+  description String?
+  occurredAt  DateTime        @default(now())
+  createdById Int?
+  createdBy   User?           @relation(fields: [createdById], references: [id])
+  createdAt   DateTime        @default(now())
+
+  @@index([branchId, occurredAt])
+}

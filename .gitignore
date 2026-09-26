@@ -19,8 +19,9 @@ node_modules/
 !.env.example
 !.env.*.example
 
-# Dữ liệu Docker (PostgreSQL mount tại ./data)
+# Dữ liệu Docker (PostgreSQL mount tại ./data) và file sao lưu (scripts/backup.sh)
 /data/
+/backups/
 
 # Chứng chỉ & Khóa bảo mật
 *.pem

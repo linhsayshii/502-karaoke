@@ -24,9 +24,10 @@ UI text and user-facing error messages are in Vietnamese; keep new strings in Vi
 ## Repository layout
 
 A single git repo at the root (`origin` = `https://github.com/linhsayshii/502-karaoke.git`, branch `main`) holding two independent npm projects, no workspace tooling at the root:
-- `502-backend/` — NestJS 11 + Prisma 5.22 + PostgreSQL. `DEPLOYMENT.md` (Vietnamese) covers the VPS setup and the one-time upgrade of the legacy production DB.
+- `502-backend/` — NestJS 11 + Prisma 5.22 + PostgreSQL.
 - `502-frontend/` — Next.js 16 (App Router) + React 19 + Tailwind 4 + shadcn/ui (new-york style, lucide icons).
-- Root `src/app/[branch]/` is an empty leftover directory; ignore it. The root `README.md` links to `./backend` / `./frontend`, which are stale paths.
+- Docs (Vietnamese): root `README.md` (overview + quick start), root `DEPLOYMENT.md` (the only deployment guide: Docker install, Nginx/HTTPS, updates, backup/restore, migrating the legacy PM2 server incl. the one-time `foundation` upgrade, troubleshooting), `502-backend/README.md` and `502-frontend/README.md` (local development only). Keep deployment steps in `DEPLOYMENT.md`, not in the per-project READMEs.
+- Root `src/app/[branch]/` is an empty leftover directory; ignore it.
 
 ## Commands
 
@@ -44,7 +45,7 @@ npx prisma migrate dev --name <name>  # after editing prisma/schema.prisma
 npx prisma migrate deploy             # production
 npx prisma db seed         # branches cs1–cs4 + admin/admin123 (CHAIN_MANAGER); SEED_DEMO=1 adds demo accounts (password demo123), rooms and products for cs1/cs2
 ```
-Migrations: `0_init` is the baseline of the legacy `db push` schema; `20260926000000_foundation` is hand-written and migrates legacy rows (see `DEPLOYMENT.md` §10). `test/fixtures/legacy-data.sql` is legacy-shaped data for rehearsing it. Don't use `prisma db push` any more.
+Migrations: `0_init` is the baseline of the legacy `db push` schema; `20260926000000_foundation` is hand-written and migrates legacy rows (see root `DEPLOYMENT.md` §6). `test/fixtures/legacy-data.sql` is legacy-shaped data for rehearsing it. Don't use `prisma db push` any more.
 
 Prisma reads `502-backend/.env` itself (before Nest's ConfigModule), so to run against another database pass `DATABASE_URL=... npm run start:dev` in the shell.
 
@@ -56,12 +57,12 @@ npm run lint
 ```
 There are no frontend tests.
 
-Docker (root, see `DOCKER.md`): `docker-compose.yml` runs `db` (postgres:17, data bind-mounted at `./data/postgres`), `backend` and `frontend`; config in root `.env` (from `.env.docker.example`). Only the frontend port is published; the browser calls `/api` on the same origin and the Next rewrite proxies to `http://backend:4000` (`API_PROXY_TARGET`, baked at build time; unset it defaults to production). The backend container runs `prisma migrate deploy` on start (so `prisma` is a prod dependency); seed with `docker compose exec backend node dist/prisma/seed.js`.
+Docker (root, see `DEPLOYMENT.md`): `docker-compose.yml` runs `db` (postgres:17, data bind-mounted at `./data/postgres`; the healthcheck uses TCP because on first init the socket answers before the DB exists), `backend` and `frontend`; config in root `.env` (from `.env.docker.example`). `scripts/backup.sh` dumps to `backups/` (gzip, keeps `KEEP_DAYS`=30). Only the frontend port is published; the browser calls `/api` on the same origin and the Next rewrite proxies to `http://backend:4000` (`API_PROXY_TARGET`, baked at build time; unset it defaults to production). The backend container runs `prisma migrate deploy` on start (so `prisma` is a prod dependency); seed with `docker compose exec backend node dist/prisma/seed.js`.
 
 ## Environment
 
 - Backend `.env` (see `.env.example`): `DATABASE_URL`, `PORT`, `JWT_SECRET`, `JWT_REFRESH_SECRET` (required when `NODE_ENV=production`, dev falls back to fixed secrets), `COOKIE_SECURE` (refresh cookie `secure` flag), `TZ` (business day is computed in server local time; use `Asia/Ho_Chi_Minh`).
-- Frontend: `NEXT_PUBLIC_API_URL`. `.env` uses `http://localhost:4000/api`; `.env.development` uses `/api`, which goes through the `next.config.ts` rewrite that proxies to the **production** backend (`https://kara.hvlsv.uk`). Put `NEXT_PUBLIC_API_URL=http://localhost:4000/api` in `.env.development.local` (git-ignored) to develop against a local backend.
+- Frontend: `NEXT_PUBLIC_API_URL` (inlined at build time). No `.env*` file is committed, so a fresh clone needs `.env.development.local` with `NEXT_PUBLIC_API_URL=http://localhost:4000/api` (without it `lib/api.ts` falls back to `http://localhost:4000`, which lacks the `/api` prefix). `NEXT_PUBLIC_API_URL=/api` goes through the `next.config.ts` rewrite to `API_PROXY_TARGET`, which defaults to the **production** backend (`https://kara.hvlsv.uk`) when unset.
 
 ## Backend architecture
 

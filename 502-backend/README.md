@@ -1,243 +1,87 @@
-# 🚀 Hướng dẫn Triển khai Backend lên VPS (Ubuntu)
+# Karaoke 502 — Backend
 
-Tài liệu này hướng dẫn chi tiết từng bước để đưa Backend (NestJS) lên máy chủ (VPS) chạy hệ điều hành Ubuntu, sử dụng Nginx làm Reverse Proxy và PM2 để quản lý tiến trình.
+API của hệ thống: NestJS 11 + Prisma 5.22 + PostgreSQL. Mọi route nằm dưới `/api`, Swagger ở `/api/docs`.
 
----
+> Triển khai production (Docker): xem [DEPLOYMENT.md](../DEPLOYMENT.md) ở thư mục gốc. Tài liệu này chỉ dành cho phát triển.
 
-## 🛠️ Phần 1: Chuẩn bị Môi trường trên VPS
+## Chạy local
 
-Đăng nhập vào VPS của bạn qua SSH:
+Cần Node.js 22+ và Docker (để chạy PostgreSQL).
+
+### 1. PostgreSQL
+
+Một container dùng chung cho phát triển (`karaoke_db`) và test e2e (`karaoke_test`), cổng 5433 để không đụng PostgreSQL có sẵn trên máy:
+
 ```bash
-ssh root@ip_cua_vps
+docker run -d --name kara502-pg -e POSTGRES_PASSWORD=postgres -p 5433:5432 \
+  -v kara502-pg:/var/lib/postgresql/data postgres:17-alpine
+docker exec kara502-pg psql -U postgres -c "create database karaoke_db" -c "create database karaoke_test"
 ```
 
-### 1. Cập nhật hệ thống
+Lần sau chỉ cần `docker start kara502-pg`.
+
+### 2. Cấu hình `.env`
+
 ```bash
-sudo apt update && sudo apt upgrade -y
+cp .env.example .env
 ```
 
-### 2. Cài đặt Node.js (Phiên bản 18 hoặc 20)
-```bash
-# Tải script cài đặt Node.js 20
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-
-# Cài đặt Node.js
-sudo apt install -y nodejs
-
-# Kiểm tra phiên bản
-node -v
-npm -v
+```env
+DATABASE_URL="postgresql://postgres:postgres@localhost:5433/karaoke_db?schema=public"
+PORT=4000
+JWT_SECRET="dev-secret"
+JWT_REFRESH_SECRET="dev-refresh-secret"
+COOKIE_SECURE=false
+TZ=Asia/Ho_Chi_Minh
 ```
 
-### 3. Cài đặt PostgreSQL (Cơ sở dữ liệu)
-```bash
-sudo apt install postgresql postgresql-contrib -y
-```
+| Biến | Ghi chú |
+|------|---------|
+| `DATABASE_URL` | Prisma đọc trực tiếp từ `.env`. Muốn chạy với DB khác thì truyền qua shell: `DATABASE_URL=... npm run start:dev`. |
+| `JWT_SECRET`, `JWT_REFRESH_SECRET` | Bắt buộc khi `NODE_ENV=production`; khi phát triển, thiếu thì dùng giá trị cố định. |
+| `COOKIE_SECURE` | Cờ `secure` của cookie refresh token. `true` chỉ khi chạy qua HTTPS. |
+| `TZ` | Ngày kinh doanh (11:30 → 06:00) tính theo giờ máy chủ. Luôn để `Asia/Ho_Chi_Minh`. |
 
-**Cấu hình Database:**
-Đăng nhập vào tài khoản postgres:
-```bash
-sudo -i -u postgres
-psql
-```
+### 3. Cài đặt và chạy
 
-Trong giao diện dòng lệnh PostgreSQL, chạy lần lượt các lệnh sau (thay đổi `password_cua_ban`):
-```sql
--- Tạo database
-CREATE DATABASE karaoke502;
-
--- Tạo user và đặt mật khẩu
-CREATE USER myuser WITH ENCRYPTED PASSWORD 'password_cua_ban';
-
--- Cấp quyền cho user
-GRANT ALL PRIVILEGES ON DATABASE karaoke502 TO myuser;
-
--- Thoát
-\q
-```
-Sau đó gõ `exit` để quay lại user root.
-
-### 4. Cài đặt PM2 (Quản lý tiến trình Node.js)
-PM2 giúp ứng dụng luôn chạy ngầm, tự khởi động lại khi bị lỗi hoặc khi khởi động lại server.
-```bash
-sudo npm install -g pm2
-```
-
-### 5. Mở Firewall (Quan trọng)
-Nếu bạn muốn truy cập trực tiếp qua cổng 4000, bạn cần mở cổng này trên VPS:
-```bash
-sudo ufw allow 4000/tcp
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-```
-
-### 6. Cài đặt Nginx (Web Server)
-```bash
-sudo apt install nginx -y
-```
-
----
-
-## 📦 Phần 2: Cài đặt Ứng dụng Backend
-
-### 1. Tải mã nguồn (Clone Git)
-Di chuyển đến thư mục web (thường là `/var/www`):
-```bash
-cd /var/www
-git clone https://github.com/username/502kara.git
-cd 502kara/backend
-```
-
-### 2. Cài đặt thư viện
 ```bash
 npm install
+npx prisma migrate deploy     # tạo bảng
+npx prisma db seed            # cơ sở cs1–cs4 + admin/admin123
+SEED_DEMO=1 npx prisma db seed  # (tuỳ chọn) thêm tài khoản demo (mật khẩu demo123), phòng, mặt hàng cho cs1/cs2
+npm run start:dev             # http://localhost:4000/api, Swagger: http://localhost:4000/api/docs
 ```
 
-### 3. Cấu hình biến môi trường (.env)
-Tạo file `.env`:
+## Lệnh
+
 ```bash
-nano .env
+npm run start:dev          # chạy với watch
+npm run build              # build ra dist/src/main.js (vì prisma/seed.ts cũng nằm trong thư mục gốc TS)
+npm run start:prod         # node dist/src/main
+npm run lint               # eslint --fix
+npm run format             # prettier
+npm test                   # unit test (*.spec.ts trong src/)
+npx jest src/orders/billing.spec.ts   # một file test
+npm run test:e2e           # e2e, dùng DB trong test/e2e.env (karaoke_test) — DB này bị xoá sạch mỗi lần chạy
 ```
-Dán nội dung sau (sửa lại thông tin database bạn đã tạo ở Phần 1):
-```env
-PORT=4000
-DATABASE_URL="postgresql://myuser:password_cua_ban@localhost:5432/karaoke502?schema=public"
-JWT_SECRET="chuoi_bi_mat_sieu_kho_doan"
-```
-Bấm `Ctrl + X`, chọn `Y`, rồi `Enter` để lưu.
 
-### 4. Đồng bộ Database (Prisma)
-Chạy lệnh sau để tạo các bảng trong Database:
+## Database và migration
+
+Schema ở `prisma/schema.prisma`. Mọi thay đổi schema đi qua migration:
+
 ```bash
-npx prisma db push
-npx prisma generate
+# sửa prisma/schema.prisma rồi:
+npx prisma migrate dev --name <ten_thay_doi>   # tạo migration mới trong prisma/migrations và áp vào DB dev
 ```
 
-### 5. Tạo tài khoản Admin đầu tiên (Seed)
-Để có tài khoản đăng nhập vào hệ thống, bạn cần chạy lệnh seed:
-```bash
-npx prisma db seed
-```
-*Mặc định tài khoản sẽ là:*
-- **Username**: `admin`
-- **Password**: `admin123` (Bạn nên đổi mật khẩu sau khi đăng nhập).
+Commit cả thư mục migration mới. Khi triển khai, container backend tự chạy `prisma migrate deploy` lúc khởi động.
 
-### 6. Build ứng dụng
-```bash
-npm run build
-```
+- **Không dùng `prisma db push`** nữa.
+- `0_init` là baseline của schema cũ (tạo bằng `db push`); `20260926000000_foundation` là migration viết tay, chuyển dữ liệu cũ sang mô hình nhiều cơ sở. Xem [DEPLOYMENT.md §6](../DEPLOYMENT.md#6-chuyển-từ-bản-cũ-pm2--postgresql-cài-trực-tiếp).
+- `test/fixtures/legacy-data.sql` là dữ liệu mẫu dạng cũ để tập dượt migration `foundation`: nạp vào DB chỉ có `0_init`, rồi chạy `npx prisma migrate deploy`.
 
----
+## Docker
 
-## 🚀 Phần 3: Chạy ứng dụng với PM2
+`Dockerfile` build 3 stage: build TypeScript, cài `node_modules` production (có `prisma` CLI để chạy migration), và image chạy (`node:22-bookworm-slim`, user `node`). Image chạy `prisma migrate deploy` rồi `node dist/src/main.js`. Seed trong container: `node dist/prisma/seed.js`.
 
-Khởi chạy backend dưới nền:
-```bash
-pm2 start dist/src/main.js --name "karaoke-backend"
-```
-
-Lưu trạng thái để tự khởi động khi reboot VPS:
-```bash
-pm2 startup
-pm2 save
-```
-
-Kiểm tra trạng thái:
-```bash
-pm2 status
-```
-
----
-
-## 🌐 Phần 4: Cấu hình Nginx (Reverse Proxy cho cả Frontend & Backend)
-
-Chúng ta sẽ cấu hình Nginx để chạy cả Frontend và Backend trên cùng một domain (ví dụ: `domain.com`).
-- Frontend sẽ chạy ở đường dẫn gốc `/`
-- Backend sẽ chạy ở đường dẫn `/api`
-
-### 1. Tạo file cấu hình
-```bash
-sudo nano /etc/nginx/sites-available/karaoke-app
-```
-
-### 2. Nội dung cấu hình
-Dán nội dung sau vào (thay `your_domain.com` bằng tên miền của bạn):
-
-```nginx
-server {
-    listen 80;
-    server_name your_domain.com; # Ví dụ: karaoke502.com
-
-    # 1. Cấu hình cho Frontend (Next.js chạy port 3000)
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
-
-    # 2. Cấu hình cho Backend (NestJS chạy port 4000)
-    # Tất cả request bắt đầu bằng /api sẽ được chuyển vào backend
-    location /api {
-        proxy_pass http://localhost:4000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
-}
-```
-
-### 3. Kích hoạt cấu hình
-```bash
-# Xóa cấu hình mặc định (nếu có)
-sudo rm /etc/nginx/sites-enabled/default
-
-# Tạo liên kết (symlink)
-sudo ln -s /etc/nginx/sites-available/karaoke-app /etc/nginx/sites-enabled/
-
-# Kiểm tra lỗi cú pháp
-sudo nginx -t
-
-# Khởi động lại Nginx
-sudo systemctl restart nginx
-```
-
----
-
-## 🔒 Phần 5: Cài đặt SSL (HTTPS) - Tùy chọn
-
-Nếu bạn có tên miền, hãy cài đặt SSL miễn phí từ Let's Encrypt để bảo mật API.
-
-1.  **Cài đặt Certbot**:
-    ```bash
-    sudo apt install certbot python3-certbot-nginx -y
-    ```
-
-2.  **Lấy chứng chỉ**:
-    ```bash
-    sudo certbot --nginx -d your_domain.com
-    ```
-    Làm theo hướng dẫn trên màn hình.
-
----
-
-## ✅ Hoàn tất
-
-Bây giờ Backend của bạn đã chạy online!
-- **API URL**: `http://your_domain_or_ip`
-- **Swagger Docs**: `http://your_domain_or_ip/api`
-
-### Một số lệnh hữu ích:
-- Xem log lỗi backend: `pm2 logs karaoke-backend`
-- Khởi động lại backend: `pm2 restart karaoke-backend`
-- Cập nhật code mới:
-    ```bash
-    git pull
-    npm install
-    npm run build
-    pm2 restart karaoke-backend
-    ```
+Image được build và chạy qua `docker-compose.yml` ở thư mục gốc, không chạy riêng.

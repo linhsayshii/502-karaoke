@@ -328,6 +328,12 @@ Migration chỉ thêm cột/bảng, không xoá dữ liệu. Sau khi cập nhậ
 - Giá giờ của phiên hát được **chốt lúc mở phòng**; phiên đang mở lúc cập nhật lấy giá phòng hiện tại.
 - Quản lý **hủy được** hóa đơn đã thanh toán, phiếu nhập/xuất và phiếu thu/chi thủ công (bắt buộc ghi lý do). Hủy hóa đơn: hoàn kho + hủy phiếu thu; hủy phiếu kho: đảo tồn kho + hủy phiếu chi đi kèm. Chứng từ đã hủy vẫn được giữ, không tính vào tổng.
 
+### 6.7. Số hóa đơn (migration `20260927120000_bill_number`)
+
+Mỗi hóa đơn khi đóng (thanh toán **hoặc** hủy phiên) nhận một số hóa đơn dạng `DDMM` ngày kinh doanh + 4 số phòng + 3 số thứ tự trong ngày của cơ sở, ví dụ `27093020001` (ngày 27/09, phòng 302, hóa đơn thứ 1). Phòng 3 số thêm 0 phía sau (401 → `4010`), phòng không có số là `0000`. Hủy hóa đơn đã thanh toán vẫn giữ số cũ; số không bao giờ dùng lại.
+
+Migration đánh số bù cho mọi hóa đơn đã đóng theo thứ tự giờ đóng, tính ngày kinh doanh theo giờ Việt Nam. Trang Hóa đơn tìm được theo số hóa đơn đầy đủ trên mọi ngày.
+
 ## 7. Xử lý sự cố
 
 | Hiện tượng | Nguyên nhân / cách xử lý |

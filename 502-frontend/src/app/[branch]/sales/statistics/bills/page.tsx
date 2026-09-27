@@ -15,7 +15,7 @@ import { BillSheet, ORDER_STATUS_BADGE } from "@/components/sales/bill-sheet";
 import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
-import { businessDate, formatDuration, formatMoney, formatNumber, formatTime, minutesBetween } from "@/lib/format";
+import { billLabel, businessDate, formatDuration, formatMoney, formatNumber, formatTime, minutesBetween } from "@/lib/format";
 import { BUSINESS_DAY_HINT, ORDER_STATUS_LABELS, PAYMENT_METHOD_LABELS } from "@/lib/labels";
 import { SHOW_FROM } from "@/lib/responsive";
 import type { Order, OrderStatus } from "@/lib/types";
@@ -24,6 +24,8 @@ import { cn } from "@/lib/utils";
 const ALL = "ALL";
 type StatusFilter = Exclude<OrderStatus, "PENDING"> | typeof ALL;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+// A whole số hóa đơn (DDMM + room + sequence) is looked up over every day.
+const FULL_BILL_NUMBER_RE = /^\d{11,}$/;
 const COLUMNS = [SHOW_FROM.xs, "", SHOW_FROM.sm, SHOW_FROM.md, SHOW_FROM.lg, SHOW_FROM.sm, "", ""];
 
 // Closed bills (paid or cancelled) of a period, by business day of payment /
@@ -61,14 +63,43 @@ function BillsView() {
   }, [load]);
 
   const keyword = search.trim().toLowerCase().replace(/^#/, "");
+  const numberQuery = FULL_BILL_NUMBER_RE.test(keyword) ? keyword : null;
+
+  // Bills with that number, whatever the selected period.
+  const [found, setFound] = useState<Order[] | null>(null);
+  useEffect(() => {
+    setFound(null);
+    if (!numberQuery) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      api
+        .get<Order[]>("/orders", { params: { branch, billNumber: numberQuery } })
+        .then((res) => !cancelled && setFound(res.data.filter((o) => o.status !== "PENDING")))
+        .catch((error) => {
+          if (cancelled) return;
+          notify.error(error, "Không thể tìm hóa đơn");
+          setFound([]);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [branch, numberQuery, notify]);
+
+  const listed = numberQuery ? found : orders;
   const shown = useMemo(
     () =>
-      (orders ?? []).filter(
+      (listed ?? []).filter(
         (o) =>
           (status === ALL || o.status === status) &&
-          (!keyword || String(o.id) === keyword || (o.room?.name ?? "").toLowerCase().includes(keyword)),
+          (!keyword ||
+            numberQuery ||
+            String(o.id) === keyword ||
+            (o.billNumber ?? "").includes(keyword) ||
+            (o.room?.name ?? "").toLowerCase().includes(keyword)),
       ),
-    [orders, status, keyword],
+    [listed, status, keyword, numberQuery],
   );
   const paid = (orders ?? []).filter((o) => o.status === "COMPLETED");
   const revenue = paid.reduce((sum, o) => sum + Number(o.finalAmount), 0);
@@ -84,10 +115,16 @@ function BillsView() {
 
       <Card>
         <CardHeader>
-          <CardTitle>{formatDateRange(range)}</CardTitle>
+          <CardTitle>{numberQuery ? `Số hóa đơn ${numberQuery}` : formatDateRange(range)}</CardTitle>
           <CardDescription>
-            {paid.length} hóa đơn đã thanh toán · doanh thu {formatMoney(revenue)}
-            {cancelledCount > 0 && ` · ${cancelledCount} hóa đơn đã hủy`}
+            {numberQuery ? (
+              "Kết quả tìm trên mọi ngày, không theo khoảng thời gian đã chọn"
+            ) : (
+              <>
+                {paid.length} hóa đơn đã thanh toán · doanh thu {formatMoney(revenue)}
+                {cancelledCount > 0 && ` · ${cancelledCount} hóa đơn đã hủy`}
+              </>
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
@@ -109,7 +146,8 @@ function BillsView() {
                 <SearchIcon />
               </InputGroupAddon>
               <InputGroupInput
-                placeholder="Tìm phòng hoặc mã hóa đơn"
+                placeholder="Tìm phòng hoặc số hóa đơn"
+                inputMode="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 aria-label="Tìm hóa đơn"
@@ -117,11 +155,11 @@ function BillsView() {
             </InputGroup>
           </div>
 
-          <div className={cn("transition-opacity", loading && orders && "opacity-60")}>
+          <div className={cn("transition-opacity", !numberQuery && loading && orders && "opacity-60")}>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className={SHOW_FROM.xs}>Mã</TableHead>
+                  <TableHead className={SHOW_FROM.xs}>Số hóa đơn</TableHead>
                   <TableHead>Phòng</TableHead>
                   <TableHead className={SHOW_FROM.sm}>Giờ vào – ra</TableHead>
                   <TableHead className={SHOW_FROM.md}>Thời lượng</TableHead>
@@ -132,7 +170,7 @@ function BillsView() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {!orders ? (
+                {!listed ? (
                   <TableSkeleton columns={COLUMNS} />
                 ) : shown.length === 0 ? (
                   <TableEmpty
@@ -148,8 +186,13 @@ function BillsView() {
                       className={cn("cursor-pointer", order.status === "CANCELLED" && "text-muted-foreground")}
                       onClick={() => setSelectedId(order.id)}
                     >
-                      <TableCell className={cn("font-medium", SHOW_FROM.xs)}>#{order.id}</TableCell>
-                      <TableCell>{order.room?.name ?? "—"}</TableCell>
+                      <TableCell className={cn("font-medium tabular-nums", SHOW_FROM.xs)}>{billLabel(order)}</TableCell>
+                      <TableCell>
+                        {order.room?.name ?? "—"}
+                        <div className="text-xs text-muted-foreground tabular-nums @sm/main:hidden">
+                          {billLabel(order)}
+                        </div>
+                      </TableCell>
                       <TableCell className={cn("tabular-nums", SHOW_FROM.sm)}>
                         {formatTime(order.startTime)} – {formatTime(order.endTime)}
                       </TableCell>

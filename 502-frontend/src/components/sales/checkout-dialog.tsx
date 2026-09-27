@@ -20,9 +20,9 @@ import { LineItemsTable } from "@/components/line-items-table";
 import { BillSummary } from "@/components/sales/bill-summary";
 import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
-import { formatDuration, formatMoney, formatTime } from "@/lib/format";
+import { billLabel, formatDuration, formatMoney, formatTime } from "@/lib/format";
 import { PAYMENT_METHOD_LABELS } from "@/lib/labels";
-import type { BillPreview, PaymentMethod } from "@/lib/types";
+import type { BillPreview, Order, PaymentMethod } from "@/lib/types";
 
 interface CheckoutDialogProps {
   orderId: number | null;
@@ -64,8 +64,10 @@ export function CheckoutDialog({ orderId, roomName, open, onOpenChange, onChecke
     if (!orderId) return;
     setSubmitting(true);
     try {
-      await api.post(`/orders/${orderId}/checkout`, { paymentMethod: method });
-      notify.success(`Đã thanh toán phòng ${roomName ?? ""} (${PAYMENT_METHOD_LABELS[method].toLowerCase()})`);
+      const res = await api.post<Order>(`/orders/${orderId}/checkout`, { paymentMethod: method });
+      notify.success(
+        `Đã thanh toán phòng ${roomName ?? ""} (${PAYMENT_METHOD_LABELS[method].toLowerCase()}) · hóa đơn ${billLabel(res.data)}`,
+      );
       onOpenChange(false);
       onCheckedOut();
     } catch (error) {

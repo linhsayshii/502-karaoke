@@ -31,6 +31,7 @@ model Branch {
   stockDocuments   StockDocument[]
   stockMovements   StockMovement[]
   fundTransactions FundTransaction[]
+  billCounters     BillCounter[]
 }
 
 enum Role {
@@ -200,6 +201,13 @@ model Order {
   cancelledBy   User?     @relation("OrderCancelledBy", fields: [cancelledById], references: [id])
   cancelReason  String?
 
+  // Số hóa đơn (see orders/bill-number.ts), given when the bill is closed —
+  // paid or cancelled — and kept when it is voided: DDMM of the business
+  // day + 4-digit room code + the day's sequence in the branch.
+  businessDate DateTime? @db.Date
+  billSeq      Int?
+  billNumber   String?
+
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   items           OrderItem[]
@@ -209,6 +217,18 @@ model Order {
   @@index([branchId, status])
   @@index([branchId, startTime])
   @@index([branchId, endTime])
+  @@unique([branchId, businessDate, billSeq])
+  @@index([branchId, billNumber])
+}
+
+// Last bill sequence handed out per branch and business day.
+model BillCounter {
+  branchId     Int
+  branch       Branch   @relation(fields: [branchId], references: [id])
+  businessDate DateTime @db.Date
+  lastSeq      Int
+
+  @@id([branchId, businessDate])
 }
 
 model OrderItem {

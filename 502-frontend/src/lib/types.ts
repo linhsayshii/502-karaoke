@@ -113,6 +113,8 @@ export interface Order {
   paymentMethod: PaymentMethod | null;
   cancelledAt: string | null;
   cancelReason: string | null;
+  // Số hóa đơn, given when the bill is closed (paid or cancelled).
+  billNumber: string | null;
   fundTransaction?: LinkedFundEntry | null;
   items: OrderItem[];
   totalProductPrice: string | number;
@@ -223,7 +225,7 @@ export interface FundTransaction {
   occurredAt: string;
   createdBy: StaffRef | null;
   // Written by checkout / an import paid from the fund.
-  order: { id: number; status: OrderStatus; room: { name: string } | null } | null;
+  order: { id: number; billNumber: string | null; status: OrderStatus; room: { name: string } | null } | null;
   stockDocument: { id: number; code: string; type: StockDocType } | null;
   cancelledAt: string | null;
   cancelledBy: StaffRef | null;

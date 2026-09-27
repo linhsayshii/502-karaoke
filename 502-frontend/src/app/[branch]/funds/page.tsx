@@ -46,6 +46,7 @@ import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
 import {
+  billLabel,
   businessDate,
   firstDayOfMonth,
   formatDate,
@@ -84,7 +85,7 @@ function nowInput() {
 
 // Where an entry comes from: a paid bill, an import, or typed by hand.
 function sourceOf(t: FundTransaction) {
-  if (t.order) return `Hóa đơn #${t.order.id}${t.order.room ? ` · ${t.order.room.name}` : ""}`;
+  if (t.order) return `Hóa đơn ${billLabel(t.order)}${t.order.room ? ` · ${t.order.room.name}` : ""}`;
   if (t.stockDocument) return `${DOC_TYPE_LABELS[t.stockDocument.type]} ${t.stockDocument.code}`;
   return "Thủ công";
 }

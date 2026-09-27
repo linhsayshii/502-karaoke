@@ -14,6 +14,7 @@ export function recordSaleReceipt(
   entry: {
     branchId: number;
     orderId: number;
+    billNumber: string;
     amount: number;
     method: PaymentMethod;
     occurredAt: Date;
@@ -28,7 +29,7 @@ export function recordSaleReceipt(
       method: entry.method,
       amount: entry.amount,
       category: SALES_CATEGORY,
-      description: `Thu tiền hóa đơn #${entry.orderId}${
+      description: `Thu tiền hóa đơn ${entry.billNumber}${
         entry.roomName ? ` – phòng ${entry.roomName}` : ''
       }`,
       occurredAt: entry.occurredAt,

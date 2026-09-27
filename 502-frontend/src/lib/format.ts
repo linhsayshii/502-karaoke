@@ -81,3 +81,9 @@ export function firstDayOfMonth(date: Date = new Date()) {
   const day = businessDay(date);
   return toDateInput(new Date(day.getFullYear(), day.getMonth(), 1));
 }
+
+// Số hóa đơn (DDMM of the business day + room + sequence, e.g. 27093020001);
+// an open session has none yet and shows its id.
+export function billLabel(order: { id: number; billNumber?: string | null }): string {
+  return order.billNumber ?? `#${order.id}`;
+}

@@ -14,7 +14,7 @@ import { ReasonDialog } from "@/components/reason-dialog";
 import { BillSummary } from "@/components/sales/bill-summary";
 import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
-import { formatDateTime, formatMoney, minutesBetween } from "@/lib/format";
+import { billLabel, formatDateTime, formatMoney, minutesBetween } from "@/lib/format";
 import { ORDER_STATUS_LABELS, PAYMENT_METHOD_LABELS } from "@/lib/labels";
 import { can } from "@/lib/permissions";
 import type { Order } from "@/lib/types";
@@ -80,7 +80,7 @@ function BillDetail({ orderId, onChanged }: { orderId: number; onChanged: () => 
     try {
       const res = await api.post<Order>(`/orders/${order.id}/void`, { reason });
       setOrder(res.data);
-      notify.success(`Đã hủy hóa đơn #${order.id}: hàng đã hoàn kho, phiếu thu đã hủy`);
+      notify.success(`Đã hủy hóa đơn ${billLabel(order)}: hàng đã hoàn kho, phiếu thu đã hủy`);
       onChanged();
     } catch (error) {
       notify.error(error, "Không thể hủy hóa đơn");
@@ -94,7 +94,7 @@ function BillDetail({ orderId, onChanged }: { orderId: number; onChanged: () => 
     <>
       <SheetHeader className="border-b">
         <SheetTitle className="flex items-center gap-2">
-          Hóa đơn #{orderId}
+          Hóa đơn {order ? billLabel(order) : `#${orderId}`}
           {order && <Badge variant={ORDER_STATUS_BADGE[order.status]}>{ORDER_STATUS_LABELS[order.status]}</Badge>}
         </SheetTitle>
         <SheetDescription>

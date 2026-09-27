@@ -5,7 +5,7 @@ Hệ thống quản lý chuỗi quán karaoke nhiều cơ sở (`cs1`–`cs4`):
 - **Bán hàng**: mở phòng, gọi món vào phòng, tính tiền giờ, thanh toán (tiền mặt / chuyển khoản), hủy hóa đơn.
 - **Kho**: phiếu nhập/xuất, sổ kho, tồn kho riêng từng cơ sở; thanh toán tự trừ kho, hủy hóa đơn/phiếu tự hoàn kho.
 - **Quỹ**: phiếu thu/chi, tồn đầu kỳ/cuối kỳ; thanh toán tự ghi phiếu thu, nhập hàng đã trả tự ghi phiếu chi.
-- **Thống kê**: doanh thu theo ngày kinh doanh (06:00 → 06:00 hôm sau, giờ mở cửa 11:30 → 06:00), khớp với phiếu thu bán hàng trong Sổ quỹ.
+- **Báo cáo**: doanh thu theo ngày/tuần/tháng/quý/năm kinh doanh (06:00 → 06:00 hôm sau, giờ mở cửa 11:30 → 06:00), so với kỳ trước, xem toàn chuỗi hoặc từng cơ sở, xuất Excel; doanh thu tính chưa gồm VAT, VAT tách riêng, khớp với phiếu thu bán hàng trong Sổ quỹ.
 - **Nhập từ Excel**: nhập mặt hàng, danh mục, phòng, nhân viên và phiếu nhập kho từ file Excel/CSV; người dùng chọn cột nào trong file ứng với trường dữ liệu nào (hệ thống tự đoán theo tiêu đề và nhớ lần trước), xem trước từng dòng rồi mới nhập.
 - **Phân quyền**: Quản lý hệ thống, Quản lý cơ sở, Thu ngân, Nhân viên. Mỗi tài khoản (trừ quản lý hệ thống) chỉ thao tác trong cơ sở của mình.
 - **Giao diện**: shadcn/ui, chế độ sáng/tối, dùng được trên máy tính, máy tính bảng và điện thoại.
@@ -28,10 +28,23 @@ Cần [Docker](https://docs.docker.com/get-docker/) có Compose v2.
 ```bash
 cp .env.docker.example .env        # rồi đổi POSTGRES_PASSWORD, JWT_SECRET, JWT_REFRESH_SECRET
 docker compose up -d --build
-docker compose exec backend node dist/prisma/seed.js   # chỉ lần đầu: tạo cs1–cs4 và tài khoản admin
+docker compose exec backend node dist/prisma/seed.js   # chỉ lần đầu: tạo cs1–cs4 và các tài khoản mặc định
 ```
 
-Mở http://localhost:3000 và đăng nhập `admin` / `admin123` (đổi mật khẩu ngay). Dữ liệu nằm trong `./data/postgres` và vẫn còn sau `docker compose down`.
+Mở http://localhost:3000 và đăng nhập `admin` / `12345678`. Dữ liệu nằm trong `./data/postgres` và vẫn còn sau `docker compose down`.
+
+### Tài khoản mặc định
+
+Seed tạo sẵn các tài khoản sau, tất cả có mật khẩu **`12345678`** — **đổi mật khẩu ngay** sau lần đăng nhập đầu tiên:
+
+| Tài khoản | Vai trò | Cơ sở |
+|-----------|---------|-------|
+| `admin` | Quản lý hệ thống | Tất cả |
+| `ql1_cs1` | Quản lý cơ sở | Cơ sở 1 |
+| `tn1_cs1` | Thu ngân | Cơ sở 1 |
+| `pv1_cs1` | Nhân viên (phục vụ) | Cơ sở 1 |
+
+Chạy lại seed không tạo trùng và không đặt lại mật khẩu của tài khoản đã có.
 
 ## Tài liệu
 

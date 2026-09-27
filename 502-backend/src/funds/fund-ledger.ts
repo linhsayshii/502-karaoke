@@ -14,6 +14,7 @@ export function recordSaleReceipt(
   entry: {
     branchId: number;
     orderId: number;
+    billNumber: string;
     amount: number;
     method: PaymentMethod;
     occurredAt: Date;
@@ -28,12 +29,39 @@ export function recordSaleReceipt(
       method: entry.method,
       amount: entry.amount,
       category: SALES_CATEGORY,
-      description: `Thu tiền hóa đơn #${entry.orderId}${
+      description: `Thu tiền hóa đơn ${entry.billNumber}${
         entry.roomName ? ` – phòng ${entry.roomName}` : ''
       }`,
       occurredAt: entry.occurredAt,
       orderId: entry.orderId,
       createdById: entry.createdById,
+    },
+  });
+}
+
+// A corrected paid bill: its receipt takes the new total, method and payment
+// time. A missing receipt is written only with `createIfMissing` (the bill
+// had nothing to collect before); bills paid before receipts existed stay
+// out of the fund, as they were.
+export async function syncSaleReceipt(
+  tx: Tx,
+  entry: Parameters<typeof recordSaleReceipt>[1],
+  createIfMissing: boolean,
+) {
+  const receipt = await tx.fundTransaction.findUnique({
+    where: { orderId: entry.orderId },
+  });
+  if (!receipt) {
+    return createIfMissing && entry.amount > 0
+      ? recordSaleReceipt(tx, entry)
+      : null;
+  }
+  return tx.fundTransaction.update({
+    where: { id: receipt.id },
+    data: {
+      amount: entry.amount,
+      method: entry.method,
+      occurredAt: entry.occurredAt,
     },
   });
 }

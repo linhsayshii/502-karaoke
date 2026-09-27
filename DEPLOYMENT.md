@@ -94,19 +94,19 @@ Lần đầu build mất vài phút.
 
 ### 2.5. Tạo dữ liệu ban đầu
 
-Tạo các cơ sở `cs1`–`cs4` và tài khoản quản lý hệ thống `admin` / `admin123`. **Chỉ chạy một lần** trên database mới (không chạy khi chuyển từ bản cũ sang):
+Tạo các cơ sở `cs1`–`cs4` và các tài khoản mặc định, tất cả có mật khẩu `12345678`: `admin` (quản lý hệ thống), `ql1_cs1` (quản lý cơ sở 1), `tn1_cs1` (thu ngân cơ sở 1), `pv1_cs1` (phục vụ cơ sở 1). **Chỉ chạy một lần** trên database mới (không chạy khi chuyển từ bản cũ sang):
 
 ```bash
 docker compose exec backend node dist/prisma/seed.js
 ```
 
-Muốn thêm dữ liệu demo (tài khoản mật khẩu `demo123`, phòng và mặt hàng cho cs1/cs2), chỉ dùng khi thử nghiệm:
+Muốn thêm dữ liệu demo (tài khoản `cskh1_cs1`, `ql1_cs2`, `tn1_cs2`, `pv1_cs2` mật khẩu `12345678`, phòng và mặt hàng cho cs1/cs2), chỉ dùng khi thử nghiệm:
 
 ```bash
 docker compose exec -e SEED_DEMO=1 backend node dist/prisma/seed.js
 ```
 
-Mở `http://<địa chỉ máy chủ>:3000`, đăng nhập `admin` / `admin123` rồi **đổi mật khẩu ngay**.
+Mở `http://<địa chỉ máy chủ>:3000`, đăng nhập `admin` / `12345678` rồi **đổi mật khẩu ngay** cho `admin` và các tài khoản mặc định (hoặc khoá những tài khoản không dùng).
 
 ## 3. Tên miền, Nginx và HTTPS
 
@@ -327,6 +327,21 @@ Migration chỉ thêm cột/bảng, không xoá dữ liệu. Sau khi cập nhậ
 - **Ngày kinh doanh** trong mọi báo cáo (doanh thu, hóa đơn, sổ quỹ, phiếu kho) là từ 06:00 hôm đó đến 06:00 hôm sau; doanh thu tính theo **giờ thanh toán**. Sổ quỹ có tồn đầu kỳ/cuối kỳ.
 - Giá giờ của phiên hát được **chốt lúc mở phòng**; phiên đang mở lúc cập nhật lấy giá phòng hiện tại.
 - Quản lý **hủy được** hóa đơn đã thanh toán, phiếu nhập/xuất và phiếu thu/chi thủ công (bắt buộc ghi lý do). Hủy hóa đơn: hoàn kho + hủy phiếu thu; hủy phiếu kho: đảo tồn kho + hủy phiếu chi đi kèm. Chứng từ đã hủy vẫn được giữ, không tính vào tổng.
+
+### 6.7. Bản cập nhật "tính giờ, VAT 10%, sửa hóa đơn đã thanh toán" (migration `20260927000000_edit_paid_bills`)
+
+Migration chỉ thêm cột và đổi giá trị mặc định, không sửa dữ liệu cũ. Sau khi cập nhật:
+
+- **Tiền giờ** = số giờ (số phút đã bắt đầu ÷ 60, **làm tròn đến 0,01 giờ**) × giá giờ, không còn làm tròn lên 1.000 đ. Ví dụ 83 phút = 1,38 giờ × 150.000 = 207.000 đ. Hóa đơn đã thanh toán giữ nguyên số tiền cũ.
+- **Thuế VAT mặc định 10%** cho phiên hát mở sau khi cập nhật (vẫn sửa được trên từng phiên). Phiên đang mở lúc cập nhật giữ mức thuế cũ.
+- **Phòng mới mặc định là VIP** (form thêm phòng, API và nhập Excel khi bỏ trống loại phòng).
+- Quản lý cơ sở và quản lý hệ thống **sửa được hóa đơn đã thanh toán** (Bán hàng → Hóa đơn → mở hóa đơn → *Sửa hóa đơn*, bắt buộc ghi lý do): món, giảm giá/phí/thuế, CSKH/phục vụ, giờ vào/ra, giá giờ, hình thức thanh toán. Tồn kho, phiếu thu trong Sổ quỹ và doanh thu được cập nhật theo số tiền mới. Tiền giờ đã thu được giữ nguyên nếu không đổi giờ hoặc giá giờ. Hóa đơn thanh toán trước bản 6.6 (không có phiếu thu) vẫn không được sinh phiếu thu khi sửa.
+
+### 6.8. Số hóa đơn (migration `20260927120000_bill_number`)
+
+Mỗi hóa đơn khi đóng (thanh toán **hoặc** hủy phiên) nhận một số hóa đơn dạng `DDMM` ngày kinh doanh + 4 số phòng + 3 số thứ tự trong ngày của cơ sở, ví dụ `27093020001` (ngày 27/09, phòng 302, hóa đơn thứ 1). Phòng 3 số thêm 0 phía sau (401 → `4010`), phòng không có số là `0000`. Hủy hóa đơn đã thanh toán vẫn giữ số cũ; số không bao giờ dùng lại.
+
+Migration đánh số bù cho mọi hóa đơn đã đóng theo thứ tự giờ đóng, tính ngày kinh doanh theo giờ Việt Nam. Trang Hóa đơn tìm được theo số hóa đơn đầy đủ trên mọi ngày.
 
 ## 7. Xử lý sự cố
 

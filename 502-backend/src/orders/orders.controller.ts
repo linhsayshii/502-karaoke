@@ -15,9 +15,10 @@ import { Role } from '@prisma/client';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
-import { ListOrdersQuery, StatisticsQuery } from './dto/order-queries';
+import { ListOrdersQuery } from './dto/order-queries';
 import { CheckoutOrderDto } from './dto/checkout-order.dto';
 import { CancelOrderDto } from './dto/cancel-order.dto';
+import { EditPaidOrderDto } from './dto/edit-paid-order.dto';
 import { CancelReasonDto } from '../common/dto/cancel-reason.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -35,15 +36,6 @@ export class OrdersController {
   @Roles(...SALES)
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateOrderDto) {
     return this.ordersService.create(user, dto);
-  }
-
-  @Get('statistics')
-  @Roles(...MANAGERS)
-  getStatistics(
-    @CurrentUser() user: AuthUser,
-    @Query() query: StatisticsQuery,
-  ) {
-    return this.ordersService.getStatistics(user, query);
   }
 
   // Bill history is a report (managers); staff get their open sessions.
@@ -100,6 +92,17 @@ export class OrdersController {
     @Body() dto: CancelOrderDto,
   ) {
     return this.ordersService.cancel(user, id, dto.reason);
+  }
+
+  // Corrects a paid bill: stock and the fund receipt follow the new amounts.
+  @Patch(':id/paid')
+  @Roles(...MANAGERS)
+  editPaid(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: EditPaidOrderDto,
+  ) {
+    return this.ordersService.editPaid(user, id, dto);
   }
 
   // Voids a paid bill: stock goes back, the fund receipt is cancelled.

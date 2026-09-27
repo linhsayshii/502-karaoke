@@ -105,6 +105,10 @@ export interface Order {
   createdBy?: StaffRef | null;
   checkedOutBy?: StaffRef | null;
   cancelledBy?: StaffRef | null;
+  // Last correction of a paid bill by a manager.
+  editedBy?: StaffRef | null;
+  editedAt?: string | null;
+  editReason?: string | null;
   startTime: string;
   endTime: string | null;
   updatedAt: string;
@@ -113,6 +117,8 @@ export interface Order {
   paymentMethod: PaymentMethod | null;
   cancelledAt: string | null;
   cancelReason: string | null;
+  // Số hóa đơn, given when the bill is closed (paid or cancelled).
+  billNumber: string | null;
   fundTransaction?: LinkedFundEntry | null;
   items: OrderItem[];
   totalProductPrice: string | number;
@@ -150,18 +156,43 @@ export interface BillPreview extends Omit<Order, BillAmounts> {
   finalAmount: number;
 }
 
-// GET /orders/statistics: one business day.
-export interface DailyStat {
-  date: string;
+// Reports (GET /reports/*): revenue is before VAT, VAT apart,
+// collected = revenue + VAT = what was paid.
+export type GroupBy = "day" | "week" | "month" | "quarter" | "year";
+
+export interface RevenueMetrics {
   orderCount: number;
-  totalRevenue: number;
-  hourlyFee: number;
-  productRevenue: number;
-  discount: number;
+  roomMinutes: number;
+  roomFee: number;
+  productSales: number;
+  roomDiscount: number;
+  productDiscount: number;
   serviceFee: number;
-  tax: number;
+  vat: number;
+  collected: number;
   cash: number;
   transfer: number;
+  revenue: number;
+  avgRevenue: number;
+}
+
+export interface ReportBucket {
+  key: string;
+  label: string;
+  from: string;
+  to: string;
+}
+
+// GET /reports/revenue
+export interface RevenueReport {
+  branchId: number | null; // null: whole chain
+  range: { from: string; to: string };
+  groupBy: GroupBy;
+  totals: RevenueMetrics;
+  previous: { from: string; to: string; totals: RevenueMetrics } | null;
+  buckets: (ReportBucket & RevenueMetrics)[];
+  byBranch: ({ branchId: number; code: string; name: string } & RevenueMetrics)[] | null;
+  voided: { count: number; amount: number };
 }
 
 // GET /users/floor-staff: employees that can be assigned to a room.
@@ -223,7 +254,7 @@ export interface FundTransaction {
   occurredAt: string;
   createdBy: StaffRef | null;
   // Written by checkout / an import paid from the fund.
-  order: { id: number; status: OrderStatus; room: { name: string } | null } | null;
+  order: { id: number; billNumber: string | null; status: OrderStatus; room: { name: string } | null } | null;
   stockDocument: { id: number; code: string; type: StockDocType } | null;
   cancelledAt: string | null;
   cancelledBy: StaffRef | null;
@@ -238,6 +269,7 @@ export interface FundSummary {
   net: number;
   closingBalance: number;
   salesIncome: number;
+  salesVat: number; // VAT inside salesIncome
   purchaseExpense: number;
   byMethod: {
     method: PaymentMethod;

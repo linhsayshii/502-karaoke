@@ -17,7 +17,12 @@ const fundInclude = {
   createdBy: userRef,
   cancelledBy: userRef,
   order: {
-    select: { id: true, status: true, room: { select: { name: true } } },
+    select: {
+      id: true,
+      billNumber: true,
+      status: true,
+      room: { select: { name: true } },
+    },
   },
   stockDocument: { select: { id: true, code: true, type: true } },
 } satisfies Prisma.FundTransactionInclude;
@@ -112,7 +117,7 @@ export class FundsService {
     const period = businessDayRange(query.from, query.to);
     const active = { branchId, cancelledAt: null };
 
-    const [inPeriod, before, linked] = await Promise.all([
+    const [inPeriod, before, linked, salesTax] = await Promise.all([
       this.prisma.fundTransaction.groupBy({
         by: ['type', 'method'],
         where: { ...active, occurredAt: period },
@@ -133,6 +138,15 @@ export class FundsService {
           OR: [{ orderId: { not: null } }, { stockDocumentId: { not: null } }],
         },
         _sum: { amount: true },
+      }),
+      // VAT inside the sales receipts: the tax of the bills they belong to.
+      this.prisma.order.aggregate({
+        where: {
+          fundTransaction: {
+            is: { branchId, cancelledAt: null, occurredAt: period },
+          },
+        },
+        _sum: { taxAmount: true },
       }),
     ]);
 
@@ -166,6 +180,7 @@ export class FundsService {
       closingBalance: opening + balance(periodTotals),
       // Receipts of paid bills / payments of imports within the totals.
       salesIncome: linkedSum(TransactionType.INCOME),
+      salesVat: Number(salesTax._sum.taxAmount ?? 0),
       purchaseExpense: linkedSum(TransactionType.EXPENSE),
       byMethod: METHODS.map((method) => {
         const t = totals(inPeriod, method);

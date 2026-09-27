@@ -31,6 +31,7 @@ model Branch {
   stockDocuments   StockDocument[]
   stockMovements   StockMovement[]
   fundTransactions FundTransaction[]
+  billCounters     BillCounter[]
 }
 
 enum Role {
@@ -66,6 +67,7 @@ model User {
   ordersCreated             Order[]           @relation("OrderCreatedBy")
   ordersCheckedOut          Order[]           @relation("OrderCheckedOutBy")
   ordersCancelled           Order[]           @relation("OrderCancelledBy")
+  ordersEdited              Order[]           @relation("OrderEditedBy")
   stockDocuments            StockDocument[]   @relation("StockDocumentCreatedBy")
   stockDocumentsCancelled   StockDocument[]   @relation("StockDocumentCancelledBy")
   stockMovements            StockMovement[]
@@ -124,7 +126,7 @@ model Room {
   branchId     Int
   branch       Branch     @relation(fields: [branchId], references: [id])
   name         String
-  type         String // "VIP", "NORMAL"
+  type         String     @default("VIP") // "VIP", "NORMAL"
   pricePerHour Decimal
   status       RoomStatus @default(AVAILABLE)
   orders       Order[]
@@ -186,7 +188,7 @@ model Order {
   serviceFeePercent Float   @default(0)
   serviceFeeAmount  Decimal @default(0)
 
-  taxPercent Float   @default(0)
+  taxPercent Float   @default(10) // VAT 10% unless changed on the session
   taxAmount  Decimal @default(0)
 
   finalAmount Decimal @default(0)
@@ -200,15 +202,41 @@ model Order {
   cancelledBy   User?     @relation("OrderCancelledBy", fields: [cancelledById], references: [id])
   cancelReason  String?
 
+  // Last correction of a paid bill by a manager (items, adjustments, times,
+  // payment method); stock and the fund receipt follow the new amounts.
+  editedAt   DateTime?
+  editedById Int?
+  editedBy   User?     @relation("OrderEditedBy", fields: [editedById], references: [id])
+  editReason String?
+
+  // Số hóa đơn (see orders/bill-number.ts), given when the bill is closed —
+  // paid or cancelled — and kept when it is voided or corrected: DDMM of the business
+  // day + 4-digit room code + the day's sequence in the branch.
+  businessDate DateTime? @db.Date
+  billSeq      Int?
+  billNumber   String?
+
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   items           OrderItem[]
   stockMovements  StockMovement[]
   fundTransaction FundTransaction?
 
+  @@unique([branchId, businessDate, billSeq])
   @@index([branchId, status])
   @@index([branchId, startTime])
   @@index([branchId, endTime])
+  @@index([branchId, billNumber])
+}
+
+// Last bill sequence handed out per branch and business day.
+model BillCounter {
+  branchId     Int
+  branch       Branch   @relation(fields: [branchId], references: [id])
+  businessDate DateTime @db.Date
+  lastSeq      Int
+
+  @@id([branchId, businessDate])
 }
 
 model OrderItem {

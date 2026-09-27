@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -42,10 +42,12 @@ import { TableEmpty, TableSkeleton } from "@/components/data-states";
 import { DateRangePicker, formatDateRange, type DateRangeValue } from "@/components/date-range-picker";
 import { PageHeader } from "@/components/layout/page-header";
 import { ReasonDialog } from "@/components/reason-dialog";
+import { StatTile } from "@/components/stat-tile";
 import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
 import {
+  billLabel,
   businessDate,
   firstDayOfMonth,
   formatDate,
@@ -84,21 +86,9 @@ function nowInput() {
 
 // Where an entry comes from: a paid bill, an import, or typed by hand.
 function sourceOf(t: FundTransaction) {
-  if (t.order) return `Hóa đơn #${t.order.id}${t.order.room ? ` · ${t.order.room.name}` : ""}`;
+  if (t.order) return `Hóa đơn ${billLabel(t.order)}${t.order.room ? ` · ${t.order.room.name}` : ""}`;
   if (t.stockDocument) return `${DOC_TYPE_LABELS[t.stockDocument.type]} ${t.stockDocument.code}`;
   return "Thủ công";
-}
-
-function StatTile({ label, value, footer }: { label: string; value: string; footer: string }) {
-  return (
-    <Card className="gap-2">
-      <CardHeader>
-        <CardDescription>{label}</CardDescription>
-        <CardTitle className="text-2xl font-semibold">{value}</CardTitle>
-      </CardHeader>
-      <CardFooter className="text-sm text-muted-foreground">{footer}</CardFooter>
-    </Card>
-  );
 }
 
 // Sổ quỹ of the branch. Bill receipts and import payments are written
@@ -262,7 +252,7 @@ export default function FundsPage() {
           <StatTile
             label="Tổng thu"
             value={formatMoney(summary.income)}
-            footer={`Trong đó bán hàng ${formatMoney(summary.salesIncome)}`}
+            footer={`Trong đó bán hàng ${formatMoney(summary.salesIncome)} (VAT ${formatMoney(summary.salesVat)})`}
           />
           <StatTile
             label="Tổng chi"

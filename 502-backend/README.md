@@ -47,8 +47,8 @@ TZ=Asia/Ho_Chi_Minh
 ```bash
 npm install
 npx prisma migrate deploy     # tạo bảng
-npx prisma db seed            # cơ sở cs1–cs4 + admin/admin123
-SEED_DEMO=1 npx prisma db seed  # (tuỳ chọn) thêm tài khoản demo (mật khẩu demo123), phòng, mặt hàng cho cs1/cs2
+npx prisma db seed            # cơ sở cs1–cs4 + admin, ql1_cs1, tn1_cs1, pv1_cs1 (mật khẩu 12345678)
+SEED_DEMO=1 npx prisma db seed  # (tuỳ chọn) thêm cskh1_cs1, ql1_cs2, tn1_cs2, pv1_cs2 (mật khẩu 12345678), phòng, mặt hàng cho cs1/cs2
 npm run start:dev             # http://localhost:4000/api, Swagger: http://localhost:4000/api/docs
 ```
 
@@ -79,6 +79,7 @@ Commit cả thư mục migration mới. Khi triển khai, container backend tự
 - **Không dùng `prisma db push`** nữa.
 - `0_init` là baseline của schema cũ (tạo bằng `db push`); `20260926000000_foundation` là migration viết tay, chuyển dữ liệu cũ sang mô hình nhiều cơ sở. Xem [DEPLOYMENT.md §6](../DEPLOYMENT.md#6-chuyển-từ-bản-cũ-pm2--postgresql-cài-trực-tiếp).
 - `20260926120000_linked_flows`: chốt giá giờ trên hóa đơn, hình thức thanh toán, liên kết phiếu thu/chi với hóa đơn/phiếu nhập, hủy chứng từ. Xem [DEPLOYMENT.md §6.6](../DEPLOYMENT.md#66-bản-cập-nhật-liên-kết-bán-hàng--kho--quỹ-migration-20260926120000_linked_flows).
+- `20260927000000_edit_paid_bills`: VAT mặc định 10%, phòng mặc định VIP, lưu lần sửa hóa đơn đã thanh toán. Xem [DEPLOYMENT.md §6.7](../DEPLOYMENT.md#67-bản-cập-nhật-tính-giờ-vat-10-sửa-hóa-đơn-đã-thanh-toán-migration-20260927000000_edit_paid_bills).
 - `test/fixtures/legacy-data.sql` là dữ liệu mẫu dạng cũ để tập dượt migration `foundation`: nạp vào DB chỉ có `0_init`, rồi chạy `npx prisma migrate deploy`.
 
 ## Docker

@@ -32,24 +32,47 @@ describe('computeBill', () => {
     });
   });
 
-  it('counts a started minute and rounds the room fee up to 1,000', () => {
-    // 61 minutes (one second over the hour) -> 61/60 * 100,000 = 101,666.67
+  it('counts a started minute and bills hours rounded to 0.01', () => {
+    // 61 minutes (one second over the hour) -> 1.0166 h -> 1.02 h
     const bill = computeBill({
       ...base,
       pricePerHour: 100000,
       endTime: new Date('2026-09-26T21:00:01'),
     });
     expect(bill.durationMinutes).toBe(61);
+    expect(bill.billedHours).toBe(1.02);
     expect(bill.hourlyFee).toBe(102000);
   });
 
-  it('does not add 1,000 through float error on exact fees', () => {
-    // 61 minutes at 120,000 = 122,000 exactly.
+  it('rounds the hours half up, then multiplies by the price', () => {
+    // 83 min = 1.3833 h -> 1.38 h; 85 min = 1.4166 h -> 1.42 h
+    const at = (minutes: number) =>
+      computeBill({
+        ...base,
+        pricePerHour: 150000,
+        endTime: new Date(base.startTime.getTime() + minutes * 60000),
+      });
+    expect(at(83)).toMatchObject({ billedHours: 1.38, hourlyFee: 207000 });
+    expect(at(85)).toMatchObject({ billedHours: 1.42, hourlyFee: 213000 });
+    // 1.37 h × 150,000 = 205,500: no rounding to 1,000 any more.
+    expect(at(82)).toMatchObject({ billedHours: 1.37, hourlyFee: 205500 });
+  });
+
+  it('has no float error on the fee', () => {
+    // 69 min = 1.15 h; 1.15 * 100000 is 114999.99999999999 in floats.
     const bill = computeBill({
       ...base,
-      endTime: new Date('2026-09-26T21:01:00'),
+      pricePerHour: 100000,
+      endTime: new Date('2026-09-26T21:09:00'),
     });
-    expect(bill.hourlyFee).toBe(122000);
+    expect(bill.billedHours).toBe(1.15);
+    expect(bill.hourlyFee).toBe(115000);
+  });
+
+  it('keeps a given room fee instead of recomputing it', () => {
+    const bill = computeBill({ ...base, hourlyFee: 100000 });
+    expect(bill.hourlyFee).toBe(100000);
+    expect(bill.finalAmount).toBe(100000);
   });
 
   it('applies products, fixed discounts, service fee, then tax rounded up', () => {

@@ -1,7 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { endOfMonth, format, parseISO, startOfMonth, subDays, subMonths } from "date-fns";
+import {
+  endOfMonth,
+  endOfQuarter,
+  endOfYear,
+  format,
+  parseISO,
+  startOfMonth,
+  startOfQuarter,
+  startOfYear,
+  subDays,
+  subMonths,
+  subQuarters,
+  subYears,
+} from "date-fns";
 import { vi } from "date-fns/locale";
 import { CalendarIcon } from "lucide-react";
 import type { DateRange } from "react-day-picker";
@@ -25,6 +38,8 @@ const dmy = (value: string) => format(parseISO(value), "dd/MM/yyyy");
 function presets(): { label: string; range: DateRangeValue }[] {
   const today = parseISO(businessDate());
   const lastMonth = subMonths(today, 1);
+  const lastQuarter = subQuarters(today, 1);
+  const lastYear = subYears(today, 1);
   return [
     { label: "Hôm nay", range: { from: ymd(today), to: ymd(today) } },
     { label: "Hôm qua", range: { from: ymd(subDays(today, 1)), to: ymd(subDays(today, 1)) } },
@@ -33,6 +48,16 @@ function presets(): { label: string; range: DateRangeValue }[] {
     {
       label: "Tháng trước",
       range: { from: ymd(startOfMonth(lastMonth)), to: ymd(endOfMonth(lastMonth)) },
+    },
+    { label: "Quý này", range: { from: ymd(startOfQuarter(today)), to: ymd(today) } },
+    {
+      label: "Quý trước",
+      range: { from: ymd(startOfQuarter(lastQuarter)), to: ymd(endOfQuarter(lastQuarter)) },
+    },
+    { label: "Năm nay", range: { from: ymd(startOfYear(today)), to: ymd(today) } },
+    {
+      label: "Năm trước",
+      range: { from: ymd(startOfYear(lastYear)), to: ymd(endOfYear(lastYear)) },
     },
   ];
 }

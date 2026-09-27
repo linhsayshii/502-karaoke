@@ -18,7 +18,17 @@ export interface BillInput {
   serviceFeePercent: number; // of products + room fee after discounts
   serviceFeeAmount: number;
   taxPercent: number;
+  // A room fee already settled (a paid bill edited without new times).
+  hourlyFee?: number;
 }
+
+// Started minutes as hours rounded to the hundredth (83 min = 1.38 h).
+export const billedHoursOf = (minutes: number) => Math.round((minutes * 100) / 60) / 100;
+
+// Room fee = billed hours × price per hour, to the đồng (in hundredths of an
+// hour, so there is no float error).
+export const roomFeeOf = (minutes: number, pricePerHour: number) =>
+  Math.round((Math.round((minutes * 100) / 60) * pricePerHour) / 100);
 
 const clamp = (value: number, max: number) => Math.min(Math.max(value, 0), Math.max(max, 0));
 
@@ -28,7 +38,7 @@ const byPercentOrAmount = (base: number, percent: number, amount: number) =>
 export function computeBill(input: BillInput) {
   const durationMs = input.endTime.getTime() - input.startTime.getTime();
   const durationMinutes = Math.max(0, Math.ceil(durationMs / (1000 * 60)));
-  const hourlyFee = roundUpToThousand((durationMinutes * input.pricePerHour) / 60);
+  const hourlyFee = input.hourlyFee ?? roomFeeOf(durationMinutes, input.pricePerHour);
   const totalProductPrice = input.items.reduce((sum, i) => sum + i.price * i.quantity, 0);
 
   const discountAmount = clamp(
@@ -49,6 +59,7 @@ export function computeBill(input: BillInput) {
 
   return {
     durationMinutes,
+    billedHours: billedHoursOf(durationMinutes),
     hourlyFee,
     totalProductPrice,
     discountAmount,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BanIcon, CircleAlertIcon } from "lucide-react";
+import { BanIcon, CircleAlertIcon, PencilIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,9 +12,10 @@ import { useAuth } from "@/components/auth-provider";
 import { LineItemsTable } from "@/components/line-items-table";
 import { ReasonDialog } from "@/components/reason-dialog";
 import { BillSummary } from "@/components/sales/bill-summary";
+import { EditPaidBillDialog } from "@/components/sales/edit-paid-bill-dialog";
 import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
-import { formatDateTime, formatMoney, minutesBetween } from "@/lib/format";
+import { billLabel, formatDateTime, formatMoney, minutesBetween } from "@/lib/format";
 import { ORDER_STATUS_LABELS, PAYMENT_METHOD_LABELS } from "@/lib/labels";
 import { can } from "@/lib/permissions";
 import type { Order } from "@/lib/types";
@@ -34,7 +35,8 @@ function Meta({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
-// A closed bill as it was stored, and (managers) voiding it: the sold goods
+// A closed bill as it was stored, and (managers) correcting it — stock, fund
+// receipt and revenue follow the new amounts — or voiding it: the sold goods
 // go back to stock and its fund receipt is cancelled.
 export function BillSheet({
   orderId,
@@ -63,6 +65,7 @@ function BillDetail({ orderId, onChanged }: { orderId: number; onChanged: () => 
   const notify = useNotify();
   const [order, setOrder] = useState<Order | null>(null);
   const [voidOpen, setVoidOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,7 +83,7 @@ function BillDetail({ orderId, onChanged }: { orderId: number; onChanged: () => 
     try {
       const res = await api.post<Order>(`/orders/${order.id}/void`, { reason });
       setOrder(res.data);
-      notify.success(`Đã hủy hóa đơn #${order.id}: hàng đã hoàn kho, phiếu thu đã hủy`);
+      notify.success(`Đã hủy hóa đơn ${billLabel(order)}: hàng đã hoàn kho, phiếu thu đã hủy`);
       onChanged();
     } catch (error) {
       notify.error(error, "Không thể hủy hóa đơn");
@@ -94,7 +97,7 @@ function BillDetail({ orderId, onChanged }: { orderId: number; onChanged: () => 
     <>
       <SheetHeader className="border-b">
         <SheetTitle className="flex items-center gap-2">
-          Hóa đơn #{orderId}
+          Hóa đơn {order ? billLabel(order) : `#${orderId}`}
           {order && <Badge variant={ORDER_STATUS_BADGE[order.status]}>{ORDER_STATUS_LABELS[order.status]}</Badge>}
         </SheetTitle>
         <SheetDescription>
@@ -123,6 +126,17 @@ function BillDetail({ orderId, onChanged }: { orderId: number; onChanged: () => 
                   {order.cancelReason ?? "Không ghi lý do"}
                   {order.checkedOutBy && " · Hóa đơn đã thanh toán trước đó: hàng đã hoàn kho, phiếu thu đã hủy."}
                 </AlertDescription>
+              </Alert>
+            )}
+
+            {order.editedAt && (
+              <Alert>
+                <PencilIcon />
+                <AlertTitle>
+                  Đã sửa lúc {formatDateTime(order.editedAt)}
+                  {order.editedBy && ` bởi ${order.editedBy.fullName}`}
+                </AlertTitle>
+                <AlertDescription>{order.editReason ?? "Không ghi lý do"}</AlertDescription>
               </Alert>
             )}
 
@@ -166,13 +180,33 @@ function BillDetail({ orderId, onChanged }: { orderId: number; onChanged: () => 
         )}
       </div>
 
-      {order?.status === "COMPLETED" && can(user, "sales.cancel") && (
+      {order?.status === "COMPLETED" && (can(user, "sales.editPaid") || can(user, "sales.cancel")) && (
         <SheetFooter className="border-t">
-          <Button variant="destructive" onClick={() => setVoidOpen(true)}>
-            <BanIcon data-icon="inline-start" />
-            Hủy hóa đơn
-          </Button>
+          {can(user, "sales.editPaid") && (
+            <Button variant="outline" onClick={() => setEditOpen(true)}>
+              <PencilIcon data-icon="inline-start" />
+              Sửa hóa đơn
+            </Button>
+          )}
+          {can(user, "sales.cancel") && (
+            <Button variant="destructive" onClick={() => setVoidOpen(true)}>
+              <BanIcon data-icon="inline-start" />
+              Hủy hóa đơn
+            </Button>
+          )}
         </SheetFooter>
+      )}
+
+      {order?.status === "COMPLETED" && (
+        <EditPaidBillDialog
+          order={order}
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          onSaved={(saved) => {
+            setOrder(saved);
+            onChanged();
+          }}
+        />
       )}
 
       <ReasonDialog

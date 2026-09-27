@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { OrderStatus } from '@prisma/client';
-import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsOptional, IsString, Matches } from 'class-validator';
 
 export class ListOrdersQuery {
   @ApiProperty({ required: false, description: 'Mã cơ sở, vd cs1' })
@@ -34,19 +34,13 @@ export class ListOrdersQuery {
   @IsOptional()
   @IsEnum(OrderStatus)
   status?: OrderStatus;
-}
 
-export class StatisticsQuery {
-  @ApiProperty({ required: false, description: 'Mã cơ sở, vd cs1' })
+  @ApiProperty({
+    required: false,
+    description:
+      'Số hóa đơn hoặc phần đầu của nó (vd 2709 = mọi hóa đơn ngày 27/09); tìm trên mọi ngày, bỏ qua from/to',
+  })
   @IsOptional()
-  @IsString()
-  branch?: string;
-
-  @ApiProperty({ description: 'Ngày kinh doanh đầu tiên, YYYY-MM-DD' })
-  @IsString()
-  from: string;
-
-  @ApiProperty({ description: 'Ngày kinh doanh cuối cùng, YYYY-MM-DD' })
-  @IsString()
-  to: string;
+  @Matches(/^\d{1,20}$/, { message: 'Số hóa đơn chỉ gồm chữ số' })
+  billNumber?: string;
 }

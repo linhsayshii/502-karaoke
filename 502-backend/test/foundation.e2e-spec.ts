@@ -6,9 +6,10 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
+import { businessDateOf } from '../src/common/dates';
 
 // Permission matrix and the main sales / inventory / fund flows against a
-// fresh database seeded with the demo accounts (SEED_DEMO=1).
+// fresh database seeded with the demo data (SEED_DEMO=1).
 
 type Json = Record<string, unknown>;
 
@@ -38,7 +39,7 @@ describe('Foundation (e2e)', () => {
         .set('Authorization', `Bearer ${tokens[username]}`),
   });
 
-  const login = async (username: string, password = 'demo123') => {
+  const login = async (username: string, password = '12345678') => {
     const res = await api()
       .post('/api/auth/login')
       .send({ username, password })
@@ -65,14 +66,14 @@ describe('Foundation (e2e)', () => {
     );
     await app.init();
 
-    await login('admin', 'admin123');
+    await login('admin');
     for (const u of [
-      'ql_cs1',
-      'tn_cs1',
-      'nv_cs1',
-      'cskh_cs1',
-      'ql_cs2',
-      'tn_cs2',
+      'ql1_cs1',
+      'tn1_cs1',
+      'pv1_cs1',
+      'cskh1_cs1',
+      'ql1_cs2',
+      'tn1_cs2',
     ]) {
       await login(u);
     }
@@ -91,7 +92,7 @@ describe('Foundation (e2e)', () => {
     it('rejects a wrong password with a Vietnamese message', async () => {
       const res = await api()
         .post('/api/auth/login')
-        .send({ username: 'tn_cs1', password: 'sai' })
+        .send({ username: 'tn1_cs1', password: 'sai' })
         .expect(401);
       expect((res.body as Json).message).toBe(
         'Tên đăng nhập hoặc mật khẩu không đúng',
@@ -99,9 +100,9 @@ describe('Foundation (e2e)', () => {
     });
 
     it('returns the account with its branch', async () => {
-      const res = await as('tn_cs1').get('/auth/me').expect(200);
+      const res = await as('tn1_cs1').get('/auth/me').expect(200);
       expect(res.body).toMatchObject({
-        username: 'tn_cs1',
+        username: 'tn1_cs1',
         role: 'CASHIER',
         branch: { code: 'cs1' },
       });
@@ -111,14 +112,14 @@ describe('Foundation (e2e)', () => {
 
   describe('branch scope', () => {
     it('gives non-chain accounts their own branch only', async () => {
-      const res = await as('tn_cs1').get('/rooms').expect(200);
+      const res = await as('tn1_cs1').get('/rooms').expect(200);
       const rooms = res.body as Json[];
       expect(rooms.map((r) => r.name)).toEqual(['P101', 'P102', 'P103']);
 
-      await as('tn_cs1').get('/rooms?branch=cs2').expect(403);
-      await as('ql_cs1').get('/products?branch=cs2').expect(403);
+      await as('tn1_cs1').get('/rooms?branch=cs2').expect(403);
+      await as('ql1_cs1').get('/products?branch=cs2').expect(403);
 
-      const branches = await as('tn_cs1').get('/branches').expect(200);
+      const branches = await as('tn1_cs1').get('/branches').expect(200);
       expect((branches.body as Json[]).map((b) => b.code)).toEqual(['cs1']);
     });
 
@@ -134,35 +135,35 @@ describe('Foundation (e2e)', () => {
     });
 
     it('blocks access by id to another branch', async () => {
-      const cs2Rooms = await as('tn_cs2').get('/rooms').expect(200);
+      const cs2Rooms = await as('tn1_cs2').get('/rooms').expect(200);
       const cs2RoomId = (cs2Rooms.body as Json[])[0].id as number;
-      await as('tn_cs1').get(`/rooms/${cs2RoomId}`).expect(403);
-      await as('tn_cs1').post('/orders', { roomId: cs2RoomId }).expect(403);
+      await as('tn1_cs1').get(`/rooms/${cs2RoomId}`).expect(403);
+      await as('tn1_cs1').post('/orders', { roomId: cs2RoomId }).expect(403);
     });
   });
 
   describe('role guards', () => {
     it('keeps cashiers to cashier work', async () => {
-      await as('tn_cs1').get('/inventory/stock').expect(403);
-      await as('tn_cs1').get('/funds').expect(403);
-      await as('tn_cs1')
-        .get('/orders/statistics?from=2026-01-01&to=2026-01-02')
+      await as('tn1_cs1').get('/inventory/stock').expect(403);
+      await as('tn1_cs1').get('/funds').expect(403);
+      await as('tn1_cs1')
+        .get('/reports/revenue?from=2026-01-01&to=2026-01-02')
         .expect(403);
-      await as('tn_cs1').get('/orders').expect(403);
-      await as('tn_cs1').get('/users').expect(403);
-      await as('tn_cs1')
+      await as('tn1_cs1').get('/orders').expect(403);
+      await as('tn1_cs1').get('/users').expect(403);
+      await as('tn1_cs1')
         .post('/rooms', { name: 'X', type: 'NORMAL', pricePerHour: 1 })
         .expect(403);
-      await as('tn_cs1').get('/products').expect(200);
+      await as('tn1_cs1').get('/products').expect(200);
     });
 
     it('keeps staff away from the catalog', async () => {
-      await as('nv_cs1').get('/products').expect(403);
-      await as('nv_cs1').post('/orders', { roomId: 1 }).expect(403);
+      await as('pv1_cs1').get('/products').expect(403);
+      await as('pv1_cs1').post('/orders', { roomId: 1 }).expect(403);
     });
 
     it('reserves branch management to the chain manager', async () => {
-      await as('ql_cs1')
+      await as('ql1_cs1')
         .post('/branches', { code: 'cs9', name: 'CS9' })
         .expect(403);
       await as('admin')
@@ -171,7 +172,7 @@ describe('Foundation (e2e)', () => {
     });
 
     it('validates bodies and strips unknown fields', async () => {
-      const res = await as('tn_cs1')
+      const res = await as('tn1_cs1')
         .post('/orders', { roomId: 'x' })
         .expect(400);
       expect((res.body as Json).message).toContain('roomId');
@@ -186,21 +187,21 @@ describe('Foundation (e2e)', () => {
     let staffId: number;
 
     beforeAll(async () => {
-      const rooms = await as('tn_cs1').get('/rooms').expect(200);
+      const rooms = await as('tn1_cs1').get('/rooms').expect(200);
       roomId = (rooms.body as Json[]).find((r) => r.name === 'P101')!
         .id as number;
-      const products = (await as('tn_cs1').get('/products').expect(200))
+      const products = (await as('tn1_cs1').get('/products').expect(200))
         .body as Json[];
       beerId = products.find((p) => p.name === 'Bia Tiger')!.id as number;
       serviceId = products.find((p) => p.name === 'Phụ thu vệ sinh')!
         .id as number;
-      const floor = (await as('tn_cs1').get('/users/floor-staff').expect(200))
+      const floor = (await as('tn1_cs1').get('/users/floor-staff').expect(200))
         .body as Json[];
       staffId = floor.find((u) => u.fullName === 'Phục vụ CS1')!.id as number;
     });
 
     it('imports stock through a document', async () => {
-      const res = await as('ql_cs1')
+      const res = await as('ql1_cs1')
         .post('/inventory/documents', {
           type: 'IMPORT',
           supplier: 'NCC A',
@@ -211,7 +212,7 @@ describe('Foundation (e2e)', () => {
       expect(doc.code).toMatch(/^PN-CS1-\d{8}-\d{4}$/);
       expect(Number(doc.totalAmount)).toBe(150000);
 
-      const stock = (await as('ql_cs1').get('/inventory/stock').expect(200))
+      const stock = (await as('ql1_cs1').get('/inventory/stock').expect(200))
         .body as Json[];
       const beer = stock.find((p) => p.id === beerId)!;
       expect(beer.stockQuantity).toBe(10);
@@ -220,33 +221,35 @@ describe('Foundation (e2e)', () => {
     });
 
     it('opens a room once', async () => {
-      const res = await as('tn_cs1')
+      const res = await as('tn1_cs1')
         .post('/orders', { roomId, serverId: staffId })
         .expect(201);
       orderId = (res.body as Json).id as number;
       expect(res.body).toMatchObject({ status: 'PENDING', branchId: 1 });
 
-      await as('tn_cs1').post('/orders', { roomId }).expect(409);
-      const room = (await as('tn_cs1').get(`/rooms/${roomId}`).expect(200))
+      await as('tn1_cs1').post('/orders', { roomId }).expect(409);
+      const room = (await as('tn1_cs1').get(`/rooms/${roomId}`).expect(200))
         .body as Json;
       expect(room).toMatchObject({ status: 'ACTIVE', activeOrderId: orderId });
     });
 
     it('shows staff only the rooms they serve, read-only', async () => {
-      const mine = (await as('nv_cs1').get('/rooms').expect(200))
+      const mine = (await as('pv1_cs1').get('/rooms').expect(200))
         .body as Json[];
       expect(mine.map((r) => r.id)).toEqual([roomId]);
-      const other = (await as('cskh_cs1').get('/rooms').expect(200))
+      const other = (await as('cskh1_cs1').get('/rooms').expect(200))
         .body as Json[];
       expect(other).toEqual([]);
 
-      await as('nv_cs1').get(`/orders/${orderId}`).expect(200);
-      await as('cskh_cs1').get(`/orders/${orderId}`).expect(403);
-      await as('nv_cs1').patch(`/orders/${orderId}`, { items: [] }).expect(403);
+      await as('pv1_cs1').get(`/orders/${orderId}`).expect(200);
+      await as('cskh1_cs1').get(`/orders/${orderId}`).expect(403);
+      await as('pv1_cs1')
+        .patch(`/orders/${orderId}`, { items: [] })
+        .expect(403);
     });
 
     it('prices items on the server', async () => {
-      const res = await as('tn_cs1')
+      const res = await as('tn1_cs1')
         .patch(`/orders/${orderId}`, {
           items: [
             { productId: beerId, quantity: 2, price: 1 },
@@ -258,9 +261,9 @@ describe('Foundation (e2e)', () => {
       const items = (res.body as Json).items as Json[];
       expect(items.map((i) => Number(i.price))).toEqual([25000, 50000]);
 
-      const cs2Products = (await as('tn_cs2').get('/products').expect(200))
+      const cs2Products = (await as('tn1_cs2').get('/products').expect(200))
         .body as Json[];
-      await as('tn_cs1')
+      await as('tn1_cs1')
         .patch(`/orders/${orderId}`, {
           items: [{ productId: cs2Products[0].id, quantity: 1 }],
         })
@@ -269,25 +272,25 @@ describe('Foundation (e2e)', () => {
 
     it('checks out once and deducts stock', async () => {
       const preview = (
-        await as('tn_cs1').get(`/orders/${orderId}/preview`).expect(200)
+        await as('tn1_cs1').get(`/orders/${orderId}/preview`).expect(200)
       ).body as Json;
       expect(preview.totalProductPrice).toBe(100000);
 
-      const res = await as('tn_cs1')
+      const res = await as('tn1_cs1')
         .post(`/orders/${orderId}/checkout`)
         .expect(200);
       expect(res.body).toMatchObject({ status: 'COMPLETED' });
       expect(Number((res.body as Json).finalAmount)).toBeGreaterThanOrEqual(
         110000,
       );
-      await as('tn_cs1').post(`/orders/${orderId}/checkout`).expect(409);
+      await as('tn1_cs1').post(`/orders/${orderId}/checkout`).expect(409);
 
-      const stock = (await as('ql_cs1').get('/inventory/stock').expect(200))
+      const stock = (await as('ql1_cs1').get('/inventory/stock').expect(200))
         .body as Json[];
       expect(stock.find((p) => p.id === beerId)!.stockQuantity).toBe(8);
 
       const movements = (
-        await as('ql_cs1')
+        await as('ql1_cs1')
           .get(`/inventory/movements?productId=${beerId}`)
           .expect(200)
       ).body as Json[];
@@ -298,14 +301,14 @@ describe('Foundation (e2e)', () => {
         ['IMPORT', 10, 10],
       ]);
 
-      const room = (await as('tn_cs1').get(`/rooms/${roomId}`).expect(200))
+      const room = (await as('tn1_cs1').get(`/rooms/${roomId}`).expect(200))
         .body as Json;
       expect(room.status).toBe('AVAILABLE');
-      expect((await as('nv_cs1').get('/rooms').expect(200)).body).toEqual([]);
+      expect((await as('pv1_cs1').get('/rooms').expect(200)).body).toEqual([]);
     });
 
     it('never exports more than in stock', async () => {
-      const res = await as('ql_cs1')
+      const res = await as('ql1_cs1')
         .post('/inventory/documents', {
           type: 'EXPORT',
           lines: [{ productId: beerId, quantity: 100 }],
@@ -313,24 +316,26 @@ describe('Foundation (e2e)', () => {
         .expect(400);
       expect((res.body as Json).message).toContain('Không đủ tồn kho');
 
-      await as('ql_cs1')
+      await as('ql1_cs1')
         .post('/inventory/documents', {
           type: 'EXPORT',
           note: 'Hư hỏng',
           lines: [{ productId: beerId, quantity: 3 }],
         })
         .expect(201);
-      const stock = (await as('ql_cs1').get('/inventory/stock').expect(200))
+      const stock = (await as('ql1_cs1').get('/inventory/stock').expect(200))
         .body as Json[];
       expect(stock.find((p) => p.id === beerId)!.stockQuantity).toBe(5);
     });
 
     it('lets only managers cancel an open session', async () => {
-      const opened = await as('tn_cs1').post('/orders', { roomId }).expect(201);
+      const opened = await as('tn1_cs1')
+        .post('/orders', { roomId })
+        .expect(201);
       const id = (opened.body as Json).id as number;
-      await as('tn_cs1').post(`/orders/${id}/cancel`).expect(403);
-      await as('ql_cs1').post(`/orders/${id}/cancel`).expect(200);
-      const room = (await as('tn_cs1').get(`/rooms/${roomId}`).expect(200))
+      await as('tn1_cs1').post(`/orders/${id}/cancel`).expect(403);
+      await as('ql1_cs1').post(`/orders/${id}/cancel`).expect(200);
+      const room = (await as('tn1_cs1').get(`/rooms/${roomId}`).expect(200))
         .body as Json;
       expect(room.status).toBe('AVAILABLE');
     });
@@ -339,17 +344,17 @@ describe('Foundation (e2e)', () => {
       const today = new Date();
       const yesterday = new Date(today);
       yesterday.setDate(today.getDate() - 1);
-      const res = await as('ql_cs1')
-        .get(`/orders/statistics?from=${ymd(yesterday)}&to=${ymd(today)}`)
+      const res = await as('ql1_cs1')
+        .get(`/reports/revenue?from=${ymd(yesterday)}&to=${ymd(today)}`)
         .expect(200);
-      const stats = res.body as Json[];
-      expect(stats.reduce((s, d) => s + (d.orderCount as number), 0)).toBe(1);
+      const report = res.body as { totals: { orderCount: number } };
+      expect(report.totals.orderCount).toBe(1);
     });
   });
 
   describe('account management', () => {
     it('lets a branch manager manage cashiers and staff of their branch', async () => {
-      const created = await as('ql_cs1')
+      const created = await as('ql1_cs1')
         .post('/users', {
           username: 'tn_moi',
           password: 'matkhau1',
@@ -362,7 +367,7 @@ describe('Foundation (e2e)', () => {
         'Bạn không có quyền truy cập cơ sở này',
       );
 
-      const res = await as('ql_cs1')
+      const res = await as('ql1_cs1')
         .post('/users', {
           username: 'tn_moi',
           password: 'matkhau1',
@@ -373,7 +378,7 @@ describe('Foundation (e2e)', () => {
       expect(res.body).toMatchObject({ branchId: 1, hasPassword: true });
       expect(res.body).not.toHaveProperty('password');
 
-      await as('ql_cs1')
+      await as('ql1_cs1')
         .post('/users', {
           username: 'ql_moi',
           fullName: 'QL',
@@ -385,30 +390,30 @@ describe('Foundation (e2e)', () => {
     it('stops a branch manager from touching other branches or themselves', async () => {
       const cs2Users = (await as('admin').get('/users?branch=cs2').expect(200))
         .body as Json[];
-      const tnCs2 = cs2Users.find((u) => u.username === 'tn_cs2')!;
-      await as('ql_cs1')
+      const tnCs2 = cs2Users.find((u) => u.username === 'tn1_cs2')!;
+      await as('ql1_cs1')
         .patch(`/users/${tnCs2.id as number}`, { fullName: 'X' })
         .expect(403);
 
-      const me = (await as('ql_cs1').get('/auth/me').expect(200)).body as Json;
-      await as('ql_cs1')
+      const me = (await as('ql1_cs1').get('/auth/me').expect(200)).body as Json;
+      await as('ql1_cs1')
         .delete(`/users/${me.id as number}`)
         .expect(403);
-      await as('ql_cs1').get('/users?branch=cs2').expect(403);
+      await as('ql1_cs1').get('/users?branch=cs2').expect(403);
     });
 
     it('locks an account immediately', async () => {
-      const cs1Users = (await as('ql_cs1').get('/users').expect(200))
+      const cs1Users = (await as('ql1_cs1').get('/users').expect(200))
         .body as Json[];
-      const cskh = cs1Users.find((u) => u.username === 'cskh_cs1')!;
-      await as('ql_cs1')
+      const cskh = cs1Users.find((u) => u.username === 'cskh1_cs1')!;
+      await as('ql1_cs1')
         .delete(`/users/${cskh.id as number}`)
         .expect(200);
 
-      await as('cskh_cs1').get('/rooms').expect(401);
+      await as('cskh1_cs1').get('/rooms').expect(401);
       const res = await api()
         .post('/api/auth/login')
-        .send({ username: 'cskh_cs1', password: 'demo123' })
+        .send({ username: 'cskh1_cs1', password: '12345678' })
         .expect(401);
       expect((res.body as Json).message).toBe('Tài khoản đã bị khóa');
     });
@@ -416,20 +421,20 @@ describe('Foundation (e2e)', () => {
 
   describe('cash fund', () => {
     it('records receipts and payments per branch', async () => {
-      const before = (await as('ql_cs1').get('/funds/summary').expect(200))
+      const before = (await as('ql1_cs1').get('/funds/summary').expect(200))
         .body as Json;
       // The bill paid earlier in this run is already in the fund.
       expect(before.salesIncome).toBeGreaterThan(0);
       expect(before.income).toBe(before.salesIncome);
 
-      await as('ql_cs1')
+      await as('ql1_cs1')
         .post('/funds', {
           type: 'INCOME',
           amount: 100000,
           category: 'Thu khác',
         })
         .expect(201);
-      await as('ql_cs1')
+      await as('ql1_cs1')
         .post('/funds', {
           type: 'EXPENSE',
           method: 'TRANSFER',
@@ -437,11 +442,11 @@ describe('Foundation (e2e)', () => {
           description: 'Mua đá',
         })
         .expect(201);
-      await as('ql_cs1')
+      await as('ql1_cs1')
         .post('/funds', { type: 'EXPENSE', amount: -5 })
         .expect(400);
 
-      const summary = (await as('ql_cs1').get('/funds/summary').expect(200))
+      const summary = (await as('ql1_cs1').get('/funds/summary').expect(200))
         .body as Json;
       expect(summary).toMatchObject({
         openingBalance: 0,
@@ -457,10 +462,10 @@ describe('Foundation (e2e)', () => {
       )!;
       expect(transfer).toMatchObject({ income: 0, expense: 30000 });
 
-      const cs2 = (await as('ql_cs2').get('/funds/summary').expect(200))
+      const cs2 = (await as('ql1_cs2').get('/funds/summary').expect(200))
         .body as Json;
       expect(cs2).toMatchObject({ income: 0, expense: 0, net: 0 });
-      await as('ql_cs2').get('/funds?branch=cs1').expect(403);
+      await as('ql1_cs2').get('/funds?branch=cs1').expect(403);
     });
   });
 
@@ -480,38 +485,41 @@ describe('Foundation (e2e)', () => {
     const period = `from=${ymd(yesterday)}&to=${ymd(tomorrow)}`;
 
     const stockOf = async (productId: number) => {
-      const stock = (await as('ql_cs2').get('/inventory/stock').expect(200))
+      const stock = (await as('ql1_cs2').get('/inventory/stock').expect(200))
         .body as Json[];
       return stock.find((p) => p.id === productId)!;
     };
     const summary = async () =>
-      (await as('ql_cs2').get(`/funds/summary?${period}`).expect(200))
+      (await as('ql1_cs2').get(`/funds/summary?${period}`).expect(200))
         .body as Json;
-    const revenue = async () => {
-      const days = (
-        await as('ql_cs2').get(`/orders/statistics?${period}`).expect(200)
-      ).body as Json[];
-      return days.reduce((s, d) => s + (d.totalRevenue as number), 0);
-    };
+    const revenueTotals = async () =>
+      (
+        (await as('ql1_cs2').get(`/reports/revenue?${period}`).expect(200))
+          .body as { totals: { collected: number; transfer: number } }
+      ).totals;
+    // What the guests paid (VAT included), as the fund's sales receipts.
+    const revenue = async () => (await revenueTotals()).collected;
     const openSession = async (items: Json[]) => {
-      const opened = await as('tn_cs2').post('/orders', { roomId }).expect(201);
+      const opened = await as('tn1_cs2')
+        .post('/orders', { roomId })
+        .expect(201);
       const id = (opened.body as Json).id as number;
-      await as('tn_cs2').patch(`/orders/${id}`, { items }).expect(200);
+      await as('tn1_cs2').patch(`/orders/${id}`, { items }).expect(200);
       return id;
     };
 
     beforeAll(async () => {
-      const rooms = (await as('tn_cs2').get('/rooms').expect(200))
+      const rooms = (await as('tn1_cs2').get('/rooms').expect(200))
         .body as Json[];
       roomId = rooms.find((r) => r.name === 'P201')!.id as number;
-      const products = (await as('tn_cs2').get('/products').expect(200))
+      const products = (await as('tn1_cs2').get('/products').expect(200))
         .body as Json[];
       beerId = products.find((p) => p.name === 'Bia Tiger')!.id as number;
       waterId = products.find((p) => p.name === 'Nước suối')!.id as number;
     });
 
     it('writes the phiếu chi of an import paid from the fund', async () => {
-      const res = await as('ql_cs2')
+      const res = await as('ql1_cs2')
         .post('/inventory/documents', {
           type: 'IMPORT',
           supplier: 'NCC B',
@@ -525,13 +533,13 @@ describe('Foundation (e2e)', () => {
       expect(Number((doc.fundTransaction as Json).amount)).toBe(240000);
 
       // Bought on credit: no fund entry.
-      await as('ql_cs2')
+      await as('ql1_cs2')
         .post('/inventory/documents', {
           type: 'IMPORT',
           lines: [{ productId: waterId, quantity: 10, unitCost: 5000 }],
         })
         .expect(201);
-      await as('ql_cs2')
+      await as('ql1_cs2')
         .post('/inventory/documents', {
           type: 'EXPORT',
           paymentMethod: 'CASH',
@@ -539,7 +547,7 @@ describe('Foundation (e2e)', () => {
         })
         .expect(400);
 
-      const entries = (await as('ql_cs2').get('/funds').expect(200))
+      const entries = (await as('ql1_cs2').get('/funds').expect(200))
         .body as Json[];
       expect(entries).toHaveLength(1);
       expect(entries[0]).toMatchObject({
@@ -561,42 +569,42 @@ describe('Foundation (e2e)', () => {
         pendingQuantity: 3,
         availableQuantity: 17,
       });
-      const products = (await as('tn_cs2').get('/products').expect(200))
+      const products = (await as('tn1_cs2').get('/products').expect(200))
         .body as Json[];
       expect(products.find((p) => p.id === beerId)!.pendingQuantity).toBe(3);
     });
 
     it('keeps the room price of the session and applies live percents', async () => {
-      await as('ql_cs2')
+      await as('ql1_cs2')
         .patch(`/rooms/${roomId}`, { pricePerHour: 999000 })
         .expect(200);
-      await as('tn_cs2')
+      await as('tn1_cs2')
         .patch(`/orders/${paidOrderId}`, { discountPercent: 10 })
         .expect(200);
 
       let bill = (
-        await as('tn_cs2').get(`/orders/${paidOrderId}/preview`).expect(200)
+        await as('tn1_cs2').get(`/orders/${paidOrderId}/preview`).expect(200)
       ).body as Json;
       // 1-2 started minutes at the 120,000 opening price.
       expect(bill.hourlyFee).toBeLessThanOrEqual(4000);
       expect(bill.discountAmount).toBe(8000); // 10% of 75,000, rounded up
 
-      await as('tn_cs2')
+      await as('tn1_cs2')
         .patch(`/orders/${paidOrderId}`, {
           items: [{ productId: beerId, quantity: 4 }],
         })
         .expect(200);
       bill = (
-        await as('tn_cs2').get(`/orders/${paidOrderId}/preview`).expect(200)
+        await as('tn1_cs2').get(`/orders/${paidOrderId}/preview`).expect(200)
       ).body as Json;
       expect(bill.discountAmount).toBe(10000); // follows the new total
-      await as('ql_cs2')
+      await as('ql1_cs2')
         .patch(`/rooms/${roomId}`, { pricePerHour: 120000 })
         .expect(200);
     });
 
     it('writes the fund receipt at checkout and matches revenue', async () => {
-      const res = await as('tn_cs2')
+      const res = await as('tn1_cs2')
         .post(`/orders/${paidOrderId}/checkout`, { paymentMethod: 'TRANSFER' })
         .expect(200);
       const order = res.body as Json;
@@ -625,50 +633,47 @@ describe('Foundation (e2e)', () => {
       ).toMatchObject({ income: finalAmount });
       expect((await stockOf(beerId)).stockQuantity).toBe(16);
 
-      const days = (
-        await as('ql_cs2').get(`/orders/statistics?${period}`).expect(200)
-      ).body as Json[];
-      expect(days.reduce((s, d) => s + (d.transfer as number), 0)).toBe(
-        finalAmount,
-      );
+      expect((await revenueTotals()).transfer).toBe(finalAmount);
       const bills = (
-        await as('ql_cs2').get(`/orders?${period}&status=COMPLETED`).expect(200)
+        await as('ql1_cs2')
+          .get(`/orders?${period}&status=COMPLETED`)
+          .expect(200)
       ).body as Json[];
       expect(bills.map((b) => b.id)).toEqual([paidOrderId]);
     });
 
     it('cancels only manual fund entries, with a reason', async () => {
-      const entries = (await as('ql_cs2').get('/funds').expect(200))
+      const entries = (await as('ql1_cs2').get('/funds').expect(200))
         .body as Json[];
       const receipt = entries.find((e) => e.order !== null)!;
-      await as('ql_cs2')
+      await as('ql1_cs2')
         .post(`/funds/${receipt.id as number}/cancel`, { reason: 'x' })
         .expect(409);
 
-      const manual = await as('ql_cs2')
+      const manual = await as('ql1_cs2')
         .post('/funds', { type: 'INCOME', amount: 50000 })
         .expect(201);
       const id = (manual.body as Json).id as number;
       const before = await summary();
-      await as('ql_cs2').post(`/funds/${id}/cancel`, {}).expect(400);
-      await as('tn_cs2')
+      await as('ql1_cs2').post(`/funds/${id}/cancel`, {}).expect(400);
+      await as('tn1_cs2')
         .post(`/funds/${id}/cancel`, { reason: 'Ghi nhầm' })
         .expect(403);
-      await as('ql_cs2')
+      await as('ql1_cs2')
         .post(`/funds/${id}/cancel`, { reason: 'Ghi nhầm' })
         .expect(200);
-      await as('ql_cs2')
+      await as('ql1_cs2')
         .post(`/funds/${id}/cancel`, { reason: 'Ghi nhầm' })
         .expect(409);
       expect((await summary()).income).toBe((before.income as number) - 50000);
     });
 
     it('voids a paid bill: stock back, receipt cancelled, revenue gone', async () => {
-      await as('tn_cs2')
+      await as('tn1_cs2')
         .post(`/orders/${paidOrderId}/void`, { reason: 'Nhập nhầm' })
         .expect(403);
-      await as('ql_cs2').post(`/orders/${paidOrderId}/void`, {}).expect(400);
-      const res = await as('ql_cs2')
+      await as('ql1_cs2').post(`/orders/${paidOrderId}/void`, {}).expect(400);
+      const res = await as('ql1_cs2')
         .post(`/orders/${paidOrderId}/void`, { reason: 'Nhập nhầm phòng' })
         .expect(200);
       expect(res.body).toMatchObject({
@@ -679,13 +684,13 @@ describe('Foundation (e2e)', () => {
       expect((res.body as Json).fundTransaction).not.toMatchObject({
         cancelledAt: null,
       });
-      await as('ql_cs2')
+      await as('ql1_cs2')
         .post(`/orders/${paidOrderId}/void`, { reason: 'lần nữa' })
         .expect(409);
 
       expect((await stockOf(beerId)).stockQuantity).toBe(20);
       const movements = (
-        await as('ql_cs2')
+        await as('ql1_cs2')
           .get(`/inventory/movements?productId=${beerId}`)
           .expect(200)
       ).body as Json[];
@@ -698,18 +703,120 @@ describe('Foundation (e2e)', () => {
       expect((await summary()).salesIncome).toBe(0);
     });
 
+    it('lets managers correct a paid bill: stock, fund and revenue follow', async () => {
+      const id = await openSession([{ productId: beerId, quantity: 2 }]);
+      const paid = (
+        await as('tn1_cs2')
+          .post(`/orders/${id}/checkout`, { paymentMethod: 'CASH' })
+          .expect(200)
+      ).body as Json;
+      expect(paid.taxPercent).toBe(10); // VAT 10% unless changed
+      expect((await stockOf(beerId)).stockQuantity).toBe(18);
+
+      const edit = (body: Json) =>
+        as('ql1_cs2').patch(`/orders/${id}/paid`, body);
+      const items = [{ productId: beerId, quantity: 5 }];
+      await as('tn1_cs2')
+        .patch(`/orders/${id}/paid`, { reason: 'x', items })
+        .expect(403);
+      await edit({ items }).expect(400);
+      await edit({
+        reason: 'x',
+        endTime: new Date(Date.now() + 3600000),
+      }).expect(400);
+
+      // More beer, a fixed discount, paid by transfer instead.
+      let order = (
+        await edit({
+          reason: 'Khách gọi thêm',
+          items,
+          discountAmount: 5000,
+          paymentMethod: 'TRANSFER',
+        }).expect(200)
+      ).body as Json;
+      expect(order).toMatchObject({
+        status: 'COMPLETED',
+        paymentMethod: 'TRANSFER',
+        editReason: 'Khách gọi thêm',
+        editedBy: { fullName: 'Quản lý CS2' },
+        fundTransaction: { method: 'TRANSFER', cancelledAt: null },
+      });
+      // The room fee charged at checkout is kept.
+      expect(Number(order.hourlyFee)).toBe(Number(paid.hourlyFee));
+      const beforeTax = 125000 - 5000 + Number(paid.hourlyFee);
+      expect(Number(order.taxAmount)).toBe(
+        Math.ceil((beforeTax * 0.1) / 1000) * 1000,
+      );
+      let finalAmount = Number(order.finalAmount);
+      expect(finalAmount).toBe(beforeTax + Number(order.taxAmount));
+      expect(Number((order.fundTransaction as Json).amount)).toBe(finalAmount);
+      expect(await revenue()).toBe(finalAmount);
+      expect((await summary()).salesIncome).toBe(finalAmount);
+      expect((await stockOf(beerId)).stockQuantity).toBe(15);
+
+      // 83 minutes = 1.38 h × 120,000; one beer: 4 go back to stock.
+      const endTime = new Date(order.endTime as string);
+      order = (
+        await edit({
+          reason: 'Sai giờ vào',
+          startTime: new Date(endTime.getTime() - 83 * 60000),
+          items: [{ productId: beerId, quantity: 1 }],
+        }).expect(200)
+      ).body as Json;
+      expect(Number(order.hourlyFee)).toBe(165600);
+      finalAmount = Number(order.finalAmount);
+      expect(finalAmount).toBe(
+        Number(order.totalProductPrice) -
+          Number(order.discountAmount) +
+          165600 +
+          Number(order.taxAmount),
+      );
+      expect(Number((order.fundTransaction as Json).amount)).toBe(finalAmount);
+      expect(await revenue()).toBe(finalAmount);
+      expect((await stockOf(beerId)).stockQuantity).toBe(19);
+      const movements = (
+        await as('ql1_cs2')
+          .get(`/inventory/movements?productId=${beerId}`)
+          .expect(200)
+      ).body as Json[];
+      expect(movements[0]).toMatchObject({
+        type: 'REVERSAL',
+        quantity: 4,
+        orderId: id,
+      });
+
+      // Voiding puts back what the bill holds after the corrections.
+      await as('ql1_cs2')
+        .post(`/orders/${id}/void`, { reason: 'Khách không ở' })
+        .expect(200);
+      await edit({ reason: 'x' }).expect(409);
+      expect((await stockOf(beerId)).stockQuantity).toBe(20);
+      expect(await revenue()).toBe(0);
+      expect((await summary()).salesIncome).toBe(0);
+    });
+
+    it('makes new rooms VIP by default', async () => {
+      const res = await as('ql1_cs2')
+        .post('/rooms', { name: 'P2VIP', pricePerHour: 300000 })
+        .expect(201);
+      expect(res.body).toMatchObject({ type: 'VIP' });
+      await as('ql1_cs2')
+        .delete(`/rooms/${(res.body as Json).id as number}`)
+        .expect(200);
+    });
+
     it('never lets an item edit and a checkout disagree', async () => {
       for (let round = 0; round < 3; round++) {
         const id = await openSession([{ productId: waterId, quantity: 1 }]);
         const [edit] = await Promise.all([
-          as('tn_cs2').patch(`/orders/${id}`, {
+          as('tn1_cs2').patch(`/orders/${id}`, {
             items: [{ productId: waterId, quantity: 5 }],
           }),
-          as('tn_cs2').post(`/orders/${id}/checkout`).expect(200),
+          as('tn1_cs2').post(`/orders/${id}/checkout`).expect(200),
         ]);
         expect([200, 409]).toContain(edit.status);
 
-        const order = (await as('ql_cs2').get(`/orders/${id}`).expect(200))
+        const order = (await as('ql1_cs2').get(`/orders/${id}`).expect(200))
           .body as Json;
         const items = order.items as Json[];
         const billed = items.reduce(
@@ -718,7 +825,7 @@ describe('Foundation (e2e)', () => {
         );
         expect(Number(order.totalProductPrice)).toBe(billed);
         const movements = (
-          await as('ql_cs2')
+          await as('ql1_cs2')
             .get(`/inventory/movements?productId=${waterId}`)
             .expect(200)
         ).body as Json[];
@@ -730,7 +837,7 @@ describe('Foundation (e2e)', () => {
     });
 
     it('cancels a stock document by reversing it', async () => {
-      const cancelled = await as('ql_cs2')
+      const cancelled = await as('ql1_cs2')
         .post(`/inventory/documents/${importId}/cancel`, {
           reason: 'Sai số lượng',
         })
@@ -742,7 +849,7 @@ describe('Foundation (e2e)', () => {
       expect(
         (cancelled.body as Json).fundTransaction as Json,
       ).not.toMatchObject({ cancelledAt: null });
-      await as('ql_cs2')
+      await as('ql1_cs2')
         .post(`/inventory/documents/${importId}/cancel`, { reason: 'x' })
         .expect(409);
 
@@ -754,10 +861,10 @@ describe('Foundation (e2e)', () => {
       // Goods already sold cannot be taken out of stock again.
       const water = await stockOf(waterId);
       const docs = (
-        await as('ql_cs2').get('/inventory/documents?type=IMPORT').expect(200)
+        await as('ql1_cs2').get('/inventory/documents?type=IMPORT').expect(200)
       ).body as Json[];
       const waterImport = docs.find((d) => d.id !== importId)!;
-      const res = await as('ql_cs2')
+      const res = await as('ql1_cs2')
         .post(`/inventory/documents/${waterImport.id as number}/cancel`, {
           reason: 'x',
         })
@@ -769,7 +876,7 @@ describe('Foundation (e2e)', () => {
     it('keeps every stock balance equal to its ledger', async () => {
       for (const productId of [beerId, waterId]) {
         const movements = (
-          await as('ql_cs2')
+          await as('ql1_cs2')
             .get(`/inventory/movements?productId=${productId}`)
             .expect(200)
         ).body as Json[];
@@ -783,7 +890,7 @@ describe('Foundation (e2e)', () => {
     });
 
     it('refuses to stop tracking a product that still has stock', async () => {
-      const res = await as('ql_cs2')
+      const res = await as('ql1_cs2')
         .patch(`/products/${waterId}`, { trackStock: false })
         .expect(409);
       expect((res.body as Json).message).toContain('còn tồn kho');
@@ -950,14 +1057,14 @@ describe('Foundation (e2e)', () => {
     });
 
     it('limits a branch manager to its branch and roles', async () => {
-      await as('ql_cs1')
+      await as('ql1_cs1')
         .post('/imports/rooms?branch=cs2', {
           dryRun: true,
           onDuplicate: 'SKIP',
           rows: [{ row: 2, name: 'P9', pricePerHour: 100000 }],
         })
         .expect(403);
-      await as('tn_cs1')
+      await as('tn1_cs1')
         .post('/imports/rooms', {
           dryRun: true,
           onDuplicate: 'SKIP',
@@ -965,7 +1072,7 @@ describe('Foundation (e2e)', () => {
         })
         .expect(403);
 
-      const res = await as('ql_cs1')
+      const res = await as('ql1_cs1')
         .post('/imports/users', {
           dryRun: false,
           onDuplicate: 'SKIP',
@@ -977,7 +1084,7 @@ describe('Foundation (e2e)', () => {
         .expect(400);
       expect(((res.body as Json).rows as Json[])[0]).toMatchObject({ row: 3 });
 
-      const ok = await as('ql_cs1')
+      const ok = await as('ql1_cs1')
         .post('/imports/users', {
           dryRun: false,
           onDuplicate: 'SKIP',
@@ -988,7 +1095,7 @@ describe('Foundation (e2e)', () => {
         action: 'CREATE',
         message: 'Tên đăng nhập: pham.van.nam',
       });
-      const staff = (await as('ql_cs1').get('/users/floor-staff').expect(200))
+      const staff = (await as('ql1_cs1').get('/users/floor-staff').expect(200))
         .body as Json[];
       expect(staff.map((u) => u.fullName)).toContain('Phạm Văn Nam');
     });
@@ -1002,6 +1109,97 @@ describe('Foundation (e2e)', () => {
         .post(cs3('/imports/categories'), { dryRun: true, rows })
         .expect(200);
       expect((res.body as Json).summary).toMatchObject({ create: 1000 });
+    });
+  });
+
+  describe('bill numbers', () => {
+    const roomIds: Record<string, number> = {};
+    // DDMM of today's business day, as the number starts.
+    const ddmm = () => {
+      const [, month, day] = businessDateOf(new Date()).split('-');
+      return `${day}${month}`;
+    };
+    const seqOf = (billNumber: string) => Number(billNumber.slice(8));
+    const open = async (room: string) =>
+      (
+        (
+          await as('tn1_cs1')
+            .post('/orders', { roomId: roomIds[room] })
+            .expect(201)
+        ).body as Json
+      ).id as number;
+    const checkout = async (id: number) =>
+      (await as('tn1_cs1').post(`/orders/${id}/checkout`).expect(200))
+        .body as Json;
+
+    beforeAll(async () => {
+      const rooms = (await as('tn1_cs1').get('/rooms').expect(200))
+        .body as Json[];
+      for (const r of rooms) roomIds[r.name as string] = r.id as number;
+    });
+
+    it('numbers every closed bill of the day, cancelled ones included', async () => {
+      const paid = await checkout(await open('P102'));
+      const first = paid.billNumber as string;
+      expect(first).toMatch(new RegExp(`^${ddmm()}1020\\d{3}$`));
+
+      const dropped = await open('P102');
+      const cancelled = (
+        await as('ql1_cs1').post(`/orders/${dropped}/cancel`).expect(200)
+      ).body as Json;
+      expect(cancelled.billNumber).toMatch(new RegExp(`^${ddmm()}1020`));
+      expect(seqOf(cancelled.billNumber as string)).toBe(seqOf(first) + 1);
+
+      // Voiding keeps the number; the next bill still counts up.
+      const voided = (
+        await as('ql1_cs1')
+          .post(`/orders/${paid.id as number}/void`, { reason: 'Nhầm' })
+          .expect(200)
+      ).body as Json;
+      expect(voided.billNumber).toBe(first);
+      const next = await checkout(await open('P103'));
+      expect(next.billNumber).toMatch(new RegExp(`^${ddmm()}1030`));
+      expect(seqOf(next.billNumber as string)).toBe(seqOf(first) + 2);
+
+      const receipt = (await as('ql1_cs1').get('/funds').expect(200))
+        .body as Json[];
+      expect(receipt.find((t) => t.orderId === next.id)).toMatchObject({
+        description: `Thu tiền hóa đơn ${next.billNumber as string} – phòng P103`,
+      });
+    });
+
+    it('never gives two concurrent checkouts the same number', async () => {
+      const ids = [await open('P102'), await open('P103')];
+      const bills = await Promise.all(ids.map((id) => checkout(id)));
+      const seqs = bills.map((b) => seqOf(b.billNumber as string));
+      expect(new Set(seqs).size).toBe(2);
+      expect(Math.abs(seqs[0] - seqs[1])).toBe(1);
+    });
+
+    it('finds bills by number or its beginning, over every day', async () => {
+      const bills = (await as('ql1_cs1').get('/orders').expect(200))
+        .body as Json[];
+      const numbered = bills.filter((b) => b.billNumber);
+      const target = numbered[0].billNumber as string;
+
+      const exact = (
+        await as('ql1_cs1')
+          .get(`/orders?billNumber=${target}&from=2000-01-01&to=2000-01-01`)
+          .expect(200)
+      ).body as Json[];
+      expect(exact.map((b) => b.billNumber)).toEqual([target]);
+
+      const sameDay = (
+        await as('ql1_cs1').get(`/orders?billNumber=${ddmm()}`).expect(200)
+      ).body as Json[];
+      expect(sameDay).toHaveLength(numbered.length);
+
+      const otherBranch = (
+        await as('ql1_cs2').get(`/orders?billNumber=${target}`).expect(200)
+      ).body as Json[];
+      expect(otherBranch).toEqual([]);
+
+      await as('ql1_cs1').get('/orders?billNumber=27-09').expect(400);
     });
   });
 });

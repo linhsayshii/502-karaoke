@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
-// Old overview screen; revenue now lives under Thống kê.
+// Old address; the revenue report now lives at /reports/revenue.
 export default async function OverviewPage({ params }: { params: Promise<{ branch: string }> }) {
   const { branch } = await params;
-  redirect(`/${branch}/sales/statistics`);
+  redirect(`/${branch}/reports/revenue`);
 }

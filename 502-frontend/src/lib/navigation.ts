@@ -37,10 +37,13 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Bán hàng",
     items: [
       { title: "Sơ đồ phòng", path: "/sales/rooms", icon: LayoutGrid },
-      { title: "Doanh thu", path: "/sales/statistics", icon: ChartColumnBig, permission: "sales.reports" },
       { title: "Hóa đơn", path: "/sales/statistics/bills", icon: ReceiptText, permission: "sales.reports" },
       { title: "Cài đặt bán hàng", path: "/sales/settings", icon: Settings2, permission: "sales.settings" },
     ],
+  },
+  {
+    label: "Báo cáo",
+    items: [{ title: "Doanh thu", path: "/reports/revenue", icon: ChartColumnBig, permission: "reports" }],
   },
   {
     label: "Kho",

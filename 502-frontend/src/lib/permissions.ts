@@ -18,6 +18,8 @@ export type Permission =
   | "sales.cancel"
   | "sales.editPaid" // correct a paid bill (stock and fund follow)
   | "sales.reports"
+  | "reports" // Báo cáo (managers)
+  | "reports.chain" // whole-chain reports and branch comparison
   | "sales.settings" // rooms, categories, products
   | "inventory"
   | "funds"
@@ -33,6 +35,8 @@ const MATRIX: Record<Permission, Role[]> = {
   "sales.cancel": MANAGERS,
   "sales.editPaid": MANAGERS,
   "sales.reports": MANAGERS,
+  reports: MANAGERS,
+  "reports.chain": ["CHAIN_MANAGER"],
   "sales.settings": MANAGERS,
   inventory: MANAGERS,
   funds: MANAGERS,
@@ -47,6 +51,8 @@ export function can(user: User | null, permission: Permission): boolean {
 
 // Page permissions by path after /[branch]; first match wins.
 const ROUTE_PERMISSIONS: [string, Permission][] = [
+  ["/reports/branches", "reports.chain"],
+  ["/reports", "reports"],
   ["/sales/statistics", "sales.reports"],
   ["/sales/overview", "sales.reports"],
   ["/sales/settings", "sales.settings"],

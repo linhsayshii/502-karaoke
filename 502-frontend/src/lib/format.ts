@@ -42,6 +42,13 @@ export function formatDuration(minutes: number) {
   return `${hours} giờ ${String(rest).padStart(2, "0")} phút`;
 }
 
+const hoursFormat = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 1 });
+
+// Room time in hours: 150 minutes → "2,5 giờ".
+export function formatHours(minutes: number) {
+  return `${hoursFormat.format(minutes / 60)} giờ`;
+}
+
 // Minutes started between two moments (as the bill counts them).
 export function minutesBetween(start: string | Date, end: Date = new Date()) {
   return Math.max(0, Math.ceil((end.getTime() - new Date(start).getTime()) / 60000));

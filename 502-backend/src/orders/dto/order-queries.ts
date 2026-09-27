@@ -44,18 +44,3 @@ export class ListOrdersQuery {
   @Matches(/^\d{1,20}$/, { message: 'Số hóa đơn chỉ gồm chữ số' })
   billNumber?: string;
 }
-
-export class StatisticsQuery {
-  @ApiProperty({ required: false, description: 'Mã cơ sở, vd cs1' })
-  @IsOptional()
-  @IsString()
-  branch?: string;
-
-  @ApiProperty({ description: 'Ngày kinh doanh đầu tiên, YYYY-MM-DD' })
-  @IsString()
-  from: string;
-
-  @ApiProperty({ description: 'Ngày kinh doanh cuối cùng, YYYY-MM-DD' })
-  @IsString()
-  to: string;
-}

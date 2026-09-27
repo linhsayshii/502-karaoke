@@ -17,11 +17,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth-user';
 import { BranchScopeService } from '../common/branch-scope.service';
-import {
-  businessDateOf,
-  businessDatesBetween,
-  businessDayRange,
-} from '../common/dates';
+import { businessDayRange } from '../common/dates';
 import { InventoryService } from '../inventory/inventory.service';
 import {
   cancelLinkedEntry,
@@ -32,7 +28,7 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { EditPaidOrderDto } from './dto/edit-paid-order.dto';
 import { OrderItemDto } from './dto/order-item.dto';
-import { ListOrdersQuery, StatisticsQuery } from './dto/order-queries';
+import { ListOrdersQuery } from './dto/order-queries';
 import { Bill, billedHoursOf, computeBill } from './billing';
 import { billNumberPrefixRange, nextBillNumber } from './bill-number';
 
@@ -722,63 +718,5 @@ export class OrdersService {
         allowNegative: true,
       });
     }
-  }
-
-  // Revenue of paid bills per business day of payment, with its make-up.
-  // Uses the same days as the fund, so the sales receipts there add up to
-  // the same totals.
-  async getStatistics(user: AuthUser, query: StatisticsQuery) {
-    const branchId = await this.branchScope.resolveBranchId(user, query.branch);
-    const dates = businessDatesBetween(query.from, query.to);
-    const orders = await this.prisma.order.findMany({
-      where: {
-        branchId,
-        status: OrderStatus.COMPLETED,
-        endTime: businessDayRange(query.from, query.to),
-      },
-      select: {
-        endTime: true,
-        hourlyFee: true,
-        totalProductPrice: true,
-        discountAmount: true,
-        hourlyDiscountAmount: true,
-        serviceFeeAmount: true,
-        taxAmount: true,
-        finalAmount: true,
-        paymentMethod: true,
-      },
-    });
-
-    const empty = () => ({
-      orderCount: 0,
-      totalRevenue: 0,
-      hourlyFee: 0,
-      productRevenue: 0,
-      discount: 0,
-      serviceFee: 0,
-      tax: 0,
-      cash: 0,
-      transfer: 0,
-    });
-    const days = new Map(dates.map((date) => [date, empty()]));
-    for (const order of orders) {
-      const day = days.get(businessDateOf(order.endTime!));
-      if (!day) continue;
-      const amount = Number(order.finalAmount);
-      day.orderCount += 1;
-      day.totalRevenue += amount;
-      day.hourlyFee += Number(order.hourlyFee);
-      day.productRevenue += Number(order.totalProductPrice);
-      day.discount +=
-        Number(order.discountAmount) + Number(order.hourlyDiscountAmount);
-      day.serviceFee += Number(order.serviceFeeAmount);
-      day.tax += Number(order.taxAmount);
-      if (order.paymentMethod === PaymentMethod.TRANSFER) {
-        day.transfer += amount;
-      } else {
-        day.cash += amount;
-      }
-    }
-    return dates.map((date) => ({ date, ...days.get(date)! }));
   }
 }

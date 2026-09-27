@@ -1,4 +1,4 @@
-import type { FundType, GroupBy, OrderStatus, PaymentMethod, StockDocType, StockMovementType } from "@/lib/types";
+import type { FundType, GroupBy, OrderStatus, PaymentMethod, StaffRole, StockDocType, StockMovementType } from "@/lib/types";
 
 // Vietnamese labels of the business enums.
 
@@ -41,3 +41,21 @@ export const GROUP_BY_LABELS: Record<GroupBy, string> = {
   quarter: "Quý",
   year: "Năm",
 };
+
+export const STAFF_ROLE_LABELS: Record<StaffRole, string> = {
+  cskh: "CSKH",
+  server: "Phục vụ",
+  cashier: "Thu ngân",
+};
+
+const ROOM_TYPE_LABELS: Record<string, string> = { VIP: "VIP", NORMAL: "Thường" };
+
+export const roomTypeLabel = (type: string | null) => (type ? (ROOM_TYPE_LABELS[type] ?? type) : "—");
+
+// ISO weekdays 1 → 7 (Monday first).
+export const WEEKDAY_LABELS = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"];
+
+// Report rows without a subject.
+export const UNASSIGNED_STAFF = "Chưa gán";
+export const NO_ROOM = "Không phòng";
+export const NO_CATEGORY = "Không danh mục";

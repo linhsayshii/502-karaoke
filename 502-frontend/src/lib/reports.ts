@@ -1,12 +1,24 @@
-import type { GroupBy } from "@/lib/types";
+import { formatDate } from "@/lib/format";
+import type { GroupBy, HourMetric, ProductGroup, ReportBucket, RoomGroup, StaffRole } from "@/lib/types";
 
 export const GROUP_BYS: GroupBy[] = ["day", "week", "month", "quarter", "year"];
+export const STAFF_ROLES: StaffRole[] = ["cskh", "server", "cashier"];
+export const ROOM_GROUPS: RoomGroup[] = ["room", "type"];
+export const PRODUCT_GROUPS: ProductGroup[] = ["product", "category"];
+export const HOUR_METRICS: HourMetric[] = ["sessions", "revenue"];
 
 // Change against the previous period (0.12 = +12%); null when the previous
 // value is 0 (nothing to compare with).
 export function delta(current: number, previous: number | undefined): number | null {
   if (previous === undefined || previous === 0) return null;
   return (current - previous) / Math.abs(previous);
+}
+
+// Short label of a period on a chart axis.
+export function tickLabel(bucket: ReportBucket, groupBy: GroupBy) {
+  if (groupBy === "day") return formatDate(bucket.key).slice(0, 5);
+  if (groupBy === "week") return bucket.label.split(" (")[0];
+  return bucket.label;
 }
 
 // doanh-thu_cs1_2026-09-01_2026-09-27.xlsx

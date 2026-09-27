@@ -3,6 +3,7 @@
 import { useCallback, useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
+import { useBranchCode } from "@/lib/branch";
 import { businessDate, firstDayOfMonth } from "@/lib/format";
 import { can } from "@/lib/permissions";
 import { GROUP_BYS } from "@/lib/reports";
@@ -44,24 +45,69 @@ export function useReportFilters() {
   const setFilters = useCallback(
     (patch: Partial<ReportFilters>) => {
       const next = { ...filters, ...patch };
-      const params = new URLSearchParams({ from: next.from, to: next.to, groupBy: next.groupBy });
+      // Starts from the current URL so a report's own options (?role, ?by,
+      // ?metric) are kept.
+      const params = new URLSearchParams(searchParams);
+      params.set("from", next.from);
+      params.set("to", next.to);
+      params.set("groupBy", next.groupBy);
       if (next.compare) params.set("compare", "1");
+      else params.delete("compare");
       if (next.chain) params.set("scope", "chain");
+      else params.delete("scope");
       router.replace(`${pathname}?${params}`, { scroll: false });
     },
-    [filters, pathname, router],
+    [filters, pathname, router, searchParams],
   );
 
   return { filters, setFilters };
 }
 
-// Query of a report request: no branch means the whole chain.
+// An option of one report, kept in the URL next to the filters (?role=cskh);
+// `fallback` when it is missing or unknown.
+export function useReportOption<T extends string>(name: string, options: readonly T[], fallback: T) {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const current = searchParams.get(name);
+  const value = options.find((option) => option === current) ?? fallback;
+
+  const setValue = useCallback(
+    (next: T) => {
+      const params = new URLSearchParams(searchParams);
+      params.set(name, next);
+      router.replace(`${pathname}?${params}`, { scroll: false });
+    },
+    [name, pathname, router, searchParams],
+  );
+
+  return [value, setValue] as const;
+}
+
+// Query of a report over time: no branch means the whole chain.
 export function reportParams(branch: string, filters: ReportFilters): Record<string, string> {
   return {
-    ...(filters.chain ? {} : { branch }),
-    from: filters.from,
-    to: filters.to,
+    ...rangeParams(branch, filters),
     groupBy: filters.groupBy,
     ...(filters.compare ? { compare: "1" } : {}),
+  };
+}
+
+// Query of a report that is not a time series (no periods, no comparison).
+export function rangeParams(branch: string, filters: ReportFilters): Record<string, string> {
+  return { ...(filters.chain ? {} : { branch }), from: filters.from, to: filters.to };
+}
+
+// Scope of the data shown. It is read from the response, since the filters
+// may already be ahead of it while a request is in flight or after it failed.
+export function useReportScope(data: { branchId: number | null } | null) {
+  const branch = useBranchCode();
+  const { branches } = useAuth();
+  const chain = data?.branchId === null;
+  return {
+    chain,
+    name: !data ? "" : chain ? "Toàn chuỗi" : (branches.find((b) => b.code === branch)?.name ?? branch.toUpperCase()),
+    // Scope part of an export's file name.
+    fileScope: chain ? "toan-chuoi" : branch,
   };
 }

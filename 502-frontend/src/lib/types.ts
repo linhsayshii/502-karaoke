@@ -195,6 +195,107 @@ export interface RevenueReport {
   voided: { count: number; amount: number };
 }
 
+export type StaffRole = "cskh" | "server" | "cashier";
+export type RoomGroup = "room" | "type";
+export type ProductGroup = "product" | "category";
+export type HourMetric = "sessions" | "revenue";
+
+// GET /reports/staff; id null: "Chưa gán".
+export interface StaffReportRow extends RevenueMetrics {
+  id: number | null;
+  name: string | null;
+  username: string | null;
+  branchCode: string | null;
+}
+
+export interface StaffReport {
+  branchId: number | null;
+  range: { from: string; to: string };
+  role: StaffRole;
+  totals: RevenueMetrics;
+  rows: StaffReportRow[];
+}
+
+// GET /reports/rooms; id: room id, or the room type (by=type); null: "Không phòng".
+export interface RoomReportRow extends RevenueMetrics {
+  id: number | string | null;
+  name: string | null;
+  type: string | null;
+  branchCode: string | null;
+  rooms: number;
+  occupancy: number | null;
+}
+
+export interface RoomReport {
+  branchId: number | null;
+  range: { from: string; to: string };
+  by: RoomGroup;
+  days: number;
+  totals: RevenueMetrics;
+  occupancy: number | null;
+  rows: RoomReportRow[];
+}
+
+// GET /reports/products: gross = Σ quantity × price, discount = its share of
+// the bills' product discount, net = gross − discount (before VAT).
+export interface ProductSales {
+  quantity: number;
+  gross: number;
+  discount: number;
+  net: number;
+}
+
+export interface ProductReportRow extends ProductSales {
+  id: number | null; // product id, or category id (by=category; null: "Không danh mục")
+  name: string | null;
+  unit: string | null;
+  categoryName: string | null;
+  branchCode: string | null;
+  share: number | null;
+}
+
+export interface ProductReport {
+  branchId: number | null;
+  range: { from: string; to: string };
+  by: ProductGroup;
+  totals: ProductSales;
+  rows: ProductReportRow[];
+}
+
+// GET /reports/hours: weekday 1 = Monday … 7 = Sunday (of the business day).
+export interface HourCell {
+  weekday: number;
+  hour: number;
+  sessions: number;
+  revenue: number;
+}
+
+export interface HoursReport {
+  branchId: number | null;
+  range: { from: string; to: string };
+  totals: { sessions: number; revenue: number };
+  cells: HourCell[];
+}
+
+// GET /reports/branches (chain manager only).
+export interface BranchReportRow extends RevenueMetrics {
+  branchId: number;
+  code: string;
+  name: string;
+  share: number | null;
+  previous: RevenueMetrics | null;
+  series: number[]; // revenue per bucket
+}
+
+export interface BranchesReport {
+  range: { from: string; to: string };
+  groupBy: GroupBy;
+  totals: RevenueMetrics;
+  previous: { from: string; to: string; totals: RevenueMetrics } | null;
+  buckets: ReportBucket[];
+  branches: BranchReportRow[];
+}
+
 // GET /users/floor-staff: employees that can be assigned to a room.
 export interface FloorStaff extends StaffRef {
   position: StaffPosition;

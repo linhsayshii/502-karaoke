@@ -22,10 +22,16 @@ export function ReportToolbar({
   filters,
   onChange,
   onExport,
+  periods = true,
+  scope = true,
 }: {
   filters: ReportFilters;
   onChange: (patch: Partial<ReportFilters>) => void;
   onExport?: () => Promise<void>;
+  // false for the reports that are not a time series: no grouping, no comparison.
+  periods?: boolean;
+  // false where the scope is fixed (So sánh cơ sở is always the whole chain).
+  scope?: boolean;
 }) {
   const { user } = useAuth();
   const notify = useNotify();
@@ -46,23 +52,27 @@ export function ReportToolbar({
   return (
     <div className="flex flex-wrap items-center gap-2">
       <DateRangePicker value={{ from: filters.from, to: filters.to }} onChange={(range) => onChange(range)} />
-      <Select value={filters.groupBy} onValueChange={(value) => onChange({ groupBy: value as GroupBy })}>
-        <SelectTrigger className="w-28" aria-label="Gộp theo">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {GROUP_BYS.map((groupBy) => (
-            <SelectItem key={groupBy} value={groupBy}>
-              {GROUP_BY_LABELS[groupBy]}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <Label className="flex items-center gap-2 px-1 text-sm font-normal">
-        <Switch checked={filters.compare} onCheckedChange={(compare) => onChange({ compare })} />
-        So kỳ trước
-      </Label>
-      {can(user, "reports.chain") && (
+      {periods && (
+        <>
+          <Select value={filters.groupBy} onValueChange={(value) => onChange({ groupBy: value as GroupBy })}>
+            <SelectTrigger className="w-28" aria-label="Gộp theo">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {GROUP_BYS.map((groupBy) => (
+                <SelectItem key={groupBy} value={groupBy}>
+                  {GROUP_BY_LABELS[groupBy]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Label className="flex items-center gap-2 px-1 text-sm font-normal">
+            <Switch checked={filters.compare} onCheckedChange={(compare) => onChange({ compare })} />
+            So kỳ trước
+          </Label>
+        </>
+      )}
+      {scope && can(user, "reports.chain") && (
         <ToggleGroup
           type="single"
           variant="outline"

@@ -2,6 +2,7 @@ import {
   Boxes,
   Building2,
   ChartColumnBig,
+  ChartLine,
   Clock,
   DoorOpen,
   FileSpreadsheet,
@@ -53,6 +54,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: "Phòng", path: "/reports/rooms", icon: DoorOpen, permission: "reports" },
       { title: "Hàng hóa", path: "/reports/products", icon: Package, permission: "reports" },
       { title: "Khung giờ", path: "/reports/hours", icon: Clock, permission: "reports" },
+      { title: "So sánh cơ sở", path: "/reports/branches", icon: ChartLine, permission: "reports.chain" },
     ],
   },
   {

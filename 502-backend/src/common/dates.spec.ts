@@ -3,6 +3,7 @@ import {
   businessDatesBetween,
   businessDayRange,
   getBusinessDayRange,
+  MAX_REPORT_RANGE_DAYS,
 } from './dates';
 
 describe('getBusinessDayRange', () => {
@@ -68,5 +69,20 @@ describe('businessDatesBetween', () => {
 
   it('limits the length of a report', () => {
     expect(() => businessDatesBetween('2020-01-01', '2026-01-01')).toThrow();
+  });
+});
+
+describe('businessDatesBetween with a longer limit', () => {
+  it('accepts up to maxDays days', () => {
+    // 2024 is a leap year: 366 + 365 days.
+    expect(
+      businessDatesBetween('2024-01-01', '2025-12-31', MAX_REPORT_RANGE_DAYS),
+    ).toHaveLength(731);
+    expect(() => businessDatesBetween('2024-01-01', '2025-12-31')).toThrow(
+      'Chỉ xem được tối đa 366 ngày một lần',
+    );
+    expect(() =>
+      businessDatesBetween('2020-01-01', '2025-12-31', MAX_REPORT_RANGE_DAYS),
+    ).toThrow('Chỉ xem được tối đa 1830 ngày một lần');
   });
 });

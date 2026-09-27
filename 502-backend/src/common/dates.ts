@@ -8,8 +8,11 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // bills, the fund and stock documents are all reported by these days.
 export const BUSINESS_DAY_START_HOUR = 6;
 
-// Longest period a report may span.
+// Longest period a list or report may span.
 export const MAX_REPORT_DAYS = 366;
+
+// Longest period of the reports module (grouped by week … year).
+export const MAX_REPORT_RANGE_DAYS = 1830;
 
 function parseLocalDate(value: string): Date {
   if (!DATE_RE.test(value)) {
@@ -64,7 +67,11 @@ export function businessDateOf(moment: Date): string {
 }
 
 // Every business date from..to, both included.
-export function businessDatesBetween(from: string, to: string): string[] {
+export function businessDatesBetween(
+  from: string,
+  to: string,
+  maxDays = MAX_REPORT_DAYS,
+): string[] {
   const current = parseLocalDate(from);
   const end = parseLocalDate(to);
   if (current > end) {
@@ -73,9 +80,9 @@ export function businessDatesBetween(from: string, to: string): string[] {
   const dates: string[] = [];
   while (current <= end) {
     dates.push(toDateString(current));
-    if (dates.length > MAX_REPORT_DAYS) {
+    if (dates.length > maxDays) {
       throw new BadRequestException(
-        `Chỉ xem được tối đa ${MAX_REPORT_DAYS} ngày một lần`,
+        `Chỉ xem được tối đa ${maxDays} ngày một lần`,
       );
     }
     current.setDate(current.getDate() + 1);

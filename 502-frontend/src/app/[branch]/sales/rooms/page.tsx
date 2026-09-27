@@ -3,39 +3,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  ClockIcon,
-  DoorOpenIcon,
-  EyeIcon,
-  PlayIcon,
-  ReceiptTextIcon,
-  RefreshCwIcon,
-  UserRoundIcon,
-  WrenchIcon,
-} from "lucide-react";
+import { DoorOpenIcon, MicVocalIcon, RefreshCwIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useAuth } from "@/components/auth-provider";
 import { EmptyState } from "@/components/data-states";
 import { PageHeader } from "@/components/layout/page-header";
-import { CheckoutDialog } from "@/components/sales/checkout-dialog";
 import { OpenRoomDialog } from "@/components/sales/open-room-dialog";
 import { useNotify } from "@/hooks/use-notify";
 import { useNow } from "@/hooks/use-now";
 import api from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
-import { formatDuration, formatMoney, formatTime, minutesBetween } from "@/lib/format";
+import { formatMoney, formatTime, minutesBetween } from "@/lib/format";
 import { can } from "@/lib/permissions";
 import type { FloorStaff, Room, RoomStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -43,15 +24,54 @@ import { cn } from "@/lib/utils";
 const ALL = "ALL";
 type Filter = RoomStatus | typeof ALL;
 
-// Columns only when each card stays wide enough (~19rem) for its two buttons.
-const ROOM_GRID =
-  "grid gap-4 @2xl/main:grid-cols-2 @[62rem]/main:grid-cols-3 @[82rem]/main:grid-cols-4 @[102rem]/main:grid-cols-5";
+// Square tiles of at least 6rem: three per row on a 360px phone, more as the page widens.
+const ROOM_GRID = "grid grid-cols-[repeat(auto-fill,minmax(6rem,1fr))] gap-3";
 
-const STATUS: Record<RoomStatus, { label: string; badge: "success" | "destructive" | "secondary" }> = {
-  AVAILABLE: { label: "Trống", badge: "success" },
-  ACTIVE: { label: "Đang hát", badge: "destructive" },
-  MAINTENANCE: { label: "Bảo trì", badge: "secondary" },
+const STATUS: Record<RoomStatus, { label: string; dot: string; tile: string; mic: string }> = {
+  AVAILABLE: {
+    label: "Trống",
+    dot: "bg-success",
+    tile: "border-success/40 hover:bg-success/5",
+    mic: "text-success",
+  },
+  ACTIVE: {
+    label: "Đang hát",
+    dot: "bg-destructive",
+    tile: "border-destructive/50 bg-destructive/5 hover:bg-destructive/10",
+    mic: "text-destructive",
+  },
+  MAINTENANCE: {
+    label: "Bảo trì",
+    dot: "bg-muted-foreground/40",
+    tile: "border-dashed opacity-60",
+    mic: "text-muted-foreground",
+  },
 };
+
+function StatusDot({ status }: { status: RoomStatus }) {
+  return (
+    <span className="relative flex size-2.5">
+      {status === "ACTIVE" && (
+        <span className="absolute inline-flex size-full rounded-full bg-destructive opacity-60 motion-safe:animate-ping" />
+      )}
+      <span className={cn("relative inline-flex size-2.5 rounded-full", STATUS[status].dot)} />
+    </span>
+  );
+}
+
+// Hover text with what the tile leaves out: type, price, start time, staff.
+function roomSummary(room: Room) {
+  const parts = [
+    room.name,
+    room.type === "VIP" ? "VIP" : "Thường",
+    `${formatMoney(room.pricePerHour)}/giờ`,
+    STATUS[room.status].label,
+  ];
+  if (room.status === "ACTIVE" && room.startTime) parts.push(`từ ${formatTime(room.startTime)}`);
+  const staff = [room.activeOrder?.server?.fullName, room.activeOrder?.cskh?.fullName].filter(Boolean);
+  if (staff.length > 0) parts.push(`Phục vụ: ${staff.join(", ")}`);
+  return parts.join(" · ");
+}
 
 // Rooms grouped by floor = first digit of the room name ("P203" -> 2).
 function groupByFloor(rooms: Room[]) {
@@ -77,7 +97,6 @@ export default function RoomsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<Filter>(ALL);
   const [openingRoom, setOpeningRoom] = useState<Room | null>(null);
-  const [checkoutRoom, setCheckoutRoom] = useState<Room | null>(null);
 
   const fetchData = useCallback(async () => {
     setRefreshing(true);
@@ -145,6 +164,7 @@ export default function RoomsPage() {
           <ToggleGroupItem value={ALL}>Tất cả · {counts.ALL}</ToggleGroupItem>
           {(Object.keys(STATUS) as RoomStatus[]).map((status) => (
             <ToggleGroupItem key={status} value={status}>
+              <span className={cn("size-2 rounded-full", STATUS[status].dot)} />
               {STATUS[status].label} · {counts[status]}
             </ToggleGroupItem>
           ))}
@@ -153,8 +173,8 @@ export default function RoomsPage() {
 
       {loading ? (
         <div className={ROOM_GRID}>
-          {Array.from({ length: 6 }, (_, i) => (
-            <Skeleton key={i} className="h-48 rounded-xl" />
+          {Array.from({ length: 12 }, (_, i) => (
+            <Skeleton key={i} className="aspect-square rounded-xl" />
           ))}
         </div>
       ) : rooms.length === 0 ? (
@@ -184,83 +204,46 @@ export default function RoomsPage() {
               {floorRooms.map((room) => {
                 const status = STATUS[room.status];
                 const active = room.status === "ACTIVE";
+                // Active: ordering and checkout are on the room page; available: open it here.
+                const onClick = active
+                  ? () => router.push(detailPath(room))
+                  : canOperate && room.status === "AVAILABLE"
+                    ? () => setOpeningRoom(room)
+                    : undefined;
                 return (
-                  <Card
+                  <button
                     key={room.id}
+                    type="button"
                     data-status={room.status}
+                    disabled={!onClick}
+                    onClick={onClick}
+                    title={roomSummary(room)}
+                    aria-label={roomSummary(room)}
                     className={cn(
-                      "gap-4 border-t-4 transition-shadow hover:shadow-md",
-                      room.status === "AVAILABLE" && "border-t-success",
-                      active && "border-t-destructive",
-                      room.status === "MAINTENANCE" && "border-t-muted-foreground/30 opacity-75",
+                      "relative flex aspect-square flex-col items-center justify-center gap-1 rounded-xl border bg-card p-2 text-card-foreground shadow-xs transition-[color,background-color,box-shadow]",
+                      "outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 enabled:hover:shadow-md disabled:cursor-default",
+                      status.tile,
                     )}
                   >
-                    <CardHeader>
-                      <CardTitle className="text-xl">{room.name}</CardTitle>
-                      <CardDescription>
-                        {room.type === "VIP" ? "VIP" : "Thường"} · {formatMoney(room.pricePerHour)}/giờ
-                      </CardDescription>
-                      <CardAction>
-                        <Badge variant={status.badge}>{status.label}</Badge>
-                      </CardAction>
-                    </CardHeader>
-                    <CardContent className="flex-1 text-sm">
-                      {active && room.startTime ? (
-                        <div className="flex flex-col gap-1.5">
-                          <div className="flex items-center gap-2">
-                            <ClockIcon className="size-4 text-muted-foreground" />
-                            <span className="font-medium tabular-nums">
-                              {formatDuration(minutesBetween(room.startTime, now))}
-                            </span>
-                            <span className="text-muted-foreground">từ {formatTime(room.startTime)}</span>
-                          </div>
-                          {(room.activeOrder?.server || room.activeOrder?.cskh) && (
-                            <div className="flex items-center gap-2 text-muted-foreground">
-                              <UserRoundIcon className="size-4" />
-                              <span className="truncate">
-                                {[room.activeOrder?.server?.fullName, room.activeOrder?.cskh?.fullName]
-                                  .filter(Boolean)
-                                  .join(" · ")}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      ) : room.status === "MAINTENANCE" ? (
-                        <p className="flex items-center gap-2 text-muted-foreground">
-                          <WrenchIcon className="size-4" /> Đang bảo trì
-                        </p>
-                      ) : (
-                        <p className="text-muted-foreground">Sẵn sàng đón khách</p>
-                      )}
-                    </CardContent>
-                    {(active || (canOperate && room.status === "AVAILABLE")) && (
-                      <CardFooter className="grid grid-cols-2 gap-2">
-                        {active ? (
-                          <>
-                            <Button
-                              variant="outline"
-                              className={cn("min-w-0", !canOperate && "col-span-2")}
-                              onClick={() => router.push(detailPath(room))}
-                            >
-                              <EyeIcon data-icon="inline-start" />
-                              {canOperate ? "Gọi món" : "Chi tiết"}
-                            </Button>
-                            {canOperate && (
-                              <Button className="min-w-0" onClick={() => setCheckoutRoom(room)}>
-                                <ReceiptTextIcon data-icon="inline-start" />
-                                Thanh toán
-                              </Button>
-                            )}
-                          </>
-                        ) : (
-                          <Button variant="secondary" className="col-span-2" onClick={() => setOpeningRoom(room)}>
-                            <PlayIcon data-icon="inline-start" />
-                            Mở phòng
-                          </Button>
-                        )}
-                      </CardFooter>
+                    <span className="absolute top-2 right-2">
+                      <StatusDot status={room.status} />
+                    </span>
+                    {room.type === "VIP" && (
+                      <span className="absolute top-1.5 left-2 text-[10px] font-semibold tracking-wide text-warning">
+                        VIP
+                      </span>
                     )}
-                  </Card>
+                    <MicVocalIcon className={cn("size-8 shrink-0", status.mic)} strokeWidth={1.75} />
+                    <span className="max-w-full truncate text-base leading-tight font-semibold">{room.name}</span>
+                    <span
+                      className={cn(
+                        "text-xs tabular-nums",
+                        active ? "font-medium text-destructive" : "text-muted-foreground",
+                      )}
+                    >
+                      {active && room.startTime ? `${minutesBetween(room.startTime, now)} phút` : status.label}
+                    </span>
+                  </button>
                 );
               })}
             </div>
@@ -281,14 +264,6 @@ export default function RoomsPage() {
           if (openingRoom) router.push(detailPath(openingRoom));
           setOpeningRoom(null);
         }}
-      />
-
-      <CheckoutDialog
-        orderId={checkoutRoom?.activeOrderId ?? null}
-        roomName={checkoutRoom?.name}
-        open={!!checkoutRoom}
-        onOpenChange={(open) => !open && setCheckoutRoom(null)}
-        onCheckedOut={fetchData}
       />
     </>
   );

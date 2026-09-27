@@ -9,9 +9,7 @@ export interface BillInput {
   discountAmount: number;
   hourlyDiscountPercent: number; // of the room fee
   hourlyDiscountAmount: number;
-  serviceFeePercent: number; // of products + room fee after discounts
-  serviceFeeAmount: number;
-  taxPercent: number; // of the subtotal
+  taxPercent: number; // of the subtotal (room fee + products after discounts)
   // A room fee already settled (editing a paid bill without touching its
   // times keeps what was charged); otherwise computed from the times.
   hourlyFee?: number;
@@ -25,16 +23,15 @@ export interface Bill {
   // The amounts actually applied (derived from the percent when one is set).
   discountAmount: number;
   hourlyDiscountAmount: number;
-  serviceFeeAmount: number;
   totalBeforeTax: number;
   taxAmount: number;
   finalAmount: number;
 }
 
-// Rounds up to 1,000 VND. Sub-đồng float noise is dropped first so that
-// e.g. 187,000 × 8% = 14,960.000000000002 does not become an extra 1,000.
-export const roundUpToThousand = (value: number) =>
-  Math.ceil(Math.round(value) / 1000) * 1000;
+// Rounds up to the đồng. Float noise is dropped first so that e.g.
+// 187,000 × 8% = 14,960.000000000002 does not become 14,961.
+export const roundUpToDong = (value: number) =>
+  Math.ceil(Math.round(value * 1000) / 1000);
 
 // Started minutes as hours rounded to the hundredth (83 min = 1.38 h).
 export const billedHoursOf = (minutes: number) =>
@@ -49,11 +46,12 @@ const clamp = (value: number, max: number) =>
   Math.min(Math.max(value, 0), Math.max(max, 0));
 
 const byPercentOrAmount = (base: number, percent: number, amount: number) =>
-  percent > 0 ? roundUpToThousand((base * percent) / 100) : amount;
+  percent > 0 ? roundUpToDong((base * percent) / 100) : amount;
 
 // The single billing formula (the frontend mirrors it in lib/billing.ts):
 // room fee = started minutes / 60 rounded to 0.01 hour, × price per hour;
-// discounts never exceed what they discount; tax is rounded up to 1,000.
+// discounts never exceed what they discount; tax = taxPercent of room fee +
+// products after discounts. Percent amounts are rounded up to the đồng.
 export function computeBill(input: BillInput): Bill {
   const durationMs = input.endTime.getTime() - input.startTime.getTime();
   const durationMinutes = Math.max(0, Math.ceil(durationMs / (1000 * 60)));
@@ -81,21 +79,9 @@ export function computeBill(input: BillInput): Bill {
     ),
     hourlyFee,
   );
-  const serviceBase =
+  const totalBeforeTax =
     totalProductPrice - discountAmount + hourlyFee - hourlyDiscountAmount;
-  const serviceFeeAmount = Math.max(
-    0,
-    byPercentOrAmount(
-      serviceBase,
-      input.serviceFeePercent,
-      input.serviceFeeAmount,
-    ),
-  );
-
-  const totalBeforeTax = serviceBase + serviceFeeAmount;
-  const taxAmount = roundUpToThousand(
-    (totalBeforeTax * input.taxPercent) / 100,
-  );
+  const taxAmount = roundUpToDong((totalBeforeTax * input.taxPercent) / 100);
 
   return {
     durationMinutes,
@@ -104,7 +90,6 @@ export function computeBill(input: BillInput): Bill {
     totalProductPrice,
     discountAmount,
     hourlyDiscountAmount,
-    serviceFeeAmount,
     totalBeforeTax,
     taxAmount,
     finalAmount: totalBeforeTax + taxAmount,

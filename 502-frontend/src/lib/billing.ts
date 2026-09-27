@@ -2,8 +2,8 @@
 // the live total on screen. The server recomputes on preview/checkout, so
 // keep the two in sync when the rules change.
 
-// Rounds up to 1,000 VND; sub-đồng float noise is dropped first.
-export const roundUpToThousand = (value: number) => Math.ceil(Math.round(value) / 1000) * 1000;
+// Rounds up to the đồng; float noise is dropped first.
+export const roundUpToDong = (value: number) => Math.ceil(Math.round(value * 1000) / 1000);
 
 export interface BillInput {
   startTime: Date;
@@ -15,9 +15,7 @@ export interface BillInput {
   discountAmount: number;
   hourlyDiscountPercent: number; // of the room fee
   hourlyDiscountAmount: number;
-  serviceFeePercent: number; // of products + room fee after discounts
-  serviceFeeAmount: number;
-  taxPercent: number;
+  taxPercent: number; // of room fee + products after discounts
   // A room fee already settled (a paid bill edited without new times).
   hourlyFee?: number;
 }
@@ -33,7 +31,7 @@ export const roomFeeOf = (minutes: number, pricePerHour: number) =>
 const clamp = (value: number, max: number) => Math.min(Math.max(value, 0), Math.max(max, 0));
 
 const byPercentOrAmount = (base: number, percent: number, amount: number) =>
-  percent > 0 ? roundUpToThousand((base * percent) / 100) : amount;
+  percent > 0 ? roundUpToDong((base * percent) / 100) : amount;
 
 export function computeBill(input: BillInput) {
   const durationMs = input.endTime.getTime() - input.startTime.getTime();
@@ -49,13 +47,8 @@ export function computeBill(input: BillInput) {
     byPercentOrAmount(hourlyFee, input.hourlyDiscountPercent, input.hourlyDiscountAmount),
     hourlyFee,
   );
-  const serviceBase = totalProductPrice - discountAmount + hourlyFee - hourlyDiscountAmount;
-  const serviceFeeAmount = Math.max(
-    0,
-    byPercentOrAmount(serviceBase, input.serviceFeePercent, input.serviceFeeAmount),
-  );
-  const totalBeforeTax = serviceBase + serviceFeeAmount;
-  const taxAmount = roundUpToThousand((totalBeforeTax * input.taxPercent) / 100);
+  const totalBeforeTax = totalProductPrice - discountAmount + hourlyFee - hourlyDiscountAmount;
+  const taxAmount = roundUpToDong((totalBeforeTax * input.taxPercent) / 100);
 
   return {
     durationMinutes,
@@ -64,7 +57,6 @@ export function computeBill(input: BillInput) {
     totalProductPrice,
     discountAmount,
     hourlyDiscountAmount,
-    serviceFeeAmount,
     totalBeforeTax,
     taxAmount,
     finalAmount: totalBeforeTax + taxAmount,

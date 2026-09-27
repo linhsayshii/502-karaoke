@@ -110,10 +110,40 @@ export function bucketsBetween(
   return buckets;
 }
 
-// The period of the same number of days right before from..to.
-export function previousRange(from: string, to: string) {
-  const days = dayCount(from, to);
-  return { from: addDays(from, -days), to: addDays(from, -1) };
+// The same month and day `years` earlier; 29/02 becomes 28/02.
+function yearsBefore(date: string, years: number): string {
+  const year = Number(date.slice(0, 4)) - years;
+  const month = Number(date.slice(5, 7));
+  const day = Number(date.slice(8, 10));
+  const lastDay = Number(ymd(year, month + 1, 0).slice(8, 10));
+  return ymd(year, month, Math.min(day, lastDay));
+}
+
+// The period that from..to is compared with ("so với kỳ trước"):
+// - day: the same number of days right before;
+// - week / month / quarter: as many whole periods right before, e.g.
+//   01/09–27/09 by month → 01/08–31/08, Q3 to date → 01/04–30/06;
+// - year: the same dates a year earlier (as many years as the range spans),
+//   e.g. 01/01–27/09/2026 → 01/01–27/09/2025.
+export function previousRange(
+  from: string,
+  to: string,
+  groupBy: GroupBy = 'day',
+) {
+  if (groupBy === 'day') {
+    const days = dayCount(from, to);
+    return { from: addDays(from, -days), to: addDays(from, -1) };
+  }
+  const periods = bucketsBetween(from, to, groupBy).length;
+  if (groupBy === 'year') {
+    return { from: yearsBefore(from, periods), to: yearsBefore(to, periods) };
+  }
+  let start = bucketOf(from, groupBy).from;
+  const end = addDays(start, -1);
+  for (let i = 0; i < periods; i++) {
+    start = bucketOf(addDays(start, -1), groupBy).from;
+  }
+  return { from: start, to: end };
 }
 
 // Adds rows that carry a business `date` into their bucket; buckets without

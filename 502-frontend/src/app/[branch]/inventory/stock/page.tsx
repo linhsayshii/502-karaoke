@@ -14,12 +14,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TableEmpty, TableSkeleton } from "@/components/data-states";
+import { ExportExcelButton } from "@/components/export-excel-button";
 import { PageHeader } from "@/components/layout/page-header";
 import { useApiData } from "@/hooks/use-api-data";
 import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
-import { formatDateTime, formatMoney, formatNumber } from "@/lib/format";
+import { exportWorkbook, toSheet, type ExportColumn } from "@/lib/excel-export";
+import { businessDate, formatDateTime, formatMoney, formatNumber } from "@/lib/format";
 import { DOC_TYPE_LABELS, MOVEMENT_LABELS } from "@/lib/labels";
 import { SHOW_FROM } from "@/lib/responsive";
 import type { Product, StockMovement, StockMovementType } from "@/lib/types";
@@ -36,6 +38,18 @@ const MOVEMENT_BADGE: Record<StockMovementType, "default" | "secondary" | "outli
   ADJUSTMENT: "secondary",
   REVERSAL: "destructive",
 };
+
+const stockColumns: ExportColumn<Product>[] = [
+  { header: "Mặt hàng", value: (p) => p.name },
+  { header: "Danh mục", value: (p) => p.category?.name ?? "Chưa phân loại" },
+  { header: "ĐVT", value: (p) => p.unit },
+  { header: "Tồn kho", type: "number", value: (p) => p.stockQuantity },
+  { header: "Đang phục vụ", type: "number", value: (p) => p.pendingQuantity ?? 0 },
+  { header: "Khả dụng", type: "number", value: (p) => p.availableQuantity ?? p.stockQuantity },
+  { header: "Giá vốn", type: "money", value: (p) => Number(p.costPrice) },
+  { header: "Giá trị tồn", type: "money", value: (p) => Math.max(0, p.stockQuantity) * Number(p.costPrice) },
+  { header: "Trạng thái", value: (p) => (p.active ? "Đang bán" : "Ngừng bán") },
+];
 
 function StatTile({ label, value, footer }: { label: string; value: string; footer: string }) {
   return (
@@ -78,6 +92,10 @@ export default function StockPage() {
   const outOfStock = list.filter((p) => (p.availableQuantity ?? p.stockQuantity) <= 0).length;
   const pendingUnits = list.reduce((sum, p) => sum + (p.pendingQuantity ?? 0), 0);
 
+  // The list as filtered on screen.
+  const exportExcel = () =>
+    exportWorkbook(`ton-kho_${branch}_${businessDate()}.xlsx`, [toSheet("Tồn kho", stockColumns, shown)]);
+
   return (
     <>
       <PageHeader
@@ -85,6 +103,7 @@ export default function StockPage() {
         description="Tồn kho trừ khi hóa đơn được thanh toán; phần đã gọi trong phòng đang mở hiện ở cột Đang phục vụ."
         actions={
           <>
+            <ExportExcelButton onExport={products && shown.length > 0 ? exportExcel : undefined} />
             <Button variant="outline" asChild>
               <Link href={`/${branch}/inventory/export`}>
                 <PackageMinusIcon data-icon="inline-start" />

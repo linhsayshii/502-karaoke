@@ -91,7 +91,9 @@ export class ReportsService {
   async revenue(user: AuthUser, query: ReportQuery): Promise<RevenueReport> {
     const branchId = await reportScope(this.branchScope, user, query);
     const groupBy = query.groupBy ?? 'day';
-    const previous = query.compare ? previousRange(query.from, query.to) : null;
+    const previous = query.compare
+      ? previousRange(query.from, query.to, groupBy)
+      : null;
 
     const [daily, previousDaily, branches, voided] = await Promise.all([
       this.daily(branchId, query.from, query.to),
@@ -132,7 +134,9 @@ export class ReportsService {
   async branches(query: ReportQuery): Promise<BranchesReport> {
     businessDatesBetween(query.from, query.to, MAX_REPORT_RANGE_DAYS);
     const groupBy = query.groupBy ?? 'day';
-    const previous = query.compare ? previousRange(query.from, query.to) : null;
+    const previous = query.compare
+      ? previousRange(query.from, query.to, groupBy)
+      : null;
 
     const [daily, previousDaily, branches] = await Promise.all([
       this.daily(undefined, query.from, query.to),

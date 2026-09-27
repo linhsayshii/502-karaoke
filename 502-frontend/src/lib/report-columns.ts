@@ -10,7 +10,6 @@ export const METRIC_COLUMNS: ExportColumn<RevenueMetrics>[] = [
   { header: "Giảm tiền giờ", type: "money", value: (m) => m.roomDiscount },
   { header: "Tiền hàng", type: "money", value: (m) => m.productSales },
   { header: "Giảm tiền hàng", type: "money", value: (m) => m.productDiscount },
-  { header: "Phí dịch vụ", type: "money", value: (m) => m.serviceFee },
   { header: "Doanh thu (chưa VAT)", type: "money", value: (m) => m.revenue },
   { header: "VAT", type: "money", value: (m) => m.vat },
   { header: "Tổng thu", type: "money", value: (m) => m.collected },

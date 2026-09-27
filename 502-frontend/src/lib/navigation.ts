@@ -27,6 +27,8 @@ import type { User } from "@/lib/types";
 
 export interface NavItem {
   title: string;
+  // Name in the sidebar when it differs from the page's own title.
+  sidebarTitle?: string;
   path: string;
   icon: LucideIcon;
   permission?: Permission;
@@ -42,7 +44,13 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Bán hàng",
     items: [
       { title: "Sơ đồ phòng", path: "/sales/rooms", icon: LayoutGrid },
-      { title: "Hóa đơn", path: "/sales/statistics/bills", icon: ReceiptText, permission: "sales.reports" },
+      {
+        title: "Hóa đơn",
+        sidebarTitle: "Quản lý bán hàng",
+        path: "/sales/statistics/bills",
+        icon: ReceiptText,
+        permission: "sales.reports",
+      },
       { title: "Cài đặt bán hàng", path: "/sales/settings", icon: Settings2, permission: "sales.settings" },
     ],
   },
@@ -86,13 +94,14 @@ function titleFor(item: NavItem, user: User | null) {
   return item.path === "/sales/rooms" && !can(user, "sales.operate") ? "Phòng đang phục vụ" : item.title;
 }
 
-// Groups and items the account may use (empty groups dropped).
+// Groups and items the account may use (empty groups dropped), titled as
+// the sidebar shows them.
 export function visibleNav(user: User | null): NavGroup[] {
   return NAV_GROUPS.map((group) => ({
     ...group,
     items: group.items
       .filter((item) => !item.permission || can(user, item.permission))
-      .map((item) => ({ ...item, title: titleFor(item, user) })),
+      .map((item) => ({ ...item, title: item.sidebarTitle ?? titleFor(item, user) })),
   })).filter((group) => group.items.length > 0);
 }
 

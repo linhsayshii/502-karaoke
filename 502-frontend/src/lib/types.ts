@@ -127,8 +127,6 @@ export interface Order {
   discountAmount: string | number;
   hourlyDiscountPercent: number;
   hourlyDiscountAmount: string | number;
-  serviceFeePercent: number;
-  serviceFeeAmount: string | number;
   taxPercent: number;
   taxAmount: string | number;
   finalAmount: string | number;
@@ -139,7 +137,6 @@ type BillAmounts =
   | "totalProductPrice"
   | "discountAmount"
   | "hourlyDiscountAmount"
-  | "serviceFeeAmount"
   | "taxAmount"
   | "finalAmount";
 
@@ -150,7 +147,6 @@ export interface BillPreview extends Omit<Order, BillAmounts> {
   totalProductPrice: number;
   discountAmount: number;
   hourlyDiscountAmount: number;
-  serviceFeeAmount: number;
   totalBeforeTax: number;
   taxAmount: number;
   finalAmount: number;
@@ -167,7 +163,6 @@ export interface RevenueMetrics {
   productSales: number;
   roomDiscount: number;
   productDiscount: number;
-  serviceFee: number;
   vat: number;
   collected: number;
   cash: number;

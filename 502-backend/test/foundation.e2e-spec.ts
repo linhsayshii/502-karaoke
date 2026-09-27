@@ -587,7 +587,7 @@ describe('Foundation (e2e)', () => {
       ).body as Json;
       // 1-2 started minutes at the 120,000 opening price.
       expect(bill.hourlyFee).toBeLessThanOrEqual(4000);
-      expect(bill.discountAmount).toBe(8000); // 10% of 75,000, rounded up
+      expect(bill.discountAmount).toBe(7500); // 10% of 75,000, to the đồng
 
       await as('tn1_cs2')
         .patch(`/orders/${paidOrderId}`, {
@@ -621,7 +621,6 @@ describe('Foundation (e2e)', () => {
           Number(order.hourlyFee) -
           Number(order.discountAmount) -
           Number(order.hourlyDiscountAmount) +
-          Number(order.serviceFeeAmount) +
           Number(order.taxAmount),
       ).toBe(finalAmount);
 
@@ -744,9 +743,8 @@ describe('Foundation (e2e)', () => {
       // The room fee charged at checkout is kept.
       expect(Number(order.hourlyFee)).toBe(Number(paid.hourlyFee));
       const beforeTax = 125000 - 5000 + Number(paid.hourlyFee);
-      expect(Number(order.taxAmount)).toBe(
-        Math.ceil((beforeTax * 0.1) / 1000) * 1000,
-      );
+      // 10% to the đồng, rounded up.
+      expect(Number(order.taxAmount)).toBe(Math.ceil(beforeTax / 10));
       let finalAmount = Number(order.finalAmount);
       expect(finalAmount).toBe(beforeTax + Number(order.taxAmount));
       expect(Number((order.fundTransaction as Json).amount)).toBe(finalAmount);

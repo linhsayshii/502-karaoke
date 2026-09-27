@@ -33,6 +33,7 @@ function useBusinessDay() {
   return { short: `${date}/${month}`, full: `${date}/${month}/${year}` };
 }
 
+// Pinned to the top while the page scrolls.
 export function SiteHeader() {
   const { user } = useAuth();
   const branch = useBranchCode();
@@ -42,7 +43,7 @@ export function SiteHeader() {
   const day = useBusinessDay();
 
   return (
-    <header className="flex h-(--header-height) shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear">
+    <header className="sticky top-0 z-20 flex h-(--header-height) shrink-0 items-center gap-2 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 transition-[width,height] ease-linear md:rounded-t-xl">
       <div className="flex w-full min-w-0 items-center gap-1 px-4 lg:gap-2 lg:px-6">
         <SidebarTrigger className="-ml-1" />
         <Separator orientation="vertical" className="mx-2 data-[orientation=vertical]:h-4" />

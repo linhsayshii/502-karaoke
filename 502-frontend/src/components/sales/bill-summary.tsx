@@ -9,7 +9,6 @@ interface BillAmounts {
   totalProductPrice: number;
   discountAmount: number;
   hourlyDiscountAmount: number;
-  serviceFeeAmount: number;
   taxAmount: number;
   finalAmount: number;
 }
@@ -17,7 +16,6 @@ interface BillAmounts {
 interface BillPercents {
   discountPercent: number;
   hourlyDiscountPercent: number;
-  serviceFeePercent: number;
   taxPercent: number;
 }
 
@@ -74,9 +72,6 @@ export function BillSummary({
           label={`Giảm giá giờ${pct(percents?.hourlyDiscountPercent ?? 0)}`}
           value={-bill.hourlyDiscountAmount}
         />
-      )}
-      {bill.serviceFeeAmount > 0 && (
-        <Line muted label={`Phí dịch vụ${pct(percents?.serviceFeePercent ?? 0)}`} value={bill.serviceFeeAmount} />
       )}
       {bill.taxAmount > 0 && <Line muted label={`Thuế VAT${pct(percents?.taxPercent ?? 0)}`} value={bill.taxAmount} />}
       <Separator className="my-1" />

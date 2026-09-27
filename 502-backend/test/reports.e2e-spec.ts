@@ -211,12 +211,11 @@ describe('Reports (e2e)', () => {
     it('keeps VAT apart from revenue, with discounts applied', async () => {
       // Fixed room discount + a percent product discount so roomDiscount and
       // productDiscount are actually non-zero end to end (spec §9: bills
-      // "có … giảm giá, phí DV và VAT").
+      // "có … giảm giá và VAT").
       const bill = await payBill(
         'tn1_cs1',
         'P101',
         {
-          serviceFeePercent: 5,
           taxPercent: 10,
           hourlyDiscountAmount: 1000,
           discountPercent: 20,
@@ -246,8 +245,7 @@ describe('Reports (e2e)', () => {
         totals.roomFee -
           totals.roomDiscount +
           totals.productSales -
-          totals.productDiscount +
-          totals.serviceFee,
+          totals.productDiscount,
       );
       expect(totals.revenue + totals.vat).toBe(totals.collected);
 
@@ -296,8 +294,17 @@ describe('Reports (e2e)', () => {
       expect(res.buckets.reduce((s, b) => s + b.collected, 0)).toBe(
         res.totals.collected,
       );
+      // By month: as many whole months right before the first one.
+      const first = daysFromToday(-40);
       expect(res.previous).toMatchObject({
-        to: ymd(daysFromToday(-41)),
+        from: ymd(
+          new Date(
+            first.getFullYear(),
+            first.getMonth() - res.buckets.length,
+            1,
+          ),
+        ),
+        to: ymd(new Date(first.getFullYear(), first.getMonth(), 0)),
         totals: { orderCount: 0 },
       });
       expect((await report('ql1_cs1')).previous).toBeNull();
@@ -546,8 +553,8 @@ describe('Reports (e2e)', () => {
         totals: Record<string, number>;
         rows: Row[];
       }>;
-    // Products' net revenue + the room fee after its discount + the service
-    // fee = the revenue (before VAT).
+    // Products' net revenue + the room fee after its discount = the revenue
+    // (before VAT).
     const expectProductTotals = (
       res: { totals: Record<string, number>; rows: Row[] },
       totals: Metrics,
@@ -561,12 +568,9 @@ describe('Reports (e2e)', () => {
         expect(sumOf(res.rows, field)).toBe(res.totals[field]);
       for (const row of res.rows)
         expect(Number.isInteger(row.discount)).toBe(true);
-      expect(
-        res.totals.net +
-          totals.roomFee -
-          totals.roomDiscount +
-          totals.serviceFee,
-      ).toBe(totals.revenue);
+      expect(res.totals.net + totals.roomFee - totals.roomDiscount).toBe(
+        totals.revenue,
+      );
     };
 
     it('validates the grouping', async () => {

@@ -8,7 +8,6 @@ export interface RevenueSums {
   productSales: number; // tiền hàng, before its discount
   roomDiscount: number;
   productDiscount: number;
-  serviceFee: number;
   vat: number;
   collected: number; // Σ finalAmount
   cash: number;
@@ -27,7 +26,6 @@ const SUM_FIELDS = [
   'productSales',
   'roomDiscount',
   'productDiscount',
-  'serviceFee',
   'vat',
   'collected',
   'cash',

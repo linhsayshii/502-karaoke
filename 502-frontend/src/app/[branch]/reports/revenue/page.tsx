@@ -36,7 +36,6 @@ import { cn } from "@/lib/utils";
 const chartConfig = {
   roomNet: { label: "Tiền giờ", color: "var(--chart-1)" },
   productNet: { label: "Tiền hàng", color: "var(--chart-2)" },
-  serviceFee: { label: "Phí dịch vụ", color: "var(--chart-3)" },
 } satisfies ChartConfig;
 
 const NUM = "text-right tabular-nums";
@@ -107,7 +106,6 @@ function RevenueView() {
         label: b.label,
         roomNet: roomNet(b),
         productNet: productNet(b),
-        serviceFee: b.serviceFee,
       }))
     : [];
 
@@ -199,7 +197,7 @@ function RevenueView() {
                       }
                     />
                     <ChartLegend content={<ChartLegendContent />} />
-                    {(["roomNet", "productNet", "serviceFee"] as const).map((key, i, all) => (
+                    {(["roomNet", "productNet"] as const).map((key, i, all) => (
                       <Bar
                         key={key}
                         dataKey={key}
@@ -241,7 +239,6 @@ function RevenueView() {
                       <TableHead className={cn("text-right", SHOW_FROM.md)}>Tiền giờ</TableHead>
                       <TableHead className={cn("text-right", SHOW_FROM.md)}>Tiền hàng</TableHead>
                       <TableHead className={cn("text-right", SHOW_FROM.lg)}>Giảm giá</TableHead>
-                      <TableHead className={cn("text-right", SHOW_FROM.lg)}>Phí DV</TableHead>
                       <TableHead className="text-right">Doanh thu</TableHead>
                       <TableHead className={cn("text-right", SHOW_FROM.sm)}>VAT</TableHead>
                       <TableHead className={cn("text-right", SHOW_FROM.sm)}>Tổng thu</TableHead>
@@ -260,7 +257,6 @@ function RevenueView() {
                         <TableCell className={cn(NUM, SHOW_FROM.lg)}>
                           {formatNumber(row.roomDiscount + row.productDiscount)}
                         </TableCell>
-                        <TableCell className={cn(NUM, SHOW_FROM.lg)}>{formatNumber(row.serviceFee)}</TableCell>
                         <TableCell className="text-right font-medium tabular-nums">
                           {formatNumber(row.revenue)}
                         </TableCell>
@@ -288,7 +284,6 @@ function RevenueView() {
                         <TableCell className={cn(NUM, SHOW_FROM.lg)}>
                           {formatNumber(t.roomDiscount + t.productDiscount)}
                         </TableCell>
-                        <TableCell className={cn(NUM, SHOW_FROM.lg)}>{formatNumber(t.serviceFee)}</TableCell>
                         <TableCell className="text-right tabular-nums">{formatNumber(t.revenue)}</TableCell>
                         <TableCell className={cn(NUM, SHOW_FROM.sm)}>{formatNumber(t.vat)}</TableCell>
                         <TableCell className={cn(NUM, SHOW_FROM.sm)}>{formatNumber(t.collected)}</TableCell>

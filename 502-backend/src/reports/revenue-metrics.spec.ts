@@ -41,8 +41,7 @@ describe('revenue metrics', () => {
       metrics.roomFee -
         metrics.roomDiscount +
         metrics.productSales -
-        metrics.productDiscount +
-        metrics.serviceFee,
+        metrics.productDiscount,
     );
   });
 

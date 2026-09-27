@@ -51,12 +51,10 @@ interface Adjustments {
   discountAmount: number;
   hourlyDiscountPercent: number;
   hourlyDiscountAmount: number;
-  serviceFeePercent: number;
-  serviceFeeAmount: number;
   taxPercent: number;
 }
-type PercentKey = "discountPercent" | "hourlyDiscountPercent" | "serviceFeePercent";
-type AmountKey = "discountAmount" | "hourlyDiscountAmount" | "serviceFeeAmount";
+type PercentKey = "discountPercent" | "hourlyDiscountPercent";
+type AmountKey = "discountAmount" | "hourlyDiscountAmount";
 
 const NONE = "none";
 const ADJUSTMENT_ROW = "grid grid-cols-[6rem_minmax(0,1fr)] items-center gap-2 sm:grid-cols-[minmax(0,1fr)_6rem_8rem]";
@@ -135,8 +133,6 @@ function EditForm({
     discountAmount: Number(order.discountAmount),
     hourlyDiscountPercent: order.hourlyDiscountPercent,
     hourlyDiscountAmount: Number(order.hourlyDiscountAmount),
-    serviceFeePercent: order.serviceFeePercent,
-    serviceFeeAmount: Number(order.serviceFeeAmount),
     taxPercent: order.taxPercent,
   });
   const [start, setStart] = useState(initialStart);
@@ -429,11 +425,10 @@ function EditForm({
         </FieldSet>
 
         <FieldSet>
-          <FieldLegend variant="label">Giảm giá, phí dịch vụ & thuế</FieldLegend>
+          <FieldLegend variant="label">Giảm giá & thuế</FieldLegend>
           <FieldGroup className="gap-3">
             {adjustmentRow("discount", "Giảm giá món", "discountPercent", "discountAmount")}
             {adjustmentRow("hourly-discount", "Giảm giá giờ", "hourlyDiscountPercent", "hourlyDiscountAmount")}
-            {adjustmentRow("service-fee", "Phí dịch vụ", "serviceFeePercent", "serviceFeeAmount")}
             <Field className={ADJUSTMENT_ROW}>
               <FieldLabel htmlFor="edit-tax" className={ADJUSTMENT_LABEL}>
                 Thuế VAT

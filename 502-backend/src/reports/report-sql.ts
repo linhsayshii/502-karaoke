@@ -71,7 +71,6 @@ export const REVENUE_COLUMNS = Prisma.sql`
   COALESCE(SUM(o."totalProductPrice"), 0)::float8 AS "productSales",
   COALESCE(SUM(o."hourlyDiscountAmount"), 0)::float8 AS "roomDiscount",
   COALESCE(SUM(o."discountAmount"), 0)::float8 AS "productDiscount",
-  COALESCE(SUM(o."serviceFeeAmount"), 0)::float8 AS "serviceFee",
   COALESCE(SUM(o."taxAmount"), 0)::float8 AS "vat",
   COALESCE(SUM(o."finalAmount"), 0)::float8 AS "collected",
   COALESCE(SUM(o."finalAmount") FILTER (WHERE o."paymentMethod" IS DISTINCT FROM 'TRANSFER'), 0)::float8 AS "cash",

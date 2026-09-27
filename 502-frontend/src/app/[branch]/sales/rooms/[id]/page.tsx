@@ -74,21 +74,17 @@ interface Adjustments {
   discountAmount: number;
   hourlyDiscountPercent: number;
   hourlyDiscountAmount: number;
-  serviceFeePercent: number;
-  serviceFeeAmount: number;
   taxPercent: number;
 }
 
-type PercentKey = "discountPercent" | "hourlyDiscountPercent" | "serviceFeePercent";
-type AmountKey = "discountAmount" | "hourlyDiscountAmount" | "serviceFeeAmount";
+type PercentKey = "discountPercent" | "hourlyDiscountPercent";
+type AmountKey = "discountAmount" | "hourlyDiscountAmount";
 
 const adjustmentsOf = (order: Order): Adjustments => ({
   discountPercent: order.discountPercent,
   discountAmount: Number(order.discountAmount),
   hourlyDiscountPercent: order.hourlyDiscountPercent,
   hourlyDiscountAmount: Number(order.hourlyDiscountAmount),
-  serviceFeePercent: order.serviceFeePercent,
-  serviceFeeAmount: Number(order.serviceFeeAmount),
   taxPercent: order.taxPercent,
 });
 
@@ -320,7 +316,6 @@ export default function RoomDetailPage() {
   const activeAdjustments = [
     adjust.discountPercent || adjust.discountAmount,
     adjust.hourlyDiscountPercent || adjust.hourlyDiscountAmount,
-    adjust.serviceFeePercent || adjust.serviceFeeAmount,
     adjust.taxPercent,
   ].filter(Boolean).length;
 
@@ -610,7 +605,7 @@ export default function RoomDetailPage() {
                   <Button variant="ghost" size="sm" className="group w-full justify-between">
                     <span className="flex items-center gap-2">
                       <PercentIcon />
-                      Giảm giá, phí dịch vụ & thuế
+                      Giảm giá & thuế
                       {activeAdjustments > 0 && <Badge variant="secondary">{activeAdjustments}</Badge>}
                     </span>
                     <ChevronDownIcon className="transition-transform group-data-[state=open]:rotate-180" />
@@ -620,8 +615,7 @@ export default function RoomDetailPage() {
                   <FieldGroup className="gap-3">
                     {adjustmentRow("discount", "Giảm giá món", "discountPercent", "discountAmount")}
                     {adjustmentRow("hourly-discount", "Giảm giá giờ", "hourlyDiscountPercent", "hourlyDiscountAmount")}
-                    {adjustmentRow("service-fee", "Phí dịch vụ", "serviceFeePercent", "serviceFeeAmount")}
-                    <Field className={ADJUSTMENT_ROW}>
+                            <Field className={ADJUSTMENT_ROW}>
                       <FieldLabel htmlFor="tax-percent" className={ADJUSTMENT_LABEL}>
                         Thuế VAT
                       </FieldLabel>

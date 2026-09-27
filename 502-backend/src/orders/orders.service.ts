@@ -56,8 +56,6 @@ type BillableOrder = Pick<
   | 'discountAmount'
   | 'hourlyDiscountPercent'
   | 'hourlyDiscountAmount'
-  | 'serviceFeePercent'
-  | 'serviceFeeAmount'
   | 'taxPercent'
 > & { items: { price: Prisma.Decimal; quantity: number }[] };
 
@@ -84,8 +82,6 @@ function adjustmentsOf(order: BillableOrder) {
     discountAmount: Number(order.discountAmount),
     hourlyDiscountPercent: order.hourlyDiscountPercent,
     hourlyDiscountAmount: Number(order.hourlyDiscountAmount),
-    serviceFeePercent: order.serviceFeePercent,
-    serviceFeeAmount: Number(order.serviceFeeAmount),
     taxPercent: order.taxPercent,
   };
 }
@@ -97,13 +93,16 @@ const sentFields = <T extends object>(dto: T) =>
     Object.entries(dto).filter(([, value]) => value !== undefined),
   ) as Partial<T>;
 
-// The amounts of a computed bill as stored on the order.
+// The amounts of a computed bill as stored on the order. The service fee is
+// no longer charged: its legacy columns are cleared whenever a bill is
+// (re)computed, so they never disagree with the total.
 const billAmounts = (bill: Bill) => ({
   hourlyFee: bill.hourlyFee,
   totalProductPrice: bill.totalProductPrice,
   discountAmount: bill.discountAmount,
   hourlyDiscountAmount: bill.hourlyDiscountAmount,
-  serviceFeeAmount: bill.serviceFeeAmount,
+  serviceFeePercent: 0,
+  serviceFeeAmount: 0,
   taxAmount: bill.taxAmount,
   finalAmount: bill.finalAmount,
 });
@@ -354,7 +353,6 @@ export class OrdersService {
         totalProductPrice: Number(order.totalProductPrice),
         discountAmount: Number(order.discountAmount),
         hourlyDiscountAmount: Number(order.hourlyDiscountAmount),
-        serviceFeeAmount: Number(order.serviceFeeAmount),
         totalBeforeTax: Number(order.finalAmount) - Number(order.taxAmount),
         taxAmount: Number(order.taxAmount),
         finalAmount: Number(order.finalAmount),

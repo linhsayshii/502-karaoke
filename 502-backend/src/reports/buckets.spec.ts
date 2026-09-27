@@ -99,14 +99,59 @@ describe('date arithmetic', () => {
     expect(dayCount('2026-09-27', '2026-09-27')).toBe(1);
   });
 
-  it('gives the period of the same length right before', () => {
-    expect(previousRange('2026-09-01', '2026-09-27')).toEqual({
+  it('gives the days of the same length right before, by day', () => {
+    expect(previousRange('2026-09-01', '2026-09-27', 'day')).toEqual({
       from: '2026-08-05',
       to: '2026-08-31',
     });
     expect(previousRange('2026-03-01', '2026-03-01')).toEqual({
       from: '2026-02-28',
       to: '2026-02-28',
+    });
+  });
+
+  it('gives the whole previous weeks, months and quarters', () => {
+    // Wednesday to Friday → the whole week before (Mon–Sun).
+    expect(previousRange('2026-09-23', '2026-09-25', 'week')).toEqual({
+      from: '2026-09-14',
+      to: '2026-09-20',
+    });
+    expect(previousRange('2026-09-01', '2026-09-27', 'month')).toEqual({
+      from: '2026-08-01',
+      to: '2026-08-31',
+    });
+    expect(previousRange('2026-03-10', '2026-03-20', 'month')).toEqual({
+      from: '2026-02-01',
+      to: '2026-02-28',
+    });
+    // Three months → the three whole months before.
+    expect(previousRange('2026-07-01', '2026-09-27', 'month')).toEqual({
+      from: '2026-04-01',
+      to: '2026-06-30',
+    });
+    expect(previousRange('2026-07-01', '2026-09-27', 'quarter')).toEqual({
+      from: '2026-04-01',
+      to: '2026-06-30',
+    });
+    expect(previousRange('2026-01-15', '2026-02-10', 'quarter')).toEqual({
+      from: '2025-10-01',
+      to: '2025-12-31',
+    });
+  });
+
+  it('gives the same dates a year earlier, by year', () => {
+    expect(previousRange('2026-01-01', '2026-09-27', 'year')).toEqual({
+      from: '2025-01-01',
+      to: '2025-09-27',
+    });
+    expect(previousRange('2024-02-01', '2024-02-29', 'year')).toEqual({
+      from: '2023-02-01',
+      to: '2023-02-28',
+    });
+    // Two calendar years → two years earlier, so the periods never overlap.
+    expect(previousRange('2025-06-01', '2026-03-31', 'year')).toEqual({
+      from: '2023-06-01',
+      to: '2024-03-31',
     });
   });
 });

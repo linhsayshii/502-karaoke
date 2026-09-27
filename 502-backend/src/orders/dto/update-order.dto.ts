@@ -65,18 +65,5 @@ export class UpdateOrderDto {
   @IsNumber()
   @Min(0)
   @Max(100)
-  serviceFeePercent?: number;
-
-  @ApiProperty({ required: false })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  serviceFeeAmount?: number;
-
-  @ApiProperty({ required: false })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Max(100)
   taxPercent?: number;
 }

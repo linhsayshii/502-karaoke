@@ -1,16 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import { DownloadIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useAuth } from "@/components/auth-provider";
 import { DateRangePicker } from "@/components/date-range-picker";
+import { ExportExcelButton } from "@/components/export-excel-button";
 import type { ReportFilters } from "@/hooks/use-report-filters";
-import { useNotify } from "@/hooks/use-notify";
 import { GROUP_BY_LABELS } from "@/lib/labels";
 import { can } from "@/lib/permissions";
 import { GROUP_BYS } from "@/lib/reports";
@@ -34,21 +31,6 @@ export function ReportToolbar({
   scope?: boolean;
 }) {
   const { user } = useAuth();
-  const notify = useNotify();
-  const [exporting, setExporting] = useState(false);
-
-  const runExport = async () => {
-    if (!onExport) return;
-    setExporting(true);
-    try {
-      await onExport();
-    } catch (error) {
-      notify.error(error, "Không thể xuất file Excel");
-    } finally {
-      setExporting(false);
-    }
-  };
-
   return (
     <div className="flex flex-wrap items-center gap-2">
       <DateRangePicker value={{ from: filters.from, to: filters.to }} onChange={(range) => onChange(range)} />
@@ -85,10 +67,7 @@ export function ReportToolbar({
           <ToggleGroupItem value="chain">Toàn chuỗi</ToggleGroupItem>
         </ToggleGroup>
       )}
-      <Button variant="outline" className="@xl/main:ml-auto" onClick={runExport} disabled={!onExport || exporting}>
-        <DownloadIcon data-icon="inline-start" />
-        Xuất Excel
-      </Button>
+      <ExportExcelButton className="@xl/main:ml-auto" onExport={onExport} />
     </div>
   );
 }

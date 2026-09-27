@@ -168,7 +168,6 @@ function BillDetail({ orderId, onChanged }: { orderId: number; onChanged: () => 
                 totalProductPrice: Number(order.totalProductPrice),
                 discountAmount: Number(order.discountAmount),
                 hourlyDiscountAmount: Number(order.hourlyDiscountAmount),
-                serviceFeeAmount: Number(order.serviceFeeAmount),
                 taxAmount: Number(order.taxAmount),
                 finalAmount: Number(order.finalAmount),
               }}

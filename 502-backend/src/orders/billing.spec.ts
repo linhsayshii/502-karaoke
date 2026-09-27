@@ -1,4 +1,4 @@
-import { computeBill, roundUpToThousand } from './billing';
+import { computeBill, roundUpToDong } from './billing';
 
 const base = {
   startTime: new Date('2026-09-26T20:00:00'),
@@ -9,17 +9,16 @@ const base = {
   discountAmount: 0,
   hourlyDiscountPercent: 0,
   hourlyDiscountAmount: 0,
-  serviceFeePercent: 0,
-  serviceFeeAmount: 0,
   taxPercent: 0,
 };
 
-describe('roundUpToThousand', () => {
-  it('rounds up to the next 1,000 but ignores float noise', () => {
-    expect(roundUpToThousand(101666.67)).toBe(102000);
-    expect(roundUpToThousand(15000.000000000002)).toBe(15000);
-    expect(roundUpToThousand(187000 * 0.08)).toBe(15000);
-    expect(roundUpToThousand(0)).toBe(0);
+describe('roundUpToDong', () => {
+  it('rounds up to the đồng but ignores float noise', () => {
+    expect(roundUpToDong(101666.67)).toBe(101667);
+    expect(roundUpToDong(12345.5)).toBe(12346);
+    expect(roundUpToDong(187000 * 0.08)).toBe(14960);
+    expect(roundUpToDong(15000.000000000002)).toBe(15000);
+    expect(roundUpToDong(0)).toBe(0);
   });
 });
 
@@ -75,7 +74,7 @@ describe('computeBill', () => {
     expect(bill.finalAmount).toBe(100000);
   });
 
-  it('applies products, fixed discounts, service fee, then tax rounded up', () => {
+  it('applies products and fixed discounts, then tax to the đồng', () => {
     const bill = computeBill({
       ...base,
       items: [
@@ -84,15 +83,28 @@ describe('computeBill', () => {
       ],
       discountAmount: 5000,
       hourlyDiscountAmount: 20000,
-      serviceFeeAmount: 7000,
-      taxPercent: 8,
+      taxPercent: 10,
     });
-    // 85,000 + 120,000 - 5,000 - 20,000 + 7,000 = 187,000; 8% = 14,960 -> 15,000
+    // 85,000 + 120,000 - 5,000 - 20,000 = 180,000; 10% = 18,000
     expect(bill.totalProductPrice).toBe(85000);
     expect(bill.discountAmount).toBe(5000);
-    expect(bill.totalBeforeTax).toBe(187000);
-    expect(bill.taxAmount).toBe(15000);
-    expect(bill.finalAmount).toBe(202000);
+    expect(bill.totalBeforeTax).toBe(180000);
+    expect(bill.taxAmount).toBe(18000);
+    expect(bill.finalAmount).toBe(198000);
+  });
+
+  it('does not round the tax to 1,000', () => {
+    // 83 min at 150,000 = 207,000 + 12,345 of products; 10% = 21,934.5 -> 21,935
+    const bill = computeBill({
+      ...base,
+      pricePerHour: 150000,
+      endTime: new Date(base.startTime.getTime() + 83 * 60000),
+      items: [{ price: 12345, quantity: 1 }],
+      taxPercent: 10,
+    });
+    expect(bill.totalBeforeTax).toBe(219345);
+    expect(bill.taxAmount).toBe(21935);
+    expect(bill.finalAmount).toBe(241280);
   });
 
   it('applies percents to the live bases, not to a stale amount', () => {
@@ -105,17 +117,26 @@ describe('computeBill', () => {
       discountAmount: 999000, // ignored: the percent wins
       hourlyDiscountPercent: 10,
       hourlyDiscountAmount: 12000, // stale 10% of the first hour
-      serviceFeePercent: 5,
       taxPercent: 10,
     });
     expect(bill.hourlyFee).toBe(360000);
     expect(bill.discountAmount).toBe(20000);
     expect(bill.hourlyDiscountAmount).toBe(36000);
-    // (200,000 - 20,000 + 360,000 - 36,000) = 504,000; 5% = 25,200 -> 26,000
-    expect(bill.serviceFeeAmount).toBe(26000);
-    expect(bill.totalBeforeTax).toBe(530000);
-    expect(bill.taxAmount).toBe(53000);
-    expect(bill.finalAmount).toBe(583000);
+    // 200,000 - 20,000 + 360,000 - 36,000 = 504,000; 10% = 50,400
+    expect(bill.totalBeforeTax).toBe(504000);
+    expect(bill.taxAmount).toBe(50400);
+    expect(bill.finalAmount).toBe(554400);
+  });
+
+  it('rounds a percent discount up to the đồng', () => {
+    // 3 × 12,345 = 37,035; 7% = 2,592.45 -> 2,593
+    const bill = computeBill({
+      ...base,
+      items: [{ price: 12345, quantity: 3 }],
+      discountPercent: 7,
+    });
+    expect(bill.discountAmount).toBe(2593);
+    expect(Number.isInteger(bill.finalAmount)).toBe(true);
   });
 
   it('never discounts more than what is discounted', () => {

@@ -227,8 +227,14 @@ export class BreakdownReportsService {
       }),
     );
     const inRooms = sumAll(rows);
-    const withoutRoom = sumsOf.get(null);
-    if (withoutRoom) {
+    // Bills without a room of this scope: no room at all, or (legacy data
+    // migrated by `foundation`) a room that belongs to another branch and so
+    // was never loaded into `rooms`.
+    const roomIds = new Set(rooms.map((r) => r.id));
+    const outOfScope = sums.filter(
+      (row) => row.roomId === null || !roomIds.has(row.roomId),
+    );
+    if (outOfScope.length) {
       rows.push({
         id: null,
         name: null,
@@ -236,7 +242,7 @@ export class BreakdownReportsService {
         branchCode: null,
         rooms: 0,
         occupancy: null,
-        ...toMetrics(withoutRoom),
+        ...toMetrics(sumAll(outOfScope)),
       });
     }
     return {
@@ -289,6 +295,8 @@ export class BreakdownReportsService {
     // Discounts not rounded yet: the exact shares.
     const groups = new Map<number | null, Omit<ProductRow, 'net' | 'share'>>();
     for (const line of lines) {
+      // productId is a foreign key and products are only soft-deleted, so
+      // every line's product is always found.
       const product = productOf.get(line.productId)!;
       const id = by === 'product' ? product.id : (product.category?.id ?? null);
       const group =

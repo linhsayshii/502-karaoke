@@ -10,6 +10,9 @@ import { PrismaService } from '../src/prisma/prisma.service';
 
 // Reports against a fresh database seeded with the demo accounts
 // (SEED_DEMO=1). Every total must add up with the bills and the fund.
+// The `it`s share one database and build on the bills the earlier ones
+// created (`payBill`, the manual `prisma.order.create`s), so run the whole
+// file — filtering with `-t` skips bills later tests rely on and fails.
 
 type Json = Record<string, unknown>;
 type Metrics = Record<string, number>;
@@ -498,6 +501,43 @@ describe('Reports (e2e)', () => {
         Number(normal.roomMinutes) / (3 * 1110 * 2),
       );
     });
+
+    it('counts a bill whose room belongs to another branch (legacy data) in "Không phòng"', async () => {
+      const prisma = app.get(PrismaService);
+      const cs1 = await prisma.branch.findUniqueOrThrow({
+        where: { code: 'cs1' },
+      });
+      const cs3 = await prisma.branch.findUniqueOrThrow({
+        where: { code: 'cs3' },
+      });
+      const p101 = await prisma.room.findFirstOrThrow({
+        where: { branchId: cs1.id, name: 'P101' },
+      });
+      await prisma.order.create({
+        data: {
+          branchId: cs3.id,
+          roomId: p101.id,
+          status: 'COMPLETED',
+          startTime: new Date('2026-02-03T20:00:00'),
+          endTime: new Date('2026-02-03T21:00:00'),
+          finalAmount: 110000,
+          taxAmount: 10000,
+          paymentMethod: 'CASH',
+        },
+      });
+
+      const res = (
+        await as('admin')
+          .get('/reports/rooms?branch=cs3&from=2026-02-03&to=2026-02-03')
+          .expect(200)
+      ).body as { totals: Metrics; rows: Row[] };
+      expectSameTotals(res.rows, res.totals);
+      expect(res.rows.at(-1)).toMatchObject({
+        id: null,
+        orderCount: 1,
+        revenue: 100000,
+      });
+    });
   });
 
   describe('products', () => {
@@ -702,6 +742,31 @@ describe('Reports (e2e)', () => {
         sessions: totals.orderCount,
         revenue: totals.revenue,
       });
+    });
+  });
+
+  describe('whole chain', () => {
+    it('adds up per breakdown across every branch, for the chain manager', async () => {
+      const chain = await report('admin');
+      for (const path of [
+        '/reports/staff?role=cskh',
+        '/reports/rooms?by=room',
+        '/reports/rooms?by=type',
+      ]) {
+        const res = await breakdown('admin', path);
+        expectSameTotals(res.rows, chain.totals);
+      }
+
+      const products = await breakdown(
+        'admin',
+        '/reports/products?by=category',
+      );
+      expect(products.totals).toMatchObject({
+        gross: chain.totals.productSales,
+        discount: chain.totals.productDiscount,
+      });
+      for (const field of ['gross', 'discount', 'net'])
+        expect(sumOf(products.rows, field)).toBe(products.totals[field]);
     });
   });
 });

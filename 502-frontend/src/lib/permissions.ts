@@ -21,7 +21,8 @@ export type Permission =
   | "inventory"
   | "funds"
   | "users"
-  | "branches";
+  | "branches"
+  | "imports"; // Excel import (each kind also needs its own permission)
 
 const MANAGERS: Role[] = ["CHAIN_MANAGER", "BRANCH_MANAGER"];
 
@@ -35,6 +36,7 @@ const MATRIX: Record<Permission, Role[]> = {
   funds: MANAGERS,
   users: MANAGERS,
   branches: ["CHAIN_MANAGER"],
+  imports: MANAGERS,
 };
 
 export function can(user: User | null, permission: Permission): boolean {
@@ -49,6 +51,7 @@ const ROUTE_PERMISSIONS: [string, Permission][] = [
   ["/inventory", "inventory"],
   ["/funds", "funds"],
   ["/admin/branches", "branches"],
+  ["/imports", "imports"],
   ["/admin", "users"],
 ];
 

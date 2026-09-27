@@ -255,3 +255,20 @@ export interface ManagedUser extends User {
   hasPassword: boolean;
   createdAt: string;
 }
+
+// Excel import (POST /imports/*): what each row does or did.
+export type ImportAction = "CREATE" | "UPDATE" | "SKIP" | "ERROR";
+
+export interface ImportRowResult {
+  row: number;
+  name: string;
+  action: ImportAction;
+  message?: string;
+}
+
+export interface ImportResult {
+  rows: ImportRowResult[];
+  summary: { create: number; update: number; skip: number; error: number };
+  totalAmount?: number; // phiếu nhập kho
+  document?: { id: number; code: string; totalAmount: string };
+}

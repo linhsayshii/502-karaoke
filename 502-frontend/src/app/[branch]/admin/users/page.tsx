@@ -44,6 +44,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useAuth } from "@/components/auth-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { TableEmpty, TableSkeleton } from "@/components/data-states";
+import { ExcelImportButton } from "@/components/excel-import/import-button";
 import { PageHeader } from "@/components/layout/page-header";
 import { useApiData } from "@/hooks/use-api-data";
 import { useNotify } from "@/hooks/use-notify";
@@ -262,10 +263,13 @@ export default function UsersPage() {
         title="Tài khoản"
         description="Mỗi nhân viên là một tài khoản; vai trò quyết định quyền. Nhân viên CSKH/phục vụ không cần mật khẩu nếu không đăng nhập."
         actions={
-          <Button onClick={() => openForm("new")}>
-            <UserPlusIcon data-icon="inline-start" />
-            Thêm tài khoản
-          </Button>
+          <>
+            <ExcelImportButton type="users" />
+            <Button onClick={() => openForm("new")}>
+              <UserPlusIcon data-icon="inline-start" />
+              Thêm tài khoản
+            </Button>
+          </>
         }
       />
 

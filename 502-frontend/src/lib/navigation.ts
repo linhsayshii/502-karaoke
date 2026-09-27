@@ -2,6 +2,7 @@ import {
   Boxes,
   Building2,
   ChartColumnBig,
+  FileSpreadsheet,
   FileText,
   LayoutGrid,
   PackageMinus,
@@ -60,6 +61,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { title: "Tài khoản", path: "/admin/users", icon: Users, permission: "users" },
       { title: "Cơ sở", path: "/admin/branches", icon: Building2, permission: "branches" },
+      { title: "Nhập từ Excel", path: "/imports", icon: FileSpreadsheet, permission: "imports" },
     ],
   },
 ];

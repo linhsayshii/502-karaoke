@@ -37,6 +37,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { ExcelImportButton } from "@/components/excel-import/import-button";
 import { TableEmpty, TableSkeleton } from "@/components/data-states";
 import { useApiData } from "@/hooks/use-api-data";
 import { useNotify } from "@/hooks/use-notify";
@@ -166,7 +167,8 @@ export function ProductManager() {
         <CardDescription>
           Đồ ăn, đồ uống, phụ thu. Tồn kho và giá vốn thay đổi qua phiếu nhập/xuất kho và khi thanh toán.
         </CardDescription>
-        <CardAction>
+        <CardAction className="flex flex-wrap justify-end gap-2">
+          <ExcelImportButton type="products" size="sm" />
           <Button size="sm" onClick={() => openForm("new")}>
             <PlusIcon data-icon="inline-start" />
             Thêm mặt hàng

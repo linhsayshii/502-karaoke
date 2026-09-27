@@ -22,6 +22,7 @@ import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { ExcelImportButton } from "@/components/excel-import/import-button";
 import { PageHeader } from "@/components/layout/page-header";
 import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
@@ -168,6 +169,7 @@ export function StockDocumentForm({ type }: { type: StockDocType }) {
             ? "Nhập hàng vào kho; đơn giá nhập trở thành giá vốn của mặt hàng. Nếu đã trả tiền, phiếu chi được ghi vào sổ quỹ."
             : "Xuất hủy, dùng nội bộ, trả nhà cung cấp… Không xuất quá số tồn kho."
         }
+        actions={isImport && <ExcelImportButton type="stock-import" />}
       />
 
       <div className="grid items-start gap-4 md:gap-6 @4xl/main:grid-cols-[minmax(0,1fr)_22rem]">

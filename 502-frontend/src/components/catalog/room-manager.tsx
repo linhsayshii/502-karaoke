@@ -36,6 +36,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { ExcelImportButton } from "@/components/excel-import/import-button";
 import { TableEmpty, TableSkeleton } from "@/components/data-states";
 import { useApiData } from "@/hooks/use-api-data";
 import { useNotify } from "@/hooks/use-notify";
@@ -143,7 +144,8 @@ export function RoomManager() {
       <CardHeader>
         <CardTitle>Phòng hát</CardTitle>
         <CardDescription>Tên phòng nên bắt đầu bằng số tầng (P101, P203…) để sơ đồ nhóm theo tầng.</CardDescription>
-        <CardAction>
+        <CardAction className="flex flex-wrap justify-end gap-2">
+          <ExcelImportButton type="rooms" size="sm" />
           <Button size="sm" onClick={() => openForm("new")}>
             <PlusIcon data-icon="inline-start" />
             Thêm phòng

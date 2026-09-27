@@ -4,7 +4,7 @@ import { useState } from "react";
 import { MoreHorizontalIcon, PencilIcon, PlusIcon, TagsIcon, Trash2Icon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -26,6 +26,7 @@ import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "
 import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { ExcelImportButton } from "@/components/excel-import/import-button";
 import { TableEmpty, TableSkeleton } from "@/components/data-states";
 import { useApiData } from "@/hooks/use-api-data";
 import { useNotify } from "@/hooks/use-notify";
@@ -100,6 +101,9 @@ export function CategoryManager() {
       <CardHeader>
         <CardTitle>Danh mục mặt hàng</CardTitle>
         <CardDescription>Nhóm đồ ăn, đồ uống của cơ sở; dùng để lọc thực đơn và tồn kho.</CardDescription>
+        <CardAction>
+          <ExcelImportButton type="categories" size="sm" />
+        </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         <form onSubmit={add}>

@@ -39,6 +39,8 @@ npm run lint
 
 Chưa có test tự động cho frontend.
 
+Gói đọc/ghi Excel `xlsx` (SheetJS) được cài từ tarball chính thức `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz` (bản trên npm đã cũ và có lỗ hổng), nên `npm install` cần truy cập được `cdn.sheetjs.com`. Muốn nâng phiên bản thì cài lại bằng đường dẫn tarball mới.
+
 ## Thêm component giao diện
 
 Component nền nằm trong `src/components/ui` (shadcn/ui style new-york bản v4, dùng gói `radix-ui`, icon lucide; chữ cho trình đọc màn hình đã dịch sang tiếng Việt). Thêm mới bằng CLI để giữ đúng cấu hình `components.json`:

@@ -195,7 +195,8 @@ export class UsersService {
 
   // Validates the role/branch an actor wants to give an account and returns
   // the normalized pair (chain manager: no branch; everyone else: one branch).
-  private async checkAssignment(
+  // Also used by the Excel import of accounts.
+  async checkAssignment(
     actor: AuthUser,
     role: Role,
     branchId: number | null,

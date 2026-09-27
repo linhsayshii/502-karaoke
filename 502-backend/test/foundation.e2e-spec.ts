@@ -1,6 +1,7 @@
 import { execSync } from 'child_process';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
@@ -59,7 +60,9 @@ describe('Foundation (e2e)', () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
-    app = configureApp(moduleRef.createNestApplication());
+    app = configureApp(
+      moduleRef.createNestApplication<NestExpressApplication>(),
+    );
     await app.init();
 
     await login('admin', 'admin123');
@@ -784,6 +787,221 @@ describe('Foundation (e2e)', () => {
         .patch(`/products/${waterId}`, { trackStock: false })
         .expect(409);
       expect((res.body as Json).message).toContain('còn tồn kho');
+    });
+  });
+
+  // Excel import on the empty branch cs3 (the browser sends mapped rows).
+  describe('excel import', () => {
+    const cs3 = (url: string) => `${url}?branch=cs3`;
+    const productNames = async () =>
+      (
+        (await as('admin').get(cs3('/products')).expect(200)).body as Json[]
+      ).map((p) => p.name);
+    const productRows = [
+      { row: 2, name: 'Bia Heineken', unit: 'lon', price: 30000 },
+      {
+        row: 3,
+        name: 'Khô mực',
+        unit: 'đĩa',
+        price: 120000,
+        categoryName: 'Đồ nhắm',
+      },
+    ];
+
+    it('checks rows in a dry run without writing', async () => {
+      const res = await as('admin')
+        .post(cs3('/imports/products'), {
+          dryRun: true,
+          onDuplicate: 'SKIP',
+          createCategories: true,
+          rows: productRows,
+        })
+        .expect(200);
+      expect((res.body as Json).summary).toEqual({
+        create: 2,
+        update: 0,
+        skip: 0,
+        error: 0,
+      });
+      expect(await productNames()).toEqual([]);
+    });
+
+    it('creates products and their missing categories', async () => {
+      await as('admin')
+        .post(cs3('/imports/products'), {
+          dryRun: false,
+          onDuplicate: 'SKIP',
+          createCategories: true,
+          rows: productRows,
+        })
+        .expect(200);
+      expect(await productNames()).toEqual(['Bia Heineken', 'Khô mực']);
+      const categories = (await as('admin').get(cs3('/categories')).expect(200))
+        .body as Json[];
+      expect(categories.map((c) => c.name)).toEqual(['Đồ nhắm']);
+    });
+
+    it('skips or updates duplicates as chosen', async () => {
+      const rows = [{ row: 2, name: 'bia heineken', price: 32000 }];
+      const skip = await as('admin')
+        .post(cs3('/imports/products'), {
+          dryRun: false,
+          onDuplicate: 'SKIP',
+          createCategories: false,
+          rows,
+        })
+        .expect(200);
+      expect((skip.body as Json).summary).toMatchObject({ skip: 1 });
+
+      await as('admin')
+        .post(cs3('/imports/products'), {
+          dryRun: false,
+          onDuplicate: 'UPDATE',
+          createCategories: false,
+          rows,
+        })
+        .expect(200);
+      const products = (await as('admin').get(cs3('/products')).expect(200))
+        .body as Json[];
+      expect(products.find((p) => p.name === 'Bia Heineken')).toMatchObject({
+        price: '32000',
+        unit: 'lon',
+      });
+    });
+
+    it('writes nothing when a row is invalid', async () => {
+      const res = await as('admin')
+        .post(cs3('/imports/products'), {
+          dryRun: false,
+          onDuplicate: 'SKIP',
+          createCategories: true,
+          rows: [
+            { row: 2, name: 'Snack', unit: 'gói', price: 15000 },
+            { row: 3, name: 'Đậu phộng', unit: 'gói' },
+          ],
+        })
+        .expect(400);
+      expect((res.body as Json).rows).toEqual([
+        {
+          row: 3,
+          name: 'Đậu phộng',
+          action: 'ERROR',
+          message: 'Thiếu giá bán để tạo sản phẩm mới',
+        },
+      ]);
+      expect(await productNames()).not.toContain('Snack');
+    });
+
+    it('turns a stock sheet into one paid phiếu nhập', async () => {
+      const res = await as('admin')
+        .post(cs3('/imports/stock-import'), {
+          dryRun: false,
+          createProducts: true,
+          supplier: 'NCC Excel',
+          paymentMethod: 'TRANSFER',
+          rows: [
+            {
+              row: 2,
+              productName: 'Bia Heineken',
+              quantity: 24,
+              unitCost: 20000,
+            },
+            {
+              row: 3,
+              productName: 'Nước ngọt',
+              quantity: 10,
+              unitCost: 8000,
+              unit: 'lon',
+              price: 15000,
+              categoryName: 'Đồ uống',
+            },
+            {
+              row: 4,
+              productName: 'bia heineken',
+              quantity: 24,
+              unitCost: 22000,
+            },
+          ],
+        })
+        .expect(200);
+      const body = res.body as Json;
+      expect(body.totalAmount).toBe(48 * 21000 + 10 * 8000);
+      expect((body.document as Json).code).toMatch(/^PN-CS3-\d{8}-\d{4}$/);
+
+      const stock = (await as('admin').get(cs3('/inventory/stock')).expect(200))
+        .body as Json[];
+      const beer = stock.find((p) => p.name === 'Bia Heineken')!;
+      expect(beer).toMatchObject({ stockQuantity: 48, costPrice: '21000' });
+      expect(stock.find((p) => p.name === 'Nước ngọt')).toMatchObject({
+        stockQuantity: 10,
+      });
+      const movements = (
+        await as('admin')
+          .get(cs3(`/inventory/movements`) + `&productId=${beer.id as number}`)
+          .expect(200)
+      ).body as Json[];
+      expect(movements.reduce((s, m) => s + (m.quantity as number), 0)).toBe(
+        48,
+      );
+
+      const fund = (await as('admin').get(cs3('/funds/summary')).expect(200))
+        .body as Json;
+      expect(fund).toMatchObject({ purchaseExpense: 48 * 21000 + 10 * 8000 });
+    });
+
+    it('limits a branch manager to its branch and roles', async () => {
+      await as('ql_cs1')
+        .post('/imports/rooms?branch=cs2', {
+          dryRun: true,
+          onDuplicate: 'SKIP',
+          rows: [{ row: 2, name: 'P9', pricePerHour: 100000 }],
+        })
+        .expect(403);
+      await as('tn_cs1')
+        .post('/imports/rooms', {
+          dryRun: true,
+          onDuplicate: 'SKIP',
+          rows: [{ row: 2, name: 'P9', pricePerHour: 100000 }],
+        })
+        .expect(403);
+
+      const res = await as('ql_cs1')
+        .post('/imports/users', {
+          dryRun: false,
+          onDuplicate: 'SKIP',
+          rows: [
+            { row: 2, fullName: 'Phạm Văn Nam', position: 'SERVER' },
+            { row: 3, fullName: 'Lê Quản Lý', role: 'BRANCH_MANAGER' },
+          ],
+        })
+        .expect(400);
+      expect(((res.body as Json).rows as Json[])[0]).toMatchObject({ row: 3 });
+
+      const ok = await as('ql_cs1')
+        .post('/imports/users', {
+          dryRun: false,
+          onDuplicate: 'SKIP',
+          rows: [{ row: 2, fullName: 'Phạm Văn Nam', position: 'SERVER' }],
+        })
+        .expect(200);
+      expect(((ok.body as Json).rows as Json[])[0]).toMatchObject({
+        action: 'CREATE',
+        message: 'Tên đăng nhập: pham.van.nam',
+      });
+      const staff = (await as('ql_cs1').get('/users/floor-staff').expect(200))
+        .body as Json[];
+      expect(staff.map((u) => u.fullName)).toContain('Phạm Văn Nam');
+    });
+
+    it('accepts a sheet of 1000 rows', async () => {
+      const rows = Array.from({ length: 1000 }, (_, i) => ({
+        row: i + 2,
+        name: `Danh mục thử nghiệm số ${i + 1}`,
+      }));
+      const res = await as('admin')
+        .post(cs3('/imports/categories'), { dryRun: true, rows })
+        .expect(200);
+      expect((res.body as Json).summary).toMatchObject({ create: 1000 });
     });
   });
 });

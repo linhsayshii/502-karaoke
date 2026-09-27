@@ -6,7 +6,9 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import {
+  Branch,
   OrderStatus,
+  PaymentMethod,
   Prisma,
   StockDocType,
   StockMovementType,
@@ -36,6 +38,12 @@ export interface MovementInput {
 }
 
 type Db = Prisma.TransactionClient | PrismaService;
+
+export interface StockLine {
+  productId: number;
+  quantity: number;
+  unitCost: number;
+}
 
 const userRef = { select: { id: true, fullName: true } };
 const fundRef = {
@@ -171,70 +179,91 @@ export class InventoryService {
       quantity: l.quantity,
       unitCost: l.unitCost ?? Number(byId.get(l.productId)!.costPrice),
     }));
+
+    return this.prisma.$transaction((tx) =>
+      this.writeDocument(tx, user, branch, dto, lines),
+    );
+  }
+
+  // Writes a validated document with its movements, cost prices and (for a
+  // paid import) its phiếu chi. Must run inside the caller's transaction;
+  // the Excel import calls it after creating the products it needs.
+  async writeDocument(
+    tx: Prisma.TransactionClient,
+    user: AuthUser,
+    branch: Branch,
+    doc: {
+      type: StockDocType;
+      supplier?: string;
+      note?: string;
+      paymentMethod?: PaymentMethod;
+    },
+    lines: StockLine[],
+  ) {
+    const branchId = branch.id;
+    const isImport = doc.type === StockDocType.IMPORT;
     const totalAmount = lines.reduce((s, l) => s + l.quantity * l.unitCost, 0);
 
-    return this.prisma.$transaction(async (tx) => {
-      const created = await tx.stockDocument.create({
-        data: {
-          branchId,
-          type: dto.type,
-          code: `tmp-${randomUUID()}`,
-          supplier: dto.supplier?.trim() || null,
-          note: dto.note?.trim() || null,
-          totalAmount,
-          createdById: user.id,
-          lines: { create: lines },
-        },
-      });
-      // PN-CS1-20260926-0042: the id suffix keeps codes unique without locks.
-      const code = [
-        isImport ? 'PN' : 'PX',
-        branch.code.toUpperCase(),
-        dateCode(created.createdAt),
-        String(created.id).padStart(4, '0'),
-      ].join('-');
-      await tx.stockDocument.update({
-        where: { id: created.id },
-        data: { code },
-      });
+    const created = await tx.stockDocument.create({
+      data: {
+        branchId,
+        type: doc.type,
+        code: `tmp-${randomUUID()}`,
+        supplier: doc.supplier?.trim() || null,
+        note: doc.note?.trim() || null,
+        totalAmount,
+        createdById: user.id,
+        lines: { create: lines },
+      },
+    });
+    // PN-CS1-20260926-0042: the id suffix keeps codes unique without locks.
+    const code = [
+      isImport ? 'PN' : 'PX',
+      branch.code.toUpperCase(),
+      dateCode(created.createdAt),
+      String(created.id).padStart(4, '0'),
+    ].join('-');
+    await tx.stockDocument.update({
+      where: { id: created.id },
+      data: { code },
+    });
 
-      // Rows are locked in product id order (see checkout).
-      const byProduct = [...lines].sort((a, b) => a.productId - b.productId);
-      for (const line of byProduct) {
-        await this.applyMovement(tx, {
-          branchId,
-          productId: line.productId,
-          type: isImport ? StockMovementType.IMPORT : StockMovementType.EXPORT,
-          quantity: isImport ? line.quantity : -line.quantity,
-          documentId: created.id,
-          createdById: user.id,
-        });
-        if (isImport && line.unitCost > 0) {
-          await tx.product.update({
-            where: { id: line.productId },
-            data: { costPrice: line.unitCost },
-          });
-        }
-      }
-
-      // Paid from the fund: the phiếu chi is written with the document.
-      if (isImport && dto.paymentMethod && totalAmount > 0) {
-        await recordPurchasePayment(tx, {
-          branchId,
-          stockDocumentId: created.id,
-          code,
-          supplier: created.supplier,
-          amount: totalAmount,
-          method: dto.paymentMethod,
-          occurredAt: created.createdAt,
-          createdById: user.id,
+    // Rows are locked in product id order (see checkout).
+    const byProduct = [...lines].sort((a, b) => a.productId - b.productId);
+    for (const line of byProduct) {
+      await this.applyMovement(tx, {
+        branchId,
+        productId: line.productId,
+        type: isImport ? StockMovementType.IMPORT : StockMovementType.EXPORT,
+        quantity: isImport ? line.quantity : -line.quantity,
+        documentId: created.id,
+        createdById: user.id,
+      });
+      if (isImport && line.unitCost > 0) {
+        await tx.product.update({
+          where: { id: line.productId },
+          data: { costPrice: line.unitCost },
         });
       }
+    }
 
-      return tx.stockDocument.findUniqueOrThrow({
-        where: { id: created.id },
-        include: documentDetail,
+    // Paid from the fund: the phiếu chi is written with the document.
+    if (isImport && doc.paymentMethod && totalAmount > 0) {
+      await recordPurchasePayment(tx, {
+        branchId,
+        stockDocumentId: created.id,
+        code,
+        supplier: created.supplier,
+        amount: totalAmount,
+        method: doc.paymentMethod,
+        occurredAt: created.createdAt,
+        createdById: user.id,
       });
+    }
+
+    return tx.stockDocument.findUniqueOrThrow({
+      where: { id: created.id },
+      include: documentDetail,
     });
   }
 

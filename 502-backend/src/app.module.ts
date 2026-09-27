@@ -13,6 +13,7 @@ import { CategoriesModule } from './categories/categories.module';
 import { RoomsModule } from './rooms/rooms.module';
 import { BranchesModule } from './branches/branches.module';
 import { InventoryModule } from './inventory/inventory.module';
+import { ImportsModule } from './imports/imports.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { InventoryModule } from './inventory/inventory.module';
     OrdersModule,
     InventoryModule,
     FundsModule,
+    ImportsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -100,3 +100,12 @@ export function firstDayOfMonth(date: Date = new Date()) {
 export function billLabel(order: { id: number; billNumber?: string | null }): string {
   return order.billNumber ?? `#${order.id}`;
 }
+
+const percentFormat = new Intl.NumberFormat("vi-VN", { style: "percent", maximumFractionDigits: 1 });
+const compactFormat = new Intl.NumberFormat("vi-VN", { notation: "compact", maximumFractionDigits: 1 });
+
+// 0.125 → "12,5%"; null → "—".
+export const formatPercent = (value: number | null) => (value === null ? "—" : percentFormat.format(value));
+
+// 1 250 000 → "1,3 Tr" (chart axes).
+export const formatCompact = (value: number) => compactFormat.format(value);

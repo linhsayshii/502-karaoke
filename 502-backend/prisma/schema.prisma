@@ -227,6 +227,7 @@ model Order {
   @@index([branchId, startTime])
   @@index([branchId, endTime])
   @@index([branchId, billNumber])
+  @@index([status, endTime])
 }
 
 // Last bill sequence handed out per branch and business day.
@@ -247,6 +248,8 @@ model OrderItem {
   product   Product @relation(fields: [productId], references: [id])
   quantity  Int
   price     Decimal // Price at the time of order
+
+  @@index([orderId])
 }
 
 enum StockDocType {

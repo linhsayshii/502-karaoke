@@ -343,6 +343,25 @@ Mỗi hóa đơn khi đóng (thanh toán **hoặc** hủy phiên) nhận một s
 
 Migration đánh số bù cho mọi hóa đơn đã đóng theo thứ tự giờ đóng, tính ngày kinh doanh theo giờ Việt Nam. Trang Hóa đơn tìm được theo số hóa đơn đầy đủ trên mọi ngày.
 
+### 6.9. Báo cáo nhân viên, phòng, hàng hóa, khung giờ, so sánh cơ sở (migration `20260927180000_report_indexes`)
+
+- Chỉ thêm hai index (`Order(status, endTime)` và `OrderItem(orderId)`) để các báo cáo toàn chuỗi và báo cáo hàng hóa chạy nhanh; không đổi dữ liệu. Container backend tự chạy `prisma migrate deploy` khi khởi động.
+- Menu **Báo cáo** có thêm Nhân viên, Phòng, Hàng hóa, Khung giờ; quản lý hệ thống có thêm **So sánh cơ sở**. Mọi báo cáo tính doanh thu chưa VAT và cộng lại đúng bằng báo cáo Doanh thu cùng kỳ.
+- Với database lớn, hai lệnh `CREATE INDEX` này khoá ghi vào bảng hóa đơn trong chốc lát — chạy bản cập nhật ngoài giờ mở cửa.
+
+**Kiểm tra dữ liệu cũ trước khi cập nhật:**
+
+```bash
+docker compose exec db sh -c 'psql -U "$POSTGRES_USER" "$POSTGRES_DB"'
+```
+
+```sql
+SELECT count(*) FROM "Order" o JOIN "Room" r ON r.id = o."roomId" WHERE r."branchId" <> o."branchId";
+SELECT count(*) FROM "Order" o WHERE o.status = 'COMPLETED' AND o."totalProductPrice" <> (SELECT COALESCE(SUM(i.quantity * i.price), 0) FROM "OrderItem" i WHERE i."orderId" = o.id);
+```
+
+Cả hai đều phải trả về 0; nếu không: câu đầu là hóa đơn có phòng thuộc cơ sở khác, báo cáo phòng sẽ xếp các hóa đơn đó vào "Không phòng"; câu sau là hóa đơn có tổng tiền hàng lệch với tổng món trên hóa đơn, báo cáo hàng hóa sẽ có thành tiền khác tiền hàng của báo cáo Doanh thu.
+
 ## 7. Xử lý sự cố
 
 | Hiện tượng | Nguyên nhân / cách xử lý |

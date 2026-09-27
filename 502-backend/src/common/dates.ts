@@ -14,6 +14,9 @@ export const MAX_REPORT_DAYS = 366;
 // Longest period of the reports module (grouped by week … year).
 export const MAX_REPORT_RANGE_DAYS = 1830;
 
+// Opening hours of a business day, 11:30 → 06:00 (room occupancy).
+export const VENUE_OPEN_MINUTES = 1110;
+
 function parseLocalDate(value: string): Date {
   if (!DATE_RE.test(value)) {
     throw new BadRequestException('Ngày không hợp lệ (định dạng YYYY-MM-DD)');

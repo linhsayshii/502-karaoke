@@ -16,21 +16,21 @@ import {
 } from "@/components/ui/chart";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { useAuth } from "@/components/auth-provider";
 import { EmptyState } from "@/components/data-states";
 import { formatDateRange } from "@/components/date-range-picker";
 import { PageHeader } from "@/components/layout/page-header";
 import { ReportToolbar } from "@/components/reports/report-toolbar";
 import { StatTile } from "@/components/stat-tile";
 import { useApiData } from "@/hooks/use-api-data";
-import { reportParams, useReportFilters } from "@/hooks/use-report-filters";
+import { reportParams, useReportFilters, useReportScope } from "@/hooks/use-report-filters";
 import { useBranchCode } from "@/lib/branch";
 import { exportWorkbook, toSheet, type ExportColumn } from "@/lib/excel-export";
 import { formatDate, formatHours, formatMoney, formatNumber } from "@/lib/format";
 import { BUSINESS_DAY_HINT } from "@/lib/labels";
-import { delta, reportFileName, withinBillsRange } from "@/lib/reports";
+import { METRIC_COLUMNS } from "@/lib/report-columns";
+import { delta, reportFileName, tickLabel, withinBillsRange } from "@/lib/reports";
 import { SHOW_FROM } from "@/lib/responsive";
-import type { GroupBy, ReportBucket, RevenueMetrics, RevenueReport } from "@/lib/types";
+import type { ReportBucket, RevenueMetrics, RevenueReport } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const chartConfig = {
@@ -50,42 +50,19 @@ const productNet = (m: RevenueMetrics) => m.productSales - m.productDiscount;
 type PeriodRow = ReportBucket & RevenueMetrics;
 type BranchRow = { name: string } & RevenueMetrics;
 
-const metricColumns: ExportColumn<RevenueMetrics>[] = [
-  { header: "Hóa đơn", type: "number", value: (m) => m.orderCount },
-  { header: "Giờ phòng", type: "decimal", value: (m) => m.roomMinutes / 60 },
-  { header: "Tiền giờ", type: "money", value: (m) => m.roomFee },
-  { header: "Giảm tiền giờ", type: "money", value: (m) => m.roomDiscount },
-  { header: "Tiền hàng", type: "money", value: (m) => m.productSales },
-  { header: "Giảm tiền hàng", type: "money", value: (m) => m.productDiscount },
-  { header: "Phí dịch vụ", type: "money", value: (m) => m.serviceFee },
-  { header: "Doanh thu (chưa VAT)", type: "money", value: (m) => m.revenue },
-  { header: "VAT", type: "money", value: (m) => m.vat },
-  { header: "Tổng thu", type: "money", value: (m) => m.collected },
-  { header: "Tiền mặt", type: "money", value: (m) => m.cash },
-  { header: "Chuyển khoản", type: "money", value: (m) => m.transfer },
-];
-
 const periodColumns: ExportColumn<PeriodRow>[] = [
   { header: "Kỳ", value: (r) => r.label },
   { header: "Từ ngày", value: (r) => formatDate(r.from) },
   { header: "Đến ngày", value: (r) => formatDate(r.to) },
-  ...metricColumns,
+  ...METRIC_COLUMNS,
 ];
 
-const branchColumns: ExportColumn<BranchRow>[] = [{ header: "Cơ sở", value: (r) => r.name }, ...metricColumns];
-
-// Short label of a period on the chart axis.
-function tickLabel(bucket: ReportBucket, groupBy: GroupBy) {
-  if (groupBy === "day") return formatDate(bucket.key).slice(0, 5);
-  if (groupBy === "week") return bucket.label.split(" (")[0];
-  return bucket.label;
-}
+const branchColumns: ExportColumn<BranchRow>[] = [{ header: "Cơ sở", value: (r) => r.name }, ...METRIC_COLUMNS];
 
 // Revenue of paid bills by business day of payment (06:00 → 06:00), before
 // VAT with VAT apart; the fund's sales receipts cover the same bills.
 function RevenueView() {
   const branch = useBranchCode();
-  const { branches } = useAuth();
   const { filters, setFilters } = useReportFilters();
   const { data, loading } = useApiData<RevenueReport | null>(
     "/reports/revenue",
@@ -96,12 +73,9 @@ function RevenueView() {
 
   // The scope of the data actually shown, not the toolbar's current filter
   // (which may not match yet while a request is in flight or failed).
-  const isChainData = data?.branchId === null;
-  const scopeName = !data
-    ? ""
-    : isChainData
-      ? "Toàn chuỗi"
-      : (branches.find((b) => b.code === branch)?.name ?? branch.toUpperCase());
+  const scope = useReportScope(data);
+  const isChainData = scope.chain;
+  const scopeName = scope.name;
   const billsHref = (from: string, to: string) => `/${branch}/sales/statistics/bills?from=${from}&to=${to}`;
 
   const exportExcel = async () => {
@@ -118,10 +92,7 @@ function RevenueView() {
     if (data.byBranch) {
       tables.push(toSheet("Theo cơ sở", branchColumns, data.byBranch, { name: "Tổng", ...data.totals }));
     }
-    await exportWorkbook(
-      reportFileName("doanh-thu", isChainData ? "toan-chuoi" : branch, data.range.from, data.range.to),
-      tables,
-    );
+    await exportWorkbook(reportFileName("doanh-thu", scope.fileScope, data.range.from, data.range.to), tables);
   };
 
   const t = data?.totals;
@@ -146,7 +117,7 @@ function RevenueView() {
         title="Doanh thu"
         description={`${scopeName} · Doanh thu chưa gồm VAT, VAT tính riêng. Theo giờ thanh toán; hóa đơn đã hủy không được tính. ${BUSINESS_DAY_HINT}`}
       />
-      <ReportToolbar filters={filters} onChange={setFilters} onExport={data ? exportExcel : undefined} />
+      <ReportToolbar filters={filters} onChange={setFilters} onExport={data && !loading ? exportExcel : undefined} />
 
       {!data || !t ? (
         <>

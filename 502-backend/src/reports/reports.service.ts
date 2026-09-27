@@ -28,24 +28,59 @@ import {
   paidOrdersWhere,
   REVENUE_COLUMNS,
 } from './report-sql';
+import { reportScope } from './report-scope';
 import { ReportQuery } from './dto/report-query';
+
+interface Range {
+  from: string;
+  to: string;
+}
+
+interface BranchInfo {
+  branchId: number;
+  code: string;
+  name: string;
+}
 
 export interface RevenueReport {
   branchId: number | null; // null: the whole chain
-  range: { from: string; to: string };
+  range: Range;
   groupBy: GroupBy;
   totals: RevenueMetrics;
-  previous: { from: string; to: string; totals: RevenueMetrics } | null;
+  previous: (Range & { totals: RevenueMetrics }) | null;
   buckets: (Bucket & RevenueMetrics)[];
-  byBranch:
-    | ({ branchId: number; code: string; name: string } & RevenueMetrics)[]
-    | null;
+  byBranch: (BranchInfo & RevenueMetrics)[] | null;
   // Bills paid and then voided (not in any total).
   voided: { count: number; amount: number };
 }
 
-// Reports of paid bills, by business day of payment. The SQL groups by day
-// (and a dimension); the periods and totals are added up here.
+// GET /reports/branches: the whole chain, branch by branch.
+export interface BranchesReport {
+  range: Range;
+  groupBy: GroupBy;
+  totals: RevenueMetrics;
+  previous: (Range & { totals: RevenueMetrics }) | null;
+  buckets: Bucket[];
+  branches: (BranchInfo &
+    RevenueMetrics & {
+      share: number | null; // of the chain's revenue; null when it is 0
+      previous: RevenueMetrics | null; // when comparing
+      series: number[]; // revenue per bucket, in the order of `buckets`
+    })[];
+}
+
+// Sums of the paid bills of one branch on one business day.
+type DailyRow = RevenueSums & { date: string; branchId: number };
+
+interface BranchRecord {
+  id: number;
+  code: string;
+  name: string;
+  active: boolean;
+}
+
+// Reports of paid bills over time, by business day of payment. The SQL
+// groups by day and branch; the periods and totals are added up here.
 @Injectable()
 export class ReportsService {
   constructor(
@@ -54,39 +89,20 @@ export class ReportsService {
   ) {}
 
   async revenue(user: AuthUser, query: ReportQuery): Promise<RevenueReport> {
-    const branchId = await this.branchScope.resolveOptionalBranchId(
-      user,
-      query.branch,
-    );
-    // Validates the dates and the length of the range.
-    businessDatesBetween(query.from, query.to, MAX_REPORT_RANGE_DAYS);
+    const branchId = await reportScope(this.branchScope, user, query);
     const groupBy = query.groupBy ?? 'day';
     const previous = query.compare ? previousRange(query.from, query.to) : null;
 
-    const [daily, previousDaily, byBranch, voided] = await Promise.all([
-      this.dailyRevenue(branchId, query.from, query.to),
+    const [daily, previousDaily, branches, voided] = await Promise.all([
+      this.daily(branchId, query.from, query.to),
       previous
-        ? this.dailyRevenue(branchId, previous.from, previous.to)
+        ? this.daily(branchId, previous.from, previous.to)
         : Promise.resolve([]),
-      branchId === undefined
-        ? this.revenueByBranch(query.from, query.to)
-        : Promise.resolve(null),
+      branchId === undefined ? this.branchList() : Promise.resolve(null),
       this.voided(branchId, query.from, query.to),
     ]);
 
-    // Wrapped in an arrow (not passed by reference): with this tsconfig's
-    // default (non-strict) function-parameter variance, TS's generic
-    // inference for rollUp's R falls back to its bare constraint when given
-    // addSums directly, losing the extra `date` field. A contextually-typed
-    // arrow restores correct inference.
-    const buckets = rollUp(
-      bucketsBetween(query.from, query.to, groupBy),
-      groupBy,
-      daily,
-      emptySums,
-      (acc, row) => addSums(acc, row),
-    ).map(({ bucket, value }) => ({ ...bucket, ...toMetrics(value) }));
-
+    // Totals, periods and branches all come from the same rows.
     return {
       branchId: branchId ?? null,
       range: { from: query.from, to: query.to },
@@ -96,44 +112,112 @@ export class ReportsService {
         ...previous,
         totals: toMetrics(sumAll(previousDaily)),
       },
-      buckets,
-      byBranch,
+      buckets: this.periods(
+        bucketsBetween(query.from, query.to, groupBy),
+        groupBy,
+        daily,
+      ).map(({ bucket, value }) => ({ ...bucket, ...toMetrics(value) })),
+      byBranch:
+        branches &&
+        this.perBranch(branches, daily, []).map(({ branch, rows }) => ({
+          ...branch,
+          ...toMetrics(sumAll(rows)),
+        })),
       voided,
     };
   }
 
-  private dailyRevenue(branchId: number | undefined, from: string, to: string) {
-    return this.prisma.$queryRaw<(RevenueSums & { date: string })[]>`
-      SELECT ${businessDateSql(Prisma.sql`o."endTime"`)} AS "date", ${REVENUE_COLUMNS}
-      FROM "Order" o
-      WHERE ${paidOrdersWhere(branchId, from, to)}
-      GROUP BY 1`;
+  // Branch comparison of the whole chain (chain manager only, so ?branch
+  // is ignored).
+  async branches(query: ReportQuery): Promise<BranchesReport> {
+    businessDatesBetween(query.from, query.to, MAX_REPORT_RANGE_DAYS);
+    const groupBy = query.groupBy ?? 'day';
+    const previous = query.compare ? previousRange(query.from, query.to) : null;
+
+    const [daily, previousDaily, branches] = await Promise.all([
+      this.daily(undefined, query.from, query.to),
+      previous
+        ? this.daily(undefined, previous.from, previous.to)
+        : Promise.resolve([]),
+      this.branchList(),
+    ]);
+
+    const buckets = bucketsBetween(query.from, query.to, groupBy);
+    const totals = toMetrics(sumAll(daily));
+    return {
+      range: { from: query.from, to: query.to },
+      groupBy,
+      totals,
+      previous: previous && {
+        ...previous,
+        totals: toMetrics(sumAll(previousDaily)),
+      },
+      buckets,
+      branches: this.perBranch(branches, daily, previousDaily).map(
+        ({ branch, rows, previousRows }) => {
+          const metrics = toMetrics(sumAll(rows));
+          return {
+            ...branch,
+            ...metrics,
+            share: totals.revenue ? metrics.revenue / totals.revenue : null,
+            previous: previous ? toMetrics(sumAll(previousRows)) : null,
+            series: this.periods(buckets, groupBy, rows).map(
+              ({ value }) => toMetrics(value).revenue,
+            ),
+          };
+        },
+      ),
+    };
   }
 
-  // Every active branch (and inactive ones that still sold in the period).
-  private async revenueByBranch(from: string, to: string) {
-    const [branches, rows] = await Promise.all([
-      this.prisma.branch.findMany({
-        orderBy: { code: 'asc' },
-        select: { id: true, code: true, name: true, active: true },
-      }),
-      this.prisma.$queryRaw<(RevenueSums & { branchId: number })[]>`
-        SELECT o."branchId" AS "branchId", ${REVENUE_COLUMNS}
-        FROM "Order" o
-        WHERE ${paidOrdersWhere(undefined, from, to)}
-        GROUP BY o."branchId"`,
-    ]);
+  // Sums per business day and branch of the paid bills. One query per
+  // range, so a report's totals, periods and branches always agree.
+  private daily(branchId: number | undefined, from: string, to: string) {
+    return this.prisma.$queryRaw<DailyRow[]>`
+      SELECT ${businessDateSql(Prisma.sql`o."endTime"`)} AS "date",
+        o."branchId" AS "branchId", ${REVENUE_COLUMNS}
+      FROM "Order" o
+      WHERE ${paidOrdersWhere(branchId, from, to)}
+      GROUP BY 1, 2`;
+  }
+
+  // Wrapped in an arrow (not passed by reference): with this tsconfig's
+  // default (non-strict) function-parameter variance, TS's generic
+  // inference for rollUp's R falls back to its bare constraint when given
+  // addSums directly, losing the extra `date` field. A contextually-typed
+  // arrow restores correct inference.
+  private periods(buckets: Bucket[], groupBy: GroupBy, rows: DailyRow[]) {
+    return rollUp(buckets, groupBy, rows, emptySums, (acc, row) =>
+      addSums(acc, row),
+    );
+  }
+
+  private branchList(): Promise<BranchRecord[]> {
+    return this.prisma.branch.findMany({
+      orderBy: { code: 'asc' },
+      select: { id: true, code: true, name: true, active: true },
+    });
+  }
+
+  // The rows of each branch: every active branch, and inactive ones that
+  // still sold in one of the two periods.
+  private perBranch(
+    branches: BranchRecord[],
+    rows: DailyRow[],
+    previousRows: DailyRow[],
+  ) {
     return branches.flatMap((branch) => {
-      const row = rows.find((r) => r.branchId === branch.id);
-      if (!branch.active && !row) return [];
-      return [
-        {
-          branchId: branch.id,
-          code: branch.code,
-          name: branch.name,
-          ...toMetrics(row ?? emptySums()),
-        },
-      ];
+      const own = rows.filter((r) => r.branchId === branch.id);
+      const ownPrevious = previousRows.filter((r) => r.branchId === branch.id);
+      if (!branch.active && own.length === 0 && ownPrevious.length === 0) {
+        return [];
+      }
+      const info: BranchInfo = {
+        branchId: branch.id,
+        code: branch.code,
+        name: branch.name,
+      };
+      return [{ branch: info, rows: own, previousRows: ownPrevious }];
     });
   }
 

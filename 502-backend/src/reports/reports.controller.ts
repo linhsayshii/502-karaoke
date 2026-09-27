@@ -8,6 +8,7 @@ import { MANAGERS } from '../auth/roles';
 import { ReportsService } from './reports.service';
 import { BreakdownReportsService } from './breakdown-reports.service';
 import {
+  ProductReportQuery,
   ReportQuery,
   RoomReportQuery,
   StaffReportQuery,
@@ -47,5 +48,12 @@ export class ReportsController {
   @Get('rooms')
   rooms(@CurrentUser() user: AuthUser, @Query() query: RoomReportQuery) {
     return this.breakdowns.rooms(user, query);
+  }
+
+  // Sales per product or category, with the bills' discounts spread over
+  // the lines.
+  @Get('products')
+  products(@CurrentUser() user: AuthUser, @Query() query: ProductReportQuery) {
+    return this.breakdowns.products(user, query);
   }
 }

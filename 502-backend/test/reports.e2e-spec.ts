@@ -499,4 +499,116 @@ describe('Reports (e2e)', () => {
       );
     });
   });
+
+  describe('products', () => {
+    const productReport = (query = '') =>
+      breakdown('ql1_cs1', `/reports/products${query}`) as unknown as Promise<{
+        totals: Record<string, number>;
+        rows: Row[];
+      }>;
+    // Products' net revenue + the room fee after its discount + the service
+    // fee = the revenue (before VAT).
+    const expectProductTotals = (
+      res: { totals: Record<string, number>; rows: Row[] },
+      totals: Metrics,
+    ) => {
+      expect(res.totals).toMatchObject({
+        gross: totals.productSales,
+        discount: totals.productDiscount,
+        net: totals.productSales - totals.productDiscount,
+      });
+      for (const field of ['quantity', 'gross', 'discount', 'net'])
+        expect(sumOf(res.rows, field)).toBe(res.totals[field]);
+      for (const row of res.rows)
+        expect(Number.isInteger(row.discount)).toBe(true);
+      expect(
+        res.totals.net +
+          totals.roomFee -
+          totals.roomDiscount +
+          totals.serviceFee,
+      ).toBe(totals.revenue);
+    };
+
+    it('validates the grouping', async () => {
+      await as('ql1_cs1')
+        .get(`/reports/products?${period}&by=brand`)
+        .expect(400);
+      await as('tn1_cs1').get(`/reports/products?${period}`).expect(403);
+    });
+
+    it('spreads the product discount over the lines, to the đồng', async () => {
+      // 2 beers (50,000) + 1 water (10,000) with 7 đồng off: 5.83 + 1.17 → 6 + 1.
+      const bill = await payBill(
+        'tn1_cs1',
+        'P101',
+        { discountAmount: 7 },
+        'CASH',
+        {
+          items: [
+            ['Bia Tiger', 2],
+            ['Nước suối', 1],
+          ],
+        },
+      );
+      expect(Number(bill.discountAmount)).toBe(7);
+
+      const { totals } = await report('ql1_cs1');
+      const res = await productReport();
+      expectProductTotals(res, totals);
+      const nuocSuoi = res.rows.find((r) => r.name === 'Nước suối');
+      expect(nuocSuoi).toMatchObject({
+        quantity: 1,
+        gross: 10000,
+        discount: 1,
+        net: 9999,
+        categoryName: 'Đồ uống',
+        branchCode: 'cs1',
+      });
+      expect(typeof nuocSuoi?.unit).toBe('string');
+      expect(res.rows[0].name).toBe('Bia Tiger');
+
+      const byCategory = await productReport('?by=category');
+      expect(byCategory.totals).toEqual(res.totals);
+      expectProductTotals(byCategory, totals);
+      expect(byCategory.rows.map((r) => r.name)).toEqual(['Đồ uống']);
+    });
+
+    it('follows a correction of a paid bill', async () => {
+      const bills = (await as('ql1_cs1').get(`/orders?${period}`).expect(200))
+        .body as Json[];
+      const bill = bills.find((b) => Number(b.discountAmount) === 7)!;
+      const products = (await as('ql1_cs1').get('/products').expect(200))
+        .body as Json[];
+      const idOfProduct = (name: string) =>
+        products.find((p) => p.name === name)!.id;
+      await as('ql1_cs1')
+        .patch(`/orders/${bill.id as number}/paid`, {
+          reason: 'thêm món',
+          items: [
+            { productId: idOfProduct('Bia Tiger'), quantity: 2 },
+            { productId: idOfProduct('Nước suối'), quantity: 3 },
+            { productId: idOfProduct('Phụ thu vệ sinh'), quantity: 1 },
+          ],
+        })
+        .expect(200);
+
+      const { totals } = await report('ql1_cs1');
+      const res = await productReport();
+      expectProductTotals(res, totals);
+      expect(res.rows.find((r) => r.name === 'Nước suối')).toMatchObject({
+        quantity: 3,
+        gross: 30000,
+      });
+
+      // A product without a category: "Không danh mục", last.
+      const byCategory = await productReport('?by=category');
+      expectProductTotals(byCategory, totals);
+      expect(byCategory.rows.at(-1)).toMatchObject({
+        id: null,
+        name: null,
+        quantity: 1,
+        gross: 50000,
+      });
+    });
+  });
 });

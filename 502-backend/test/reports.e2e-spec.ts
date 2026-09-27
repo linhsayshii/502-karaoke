@@ -146,16 +146,28 @@ describe('Reports (e2e)', () => {
   });
 
   describe('revenue', () => {
-    it('keeps VAT apart from revenue', async () => {
+    it('keeps VAT apart from revenue, with discounts applied', async () => {
+      // Fixed room discount + a percent product discount so roomDiscount and
+      // productDiscount are actually non-zero end to end (spec §9: bills
+      // "có … giảm giá, phí DV và VAT").
       const bill = await payBill(
         'tn_cs1',
         'P101',
-        { serviceFeePercent: 5, taxPercent: 10 },
+        {
+          serviceFeePercent: 5,
+          taxPercent: 10,
+          hourlyDiscountAmount: 1000,
+          discountPercent: 20,
+        },
         'CASH',
       );
       const vat = Number(bill.taxAmount);
       const paid = Number(bill.finalAmount);
+      const roomDiscount = Number(bill.hourlyDiscountAmount);
+      const productDiscount = Number(bill.discountAmount);
       expect(vat).toBeGreaterThan(0);
+      expect(roomDiscount).toBeGreaterThan(0);
+      expect(productDiscount).toBeGreaterThan(0);
 
       const { totals } = await report('ql_cs1');
       expect(totals).toMatchObject({
@@ -165,6 +177,8 @@ describe('Reports (e2e)', () => {
         revenue: paid - vat,
         cash: paid,
         transfer: 0,
+        roomDiscount,
+        productDiscount,
       });
       expect(totals.revenue).toBe(
         totals.roomFee -
@@ -173,6 +187,7 @@ describe('Reports (e2e)', () => {
           totals.productDiscount +
           totals.serviceFee,
       );
+      expect(totals.revenue + totals.vat).toBe(totals.collected);
 
       const fund = (
         await as('ql_cs1').get(`/funds/summary?${period}`).expect(200)

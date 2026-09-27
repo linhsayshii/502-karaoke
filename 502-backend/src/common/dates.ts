@@ -19,7 +19,10 @@ function parseLocalDate(value: string): Date {
     throw new BadRequestException('Ngày không hợp lệ (định dạng YYYY-MM-DD)');
   }
   const date = new Date(`${value}T00:00:00`);
-  if (isNaN(date.getTime())) {
+  // new Date() rolls an out-of-range day/month over into the next one
+  // (2026-02-30 -> 2 March) instead of rejecting it, so round-trip the
+  // parsed date back to YYYY-MM-DD and compare with the input.
+  if (isNaN(date.getTime()) || toDateString(date) !== value) {
     throw new BadRequestException('Ngày không hợp lệ (định dạng YYYY-MM-DD)');
   }
   return date;

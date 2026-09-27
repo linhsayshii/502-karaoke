@@ -72,6 +72,26 @@ describe('businessDatesBetween', () => {
   });
 });
 
+describe('parseLocalDate (rejecting impossible calendar dates)', () => {
+  it('rejects a day/month combination that rolls over (JS Date is lenient by default)', () => {
+    expect(() => getBusinessDayRange('2026-02-30')).toThrow();
+    expect(() => businessDatesBetween('2026-02-30', '2026-03-05')).toThrow();
+  });
+
+  it('rejects an out-of-range month', () => {
+    expect(() => getBusinessDayRange('2026-13-01')).toThrow();
+  });
+
+  it('accepts a real leap day', () => {
+    expect(() => getBusinessDayRange('2024-02-29')).not.toThrow();
+    expect(businessDatesBetween('2024-02-28', '2024-03-01')).toEqual([
+      '2024-02-28',
+      '2024-02-29',
+      '2024-03-01',
+    ]);
+  });
+});
+
 describe('businessDatesBetween with a longer limit', () => {
   it('accepts up to maxDays days', () => {
     // 2024 is a leap year: 366 + 365 days.

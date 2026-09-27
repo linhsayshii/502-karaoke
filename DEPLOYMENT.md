@@ -343,6 +343,11 @@ Mỗi hóa đơn khi đóng (thanh toán **hoặc** hủy phiên) nhận một s
 
 Migration đánh số bù cho mọi hóa đơn đã đóng theo thứ tự giờ đóng, tính ngày kinh doanh theo giờ Việt Nam. Trang Hóa đơn tìm được theo số hóa đơn đầy đủ trên mọi ngày.
 
+### 6.9. Báo cáo nhân viên, phòng, hàng hóa, khung giờ, so sánh cơ sở (migration `20260927180000_report_indexes`)
+
+- Chỉ thêm hai index (`Order(status, endTime)` và `OrderItem(orderId)`) để các báo cáo toàn chuỗi và báo cáo hàng hóa chạy nhanh; không đổi dữ liệu. Container backend tự chạy `prisma migrate deploy` khi khởi động.
+- Menu **Báo cáo** có thêm Nhân viên, Phòng, Hàng hóa, Khung giờ; quản lý hệ thống có thêm **So sánh cơ sở**. Mọi báo cáo tính doanh thu chưa VAT và cộng lại đúng bằng báo cáo Doanh thu cùng kỳ.
+
 ## 7. Xử lý sự cố
 
 | Hiện tượng | Nguyên nhân / cách xử lý |

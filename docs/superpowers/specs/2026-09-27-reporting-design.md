@@ -90,7 +90,7 @@ Các chỉ số doanh thu được tính trên các hóa đơn **đã thanh toá
 
 **Ngày kinh doanh trong SQL:** `businessDateSql(col)`
 = `(((col) AT TIME ZONE 'UTC') AT TIME ZONE ${tz} - interval '6 hours')::date`.
-- `tz` lấy từ `Intl.DateTimeFormat().resolvedOptions().timeZone`, tức biến `TZ` của server, giống hệt `businessDateOf`.
+- `tz` lấy từ `process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone`, giống hệt `businessDateOf`. Dùng trực tiếp `process.env.TZ` khi có (thay vì chỉ dựa vào `Intl`), vì ICU chuẩn hoá `Asia/Ho_Chi_Minh` thành `Asia/Saigon` — một tên mà Postgres có thể không nhận ra.
 - Prisma lưu `DateTime` dạng `timestamp(3)` theo UTC.
 - Mệnh đề WHERE vẫn lọc bằng các mốc của `businessDayRange()` để dùng được index `[branchId, endTime]`.
 

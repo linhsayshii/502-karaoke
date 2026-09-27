@@ -2,6 +2,7 @@ import {
   Boxes,
   Building2,
   ChartColumnBig,
+  DoorOpen,
   FileSpreadsheet,
   FileText,
   LayoutGrid,
@@ -10,6 +11,7 @@ import {
   ReceiptText,
   Settings2,
   Tags,
+  UserRound,
   Users,
   Wallet,
   type LucideIcon,
@@ -43,7 +45,11 @@ export const NAV_GROUPS: NavGroup[] = [
   },
   {
     label: "Báo cáo",
-    items: [{ title: "Doanh thu", path: "/reports/revenue", icon: ChartColumnBig, permission: "reports" }],
+    items: [
+      { title: "Doanh thu", path: "/reports/revenue", icon: ChartColumnBig, permission: "reports" },
+      { title: "Nhân viên", path: "/reports/staff", icon: UserRound, permission: "reports" },
+      { title: "Phòng", path: "/reports/rooms", icon: DoorOpen, permission: "reports" },
+    ],
   },
   {
     label: "Kho",

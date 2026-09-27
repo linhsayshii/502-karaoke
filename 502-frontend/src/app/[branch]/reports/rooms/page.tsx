@@ -96,7 +96,12 @@ function RoomsView() {
 
   const t = data?.totals;
   const chartRows = data
-    ? data.rows.filter((row) => row.id !== null).map((row) => ({ name: rowName(row, data.by), value: row.revenue }))
+    ? data.rows
+        .filter((row) => row.id !== null)
+        .map((row) => ({
+          name: rowName(row, data.by) + (scope.chain && row.branchCode ? ` · ${row.branchCode.toUpperCase()}` : ""),
+          value: row.revenue,
+        }))
     : [];
 
   return (
@@ -105,7 +110,7 @@ function RoomsView() {
         title="Phòng"
         description={`${scope.name} · Công suất = giờ có khách / giờ mở cửa (11:30 – 06:00, 18,5 giờ mỗi ngày). Doanh thu chưa gồm VAT. ${BUSINESS_DAY_HINT}`}
       />
-      <ReportToolbar filters={filters} onChange={setFilters} onExport={data ? exportExcel : undefined} periods={false} />
+      <ReportToolbar filters={filters} onChange={setFilters} onExport={data && !loading ? exportExcel : undefined} periods={false} />
       <Tabs value={by} onValueChange={(value) => setBy(value as RoomGroup)}>
         <TabsList>
           {ROOM_GROUPS.map((g) => (

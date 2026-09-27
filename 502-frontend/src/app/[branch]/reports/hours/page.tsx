@@ -94,7 +94,7 @@ function HoursView() {
         title="Khung giờ"
         description={`${scope.name} · Theo thứ của ngày kinh doanh và giờ khách vào phòng; doanh thu chưa gồm VAT. ${BUSINESS_DAY_HINT}`}
       />
-      <ReportToolbar filters={filters} onChange={setFilters} onExport={data ? exportExcel : undefined} periods={false} />
+      <ReportToolbar filters={filters} onChange={setFilters} onExport={data && !loading ? exportExcel : undefined} periods={false} />
       <Tabs value={metric} onValueChange={(v) => setMetric(v as HourMetric)}>
         <TabsList>
           {HOUR_METRICS.map((m) => (
@@ -135,7 +135,8 @@ function HoursView() {
                 <CardHeader>
                   <CardTitle>{METRIC_LABELS[metric]} theo thứ × giờ</CardTitle>
                   <CardDescription>
-                    {formatDateRange(data.range)} · Cột là giờ bắt đầu, từ 06:00; di chuột lên ô để xem số.
+                    {formatDateRange(data.range)} · Cột là giờ bắt đầu, từ 06:00; di chuột lên ô để xem số; số theo
+                    từng thứ ở bảng bên dưới.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>

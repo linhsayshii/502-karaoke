@@ -120,7 +120,7 @@ function BranchesView() {
         title="So sánh cơ sở"
         description={`Toàn chuỗi · Doanh thu chưa gồm VAT, VAT tính riêng. Theo giờ thanh toán. ${BUSINESS_DAY_HINT}`}
       />
-      <ReportToolbar filters={filters} onChange={setFilters} onExport={data ? exportExcel : undefined} scope={false} />
+      <ReportToolbar filters={filters} onChange={setFilters} onExport={data && !loading ? exportExcel : undefined} scope={false} />
 
       {!data || !t ? (
         <>

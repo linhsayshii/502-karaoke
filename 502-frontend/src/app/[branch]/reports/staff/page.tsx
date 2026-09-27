@@ -84,7 +84,10 @@ function StaffView() {
   const t = data?.totals;
   const chartRows = (data?.rows ?? [])
     .filter((row) => row.id !== null)
-    .map((row) => ({ name: staffName(row), value: row.revenue }));
+    .map((row) => ({
+      name: staffName(row) + (scope.chain && row.branchCode ? ` · ${row.branchCode.toUpperCase()}` : ""),
+      value: row.revenue,
+    }));
 
   return (
     <>
@@ -92,7 +95,7 @@ function StaffView() {
         title="Nhân viên"
         description={`${scope.name} · Mỗi hóa đơn được tính trọn cho CSKH, phục vụ và thu ngân của nó. Doanh thu chưa gồm VAT. ${BUSINESS_DAY_HINT}`}
       />
-      <ReportToolbar filters={filters} onChange={setFilters} onExport={data ? exportExcel : undefined} periods={false} />
+      <ReportToolbar filters={filters} onChange={setFilters} onExport={data && !loading ? exportExcel : undefined} periods={false} />
       <Tabs value={role} onValueChange={(value) => setRole(value as StaffRole)}>
         <TabsList>
           {STAFF_ROLES.map((r) => (

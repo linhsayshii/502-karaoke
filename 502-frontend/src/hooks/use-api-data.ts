@@ -14,9 +14,15 @@ export function useApiData<T>(
 ) {
   const notify = useNotify();
   const [data, setData] = useState<T>(initial);
-  const [loading, setLoading] = useState(true);
   const [version, setVersion] = useState(0);
   const paramsKey = JSON.stringify(params);
+  // Identifies the in-flight request; `loading` is derived from comparing it
+  // to the key of the request whose result last landed, so changing `url`/
+  // `params` (or calling `reload()`) makes `loading` true again without
+  // setting state synchronously inside the effect.
+  const requestKey = `${url}:${paramsKey}:${version}`;
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const loading = loadedKey !== requestKey;
 
   useEffect(() => {
     let cancelled = false;
@@ -29,12 +35,12 @@ export function useApiData<T>(
         if (!cancelled) notify.error(error, errorMessage);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setLoadedKey(requestKey);
       });
     return () => {
       cancelled = true;
     };
-  }, [url, paramsKey, version, notify, errorMessage]);
+  }, [url, paramsKey, requestKey, notify, errorMessage]);
 
   const reload = useCallback(() => setVersion((v) => v + 1), []);
   return { data, loading, reload };

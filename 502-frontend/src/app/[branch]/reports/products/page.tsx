@@ -91,7 +91,12 @@ function ProductsView() {
   };
 
   const t = data?.totals;
-  const chartRows = (data?.rows ?? []).filter((row) => row.id !== null).map((row) => ({ name: rowName(row), value: row.net }));
+  const chartRows = (data?.rows ?? [])
+    .filter((row) => row.id !== null)
+    .map((row) => ({
+      name: rowName(row) + (scope.chain && row.branchCode ? ` · ${row.branchCode.toUpperCase()}` : ""),
+      value: row.net,
+    }));
 
   return (
     <>
@@ -99,7 +104,7 @@ function ProductsView() {
         title="Hàng hóa"
         description={`${scope.name} · Doanh thu thuần = thành tiền − giảm giá của hóa đơn phân bổ theo tỷ lệ tiền từng món; chưa gồm VAT. ${BUSINESS_DAY_HINT}`}
       />
-      <ReportToolbar filters={filters} onChange={setFilters} onExport={data ? exportExcel : undefined} periods={false} />
+      <ReportToolbar filters={filters} onChange={setFilters} onExport={data && !loading ? exportExcel : undefined} periods={false} />
       <Tabs value={by} onValueChange={(value) => setBy(value as ProductGroup)}>
         <TabsList>
           {PRODUCT_GROUPS.map((g) => (

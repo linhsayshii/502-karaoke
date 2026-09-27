@@ -43,7 +43,7 @@ npx jest -t "test name"               # single test by name
 npm run test:e2e           # test/foundation.e2e-spec.ts; resets the DB in test/e2e.env (karaoke_test)
 npx prisma migrate dev --name <name>  # after editing prisma/schema.prisma
 npx prisma migrate deploy             # production
-npx prisma db seed         # branches cs1–cs4 + admin/admin123 (CHAIN_MANAGER); SEED_DEMO=1 adds demo accounts (password demo123), rooms and products for cs1/cs2
+npx prisma db seed         # branches cs1–cs4 + admin (CHAIN_MANAGER), ql1_cs1, tn1_cs1, pv1_cs1, password 12345678; SEED_DEMO=1 adds cskh1_cs1, ql1_cs2, tn1_cs2, pv1_cs2 (same password), rooms and products for cs1/cs2
 ```
 Migrations: `0_init` is the baseline of the legacy `db push` schema; `20260926000000_foundation` is hand-written and migrates legacy rows (see root `DEPLOYMENT.md` §6); `20260926120000_linked_flows` adds the price snapshot, payment methods, fund links and cancel fields (§6.6); `20260927000000_edit_paid_bills` sets the VAT default to 10%, the room type default to VIP and adds the `editedAt/editedBy/editReason` of corrected bills (§6.7); `20260927120000_bill_number` adds bill numbers and numbers the closed bills (§6.8). `test/fixtures/legacy-data.sql` is legacy-shaped data for rehearsing them. Don't use `prisma db push` any more. `prisma migrate dev` needs a TTY; elsewhere write the SQL with `npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url <db> --script`.
 

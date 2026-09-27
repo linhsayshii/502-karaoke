@@ -611,4 +611,97 @@ describe('Reports (e2e)', () => {
       });
     });
   });
+
+  describe('hours', () => {
+    interface HoursReport {
+      totals: { sessions: number; revenue: number };
+      cells: {
+        weekday: number;
+        hour: number;
+        sessions: number;
+        revenue: number;
+      }[];
+    }
+
+    it('counts sessions by weekday of the business day and hour of start', async () => {
+      const prisma = app.get(PrismaService);
+      const cs4 = await prisma.branch.findUniqueOrThrow({
+        where: { code: 'cs4' },
+      });
+      const session = (start: string, end: string, paid: number, vat: number) =>
+        prisma.order.create({
+          data: {
+            branchId: cs4.id,
+            status: 'COMPLETED',
+            startTime: new Date(start),
+            endTime: new Date(end),
+            finalAmount: paid,
+            taxAmount: vat,
+            paymentMethod: 'CASH',
+          },
+        });
+      // 2026-01-09 is a Friday (T6).
+      await session(
+        '2026-01-09T22:10:00',
+        '2026-01-10T00:30:00',
+        110000,
+        10000,
+      );
+      // Saturday 01:00 still belongs to Friday's business day.
+      await session(
+        '2026-01-10T01:00:00',
+        '2026-01-10T03:00:00',
+        220000,
+        20000,
+      );
+      await session('2026-01-10T12:00:00', '2026-01-10T14:00:00', 55000, 5000);
+
+      const res = (
+        await as('admin')
+          .get('/reports/hours?branch=cs4&from=2026-01-09&to=2026-01-10')
+          .expect(200)
+      ).body as HoursReport;
+      expect(res.cells).toHaveLength(168);
+      expect(
+        res.cells
+          .filter((c) => c.sessions > 0)
+          .map((c) => [c.weekday, c.hour, c.sessions, c.revenue]),
+      ).toEqual([
+        [5, 1, 1, 200000],
+        [5, 22, 1, 100000],
+        [6, 12, 1, 50000],
+      ]);
+      expect(res.totals).toEqual({ sessions: 3, revenue: 350000 });
+
+      // Bills without a room: the rooms report's "Không phòng" row.
+      const rooms = (
+        await as('admin')
+          .get('/reports/rooms?branch=cs4&from=2026-01-09&to=2026-01-10')
+          .expect(200)
+      ).body as { occupancy: number | null; rows: Row[] };
+      expect(rooms.occupancy).toBeNull();
+      expect(rooms.rows).toEqual([
+        expect.objectContaining({
+          id: null,
+          name: null,
+          rooms: 0,
+          occupancy: null,
+          orderCount: 3,
+          revenue: 350000,
+        }),
+      ]);
+    });
+
+    it('adds up to the revenue report', async () => {
+      await as('tn1_cs1').get(`/reports/hours?${period}`).expect(403);
+      const { totals } = await report('ql1_cs1');
+      const res = (
+        await as('ql1_cs1').get(`/reports/hours?${period}`).expect(200)
+      ).body as HoursReport;
+      expect(res.totals).toEqual({
+        sessions: totals.orderCount,
+        revenue: totals.revenue,
+      });
+    });
+  });
 });

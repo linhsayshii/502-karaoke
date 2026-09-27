@@ -4,7 +4,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth-user';
 import { BranchScopeService } from '../common/branch-scope.service';
 import { dayCount } from './buckets';
-import { occupancy, rank, roundToTotal } from './breakdowns';
+import {
+  hourGrid,
+  HourCell,
+  occupancy,
+  rank,
+  roundToTotal,
+} from './breakdowns';
 import {
   addSums,
   emptySums,
@@ -13,11 +19,17 @@ import {
   sumAll,
   toMetrics,
 } from './revenue-metrics';
-import { paidOrdersWhere, REVENUE_COLUMNS } from './report-sql';
+import {
+  businessWeekdaySql,
+  localHourSql,
+  paidOrdersWhere,
+  REVENUE_COLUMNS,
+} from './report-sql';
 import { reportScope } from './report-scope';
 import {
   ProductGroup,
   ProductReportQuery,
+  ReportRangeQuery,
   RoomGroup,
   RoomReportQuery,
   StaffReportQuery,
@@ -91,6 +103,13 @@ export interface ProductReport {
   by: ProductGroup;
   totals: ProductSales;
   rows: ProductRow[];
+}
+
+export interface HoursReport {
+  branchId: number | null;
+  range: Range;
+  totals: { sessions: number; revenue: number };
+  cells: HourCell[]; // 7 × 24, Monday 00:00 first
 }
 
 // The person a bill is credited to in each staff report (fixed column
@@ -326,6 +345,32 @@ export class BreakdownReportsService {
       by,
       totals: { quantity, gross, discount, net },
       rows: rank(rows, (r) => r.net),
+    };
+  }
+
+  // Sessions and revenue (before VAT) by weekday of the business day and
+  // hour of the start; the bills are still those paid in the range.
+  async hours(user: AuthUser, query: ReportRangeQuery): Promise<HoursReport> {
+    const branchId = await reportScope(this.branchScope, user, query);
+    // A bill without a start time counts at its payment.
+    const start = Prisma.sql`COALESCE(o."startTime", o."endTime")`;
+    const sums = await this.prisma.$queryRaw<HourCell[]>`
+      SELECT ${businessWeekdaySql(start)} AS "weekday",
+        ${localHourSql(start)} AS "hour",
+        COUNT(*)::int AS "sessions",
+        COALESCE(SUM(o."finalAmount" - o."taxAmount"), 0)::float8 AS "revenue"
+      FROM "Order" o
+      WHERE ${paidOrdersWhere(branchId, query.from, query.to)}
+      GROUP BY 1, 2`;
+    const cells = hourGrid(sums);
+    return {
+      branchId: branchId ?? null,
+      range: { from: query.from, to: query.to },
+      totals: {
+        sessions: cells.reduce((sum, c) => sum + c.sessions, 0),
+        revenue: cells.reduce((sum, c) => sum + c.revenue, 0),
+      },
+      cells,
     };
   }
 }

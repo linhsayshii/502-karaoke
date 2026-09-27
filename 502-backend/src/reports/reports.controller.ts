@@ -10,6 +10,7 @@ import { BreakdownReportsService } from './breakdown-reports.service';
 import {
   ProductReportQuery,
   ReportQuery,
+  ReportRangeQuery,
   RoomReportQuery,
   StaffReportQuery,
 } from './dto/report-query';
@@ -55,5 +56,11 @@ export class ReportsController {
   @Get('products')
   products(@CurrentUser() user: AuthUser, @Query() query: ProductReportQuery) {
     return this.breakdowns.products(user, query);
+  }
+
+  // Heatmap: weekday of the business day × hour the sessions started.
+  @Get('hours')
+  hours(@CurrentUser() user: AuthUser, @Query() query: ReportRangeQuery) {
+    return this.breakdowns.hours(user, query);
   }
 }

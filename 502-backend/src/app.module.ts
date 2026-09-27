@@ -14,6 +14,7 @@ import { RoomsModule } from './rooms/rooms.module';
 import { BranchesModule } from './branches/branches.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { ImportsModule } from './imports/imports.module';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { ImportsModule } from './imports/imports.module';
     InventoryModule,
     FundsModule,
     ImportsModule,
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

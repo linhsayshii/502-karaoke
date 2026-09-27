@@ -337,6 +337,12 @@ Migration chỉ thêm cột và đổi giá trị mặc định, không sửa d�
 - **Phòng mới mặc định là VIP** (form thêm phòng, API và nhập Excel khi bỏ trống loại phòng).
 - Quản lý cơ sở và quản lý hệ thống **sửa được hóa đơn đã thanh toán** (Bán hàng → Hóa đơn → mở hóa đơn → *Sửa hóa đơn*, bắt buộc ghi lý do): món, giảm giá/phí/thuế, CSKH/phục vụ, giờ vào/ra, giá giờ, hình thức thanh toán. Tồn kho, phiếu thu trong Sổ quỹ và doanh thu được cập nhật theo số tiền mới. Tiền giờ đã thu được giữ nguyên nếu không đổi giờ hoặc giá giờ. Hóa đơn thanh toán trước bản 6.6 (không có phiếu thu) vẫn không được sinh phiếu thu khi sửa.
 
+### 6.8. Số hóa đơn (migration `20260927120000_bill_number`)
+
+Mỗi hóa đơn khi đóng (thanh toán **hoặc** hủy phiên) nhận một số hóa đơn dạng `DDMM` ngày kinh doanh + 4 số phòng + 3 số thứ tự trong ngày của cơ sở, ví dụ `27093020001` (ngày 27/09, phòng 302, hóa đơn thứ 1). Phòng 3 số thêm 0 phía sau (401 → `4010`), phòng không có số là `0000`. Hủy hóa đơn đã thanh toán vẫn giữ số cũ; số không bao giờ dùng lại.
+
+Migration đánh số bù cho mọi hóa đơn đã đóng theo thứ tự giờ đóng, tính ngày kinh doanh theo giờ Việt Nam. Trang Hóa đơn tìm được theo số hóa đơn đầy đủ trên mọi ngày.
+
 ## 7. Xử lý sự cố
 
 | Hiện tượng | Nguyên nhân / cách xử lý |

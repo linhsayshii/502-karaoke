@@ -6,6 +6,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
+import { businessDateOf } from '../src/common/dates';
 
 // Permission matrix and the main sales / inventory / fund flows against a
 // fresh database seeded with the demo accounts (SEED_DEMO=1).
@@ -1104,6 +1105,97 @@ describe('Foundation (e2e)', () => {
         .post(cs3('/imports/categories'), { dryRun: true, rows })
         .expect(200);
       expect((res.body as Json).summary).toMatchObject({ create: 1000 });
+    });
+  });
+
+  describe('bill numbers', () => {
+    const roomIds: Record<string, number> = {};
+    // DDMM of today's business day, as the number starts.
+    const ddmm = () => {
+      const [, month, day] = businessDateOf(new Date()).split('-');
+      return `${day}${month}`;
+    };
+    const seqOf = (billNumber: string) => Number(billNumber.slice(8));
+    const open = async (room: string) =>
+      (
+        (
+          await as('tn_cs1')
+            .post('/orders', { roomId: roomIds[room] })
+            .expect(201)
+        ).body as Json
+      ).id as number;
+    const checkout = async (id: number) =>
+      (await as('tn_cs1').post(`/orders/${id}/checkout`).expect(200))
+        .body as Json;
+
+    beforeAll(async () => {
+      const rooms = (await as('tn_cs1').get('/rooms').expect(200))
+        .body as Json[];
+      for (const r of rooms) roomIds[r.name as string] = r.id as number;
+    });
+
+    it('numbers every closed bill of the day, cancelled ones included', async () => {
+      const paid = await checkout(await open('P102'));
+      const first = paid.billNumber as string;
+      expect(first).toMatch(new RegExp(`^${ddmm()}1020\\d{3}$`));
+
+      const dropped = await open('P102');
+      const cancelled = (
+        await as('ql_cs1').post(`/orders/${dropped}/cancel`).expect(200)
+      ).body as Json;
+      expect(cancelled.billNumber).toMatch(new RegExp(`^${ddmm()}1020`));
+      expect(seqOf(cancelled.billNumber as string)).toBe(seqOf(first) + 1);
+
+      // Voiding keeps the number; the next bill still counts up.
+      const voided = (
+        await as('ql_cs1')
+          .post(`/orders/${paid.id as number}/void`, { reason: 'Nhầm' })
+          .expect(200)
+      ).body as Json;
+      expect(voided.billNumber).toBe(first);
+      const next = await checkout(await open('P103'));
+      expect(next.billNumber).toMatch(new RegExp(`^${ddmm()}1030`));
+      expect(seqOf(next.billNumber as string)).toBe(seqOf(first) + 2);
+
+      const receipt = (await as('ql_cs1').get('/funds').expect(200))
+        .body as Json[];
+      expect(receipt.find((t) => t.orderId === next.id)).toMatchObject({
+        description: `Thu tiền hóa đơn ${next.billNumber as string} – phòng P103`,
+      });
+    });
+
+    it('never gives two concurrent checkouts the same number', async () => {
+      const ids = [await open('P102'), await open('P103')];
+      const bills = await Promise.all(ids.map((id) => checkout(id)));
+      const seqs = bills.map((b) => seqOf(b.billNumber as string));
+      expect(new Set(seqs).size).toBe(2);
+      expect(Math.abs(seqs[0] - seqs[1])).toBe(1);
+    });
+
+    it('finds bills by number or its beginning, over every day', async () => {
+      const bills = (await as('ql_cs1').get('/orders').expect(200))
+        .body as Json[];
+      const numbered = bills.filter((b) => b.billNumber);
+      const target = numbered[0].billNumber as string;
+
+      const exact = (
+        await as('ql_cs1')
+          .get(`/orders?billNumber=${target}&from=2000-01-01&to=2000-01-01`)
+          .expect(200)
+      ).body as Json[];
+      expect(exact.map((b) => b.billNumber)).toEqual([target]);
+
+      const sameDay = (
+        await as('ql_cs1').get(`/orders?billNumber=${ddmm()}`).expect(200)
+      ).body as Json[];
+      expect(sameDay).toHaveLength(numbered.length);
+
+      const otherBranch = (
+        await as('ql_cs2').get(`/orders?billNumber=${target}`).expect(200)
+      ).body as Json[];
+      expect(otherBranch).toEqual([]);
+
+      await as('ql_cs1').get('/orders?billNumber=27-09').expect(400);
     });
   });
 });

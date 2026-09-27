@@ -34,6 +34,7 @@ import { EditPaidOrderDto } from './dto/edit-paid-order.dto';
 import { OrderItemDto } from './dto/order-item.dto';
 import { ListOrdersQuery, StatisticsQuery } from './dto/order-queries';
 import { Bill, billedHoursOf, computeBill } from './billing';
+import { billNumberPrefixRange, nextBillNumber } from './bill-number';
 
 const staffRef = { select: { id: true, fullName: true } };
 const orderInclude = {
@@ -230,13 +231,19 @@ export class OrdersService {
     const branchId = await this.branchScope.resolveBranchId(user, query.branch);
     const where: Prisma.OrderWhereInput = { branchId, status: query.status };
 
+    // A bill number is looked up over every day.
     const from = query.from ?? query.businessDate;
     const to = query.to ?? query.businessDate;
-    if (from || to) where.endTime = businessDayRange(from, to);
+    if (query.billNumber) {
+      where.billNumber = billNumberPrefixRange(query.billNumber);
+    } else if (from || to) {
+      where.endTime = businessDayRange(from, to);
+    }
 
     if (user.role === Role.STAFF) {
       where.status = OrderStatus.PENDING;
       where.endTime = undefined;
+      where.billNumber = undefined;
       where.OR = [{ serverId: user.id }, { cskhId: user.id }];
     }
 
@@ -377,12 +384,19 @@ export class OrdersService {
 
         const endTime = new Date();
         const bill = billOf(order, endTime);
+        const number = await nextBillNumber(
+          tx,
+          order.branchId,
+          endTime,
+          order.room?.name,
+        );
 
         await tx.order.update({
           where: { id },
           data: {
             status: OrderStatus.COMPLETED,
             endTime,
+            ...number,
             ...billAmounts(bill),
             paymentMethod: method,
             checkedOutById: user.id,
@@ -423,6 +437,7 @@ export class OrdersService {
           await recordSaleReceipt(tx, {
             branchId: order.branchId,
             orderId: order.id,
+            billNumber: number.billNumber,
             amount: bill.finalAmount,
             method,
             occurredAt: endTime,
@@ -440,7 +455,8 @@ export class OrdersService {
     );
   }
 
-  // Managers only: drop an open session without billing it.
+  // Managers only: drop an open session without billing it. It still takes
+  // the next bill number, so the day's numbers show every closed session.
   cancel(user: AuthUser, id: number, reason?: string) {
     return this.prisma.$transaction(async (tx) => {
       const order = await this.lockOrder(
@@ -451,11 +467,18 @@ export class OrdersService {
         'Chỉ hủy được hóa đơn đang mở',
       );
       const now = new Date();
+      const number = await nextBillNumber(
+        tx,
+        order.branchId,
+        now,
+        order.room?.name,
+      );
       await tx.order.update({
         where: { id },
         data: {
           status: OrderStatus.CANCELLED,
           endTime: now,
+          ...number,
           cancelledAt: now,
           cancelledById: user.id,
           cancelReason: reason?.trim() || null,
@@ -475,7 +498,8 @@ export class OrdersService {
   }
 
   // Managers only: void a paid bill. The sold goods go back to stock and the
-  // fund receipt is cancelled, so revenue, stock and fund stay in step.
+  // fund receipt is cancelled, so revenue, stock and fund stay in step. The
+  // bill keeps its number.
   voidPaid(user: AuthUser, id: number, reason: string) {
     return this.prisma.$transaction(
       async (tx) => {
@@ -516,7 +540,7 @@ export class OrdersService {
           { orderId: id },
           {
             cancelledById: user.id,
-            reason: `Hủy hóa đơn #${id}: ${reason.trim()}`,
+            reason: `Hủy hóa đơn ${order.billNumber ?? `#${id}`}: ${reason.trim()}`,
           },
         );
 
@@ -625,6 +649,7 @@ export class OrdersService {
           {
             branchId: order.branchId,
             orderId: id,
+            billNumber: order.billNumber ?? `#${id}`,
             amount: bill.finalAmount,
             method,
             occurredAt: endTime,

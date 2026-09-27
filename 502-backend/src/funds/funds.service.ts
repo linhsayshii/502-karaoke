@@ -17,7 +17,12 @@ const fundInclude = {
   createdBy: userRef,
   cancelledBy: userRef,
   order: {
-    select: { id: true, status: true, room: { select: { name: true } } },
+    select: {
+      id: true,
+      billNumber: true,
+      status: true,
+      room: { select: { name: true } },
+    },
   },
   stockDocument: { select: { id: true, code: true, type: true } },
 } satisfies Prisma.FundTransactionInclude;

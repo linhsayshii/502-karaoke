@@ -89,10 +89,7 @@ describe('Reports (e2e)', () => {
       .body as Report;
   const sumOf = (rows: Row[], field: string) =>
     rows.reduce((sum, row) => sum + Number(row[field]), 0);
-  // The rows of a breakdown add up to the revenue report's totals. Not used
-  // by this task's tests yet — scaffolding for the breakdown reports of the
-  // next task.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  // The rows of a breakdown add up to the revenue report's totals.
   const expectSameTotals = (rows: Row[], totals: Metrics) => {
     for (const field of [
       'orderCount',
@@ -104,23 +101,51 @@ describe('Reports (e2e)', () => {
       expect(sumOf(rows, field)).toBe(totals[field]);
   };
 
-  // Opens a room, orders 2 beers, applies `adjustments` and pays.
+  const idOf = async (username: string) =>
+    (
+      await app
+        .get(PrismaService)
+        .user.findUniqueOrThrow({ where: { username } })
+    ).id;
+  const breakdown = async (username: string, path: string) =>
+    (
+      await as(username)
+        .get(`${path}${path.includes('?') ? '&' : '?'}${period}`)
+        .expect(200)
+    ).body as {
+      totals: Metrics;
+      rows: Row[];
+      occupancy?: number | null;
+      days?: number;
+    };
+
+  // Opens a room (with `open`, e.g. its CSKH/server), orders `items`
+  // (default 2 beers), applies `adjustments` and pays.
   const payBill = async (
     cashier: string,
     roomName: string,
     adjustments: Json,
     paymentMethod: 'CASH' | 'TRANSFER',
+    {
+      open = {},
+      items = [['Bia Tiger', 2]],
+    }: { open?: Json; items?: [string, number][] } = {},
   ) => {
     const rooms = (await as(cashier).get('/rooms').expect(200)).body as Json[];
     const products = (await as(cashier).get('/products').expect(200))
       .body as Json[];
     const roomId = rooms.find((r) => r.name === roomName)!.id;
-    const beerId = products.find((p) => p.name === 'Bia Tiger')!.id;
-    const opened = (await as(cashier).post('/orders', { roomId }).expect(201))
-      .body as Json;
+    const opened = (
+      await as(cashier)
+        .post('/orders', { roomId, ...open })
+        .expect(201)
+    ).body as Json;
     await as(cashier)
       .patch(`/orders/${opened.id as number}`, {
-        items: [{ productId: beerId, quantity: 2 }],
+        items: items.map(([name, quantity]) => ({
+          productId: products.find((p) => p.name === name)!.id,
+          quantity,
+        })),
         ...adjustments,
       })
       .expect(200);
@@ -367,6 +392,111 @@ describe('Reports (e2e)', () => {
         1,
       );
       expect(res.previous).toMatchObject({ totals: { orderCount: 0 } });
+    });
+  });
+
+  describe('staff', () => {
+    it('is for managers, within their own branch', async () => {
+      await as('tn1_cs1').get(`/reports/staff?${period}`).expect(403);
+      await as('ql1_cs1')
+        .get(`/reports/staff?${period}&branch=cs2`)
+        .expect(403);
+      await as('ql1_cs1').get(`/reports/staff?${period}&role=boss`).expect(400);
+    });
+
+    it('credits each bill in full to its CSKH, its server and its cashier', async () => {
+      const cskhId = await idOf('cskh1_cs1');
+      const serverId = await idOf('pv1_cs1');
+      const cashierId = await idOf('tn1_cs1');
+      const bill = await payBill('tn1_cs1', 'P103', {}, 'CASH', {
+        open: { cskhId, serverId },
+      });
+      const { totals } = await report('ql1_cs1');
+
+      for (const [role, id] of [
+        ['cskh', cskhId],
+        ['server', serverId],
+      ] as const) {
+        const res = await breakdown('ql1_cs1', `/reports/staff?role=${role}`);
+        expect(res.totals).toEqual(totals);
+        expectSameTotals(res.rows, totals);
+        expect(res.rows[0]).toMatchObject({
+          id,
+          orderCount: 1,
+          collected: Number(bill.finalAmount),
+        });
+        // Bills without anyone in that role: "Chưa gán", always last.
+        expect(res.rows.at(-1)).toMatchObject({
+          id: null,
+          name: null,
+          orderCount: totals.orderCount - 1,
+        });
+      }
+
+      const cashiers = await breakdown(
+        'ql1_cs1',
+        '/reports/staff?role=cashier',
+      );
+      expectSameTotals(cashiers.rows, totals);
+      expect(cashiers.rows).toEqual([
+        expect.objectContaining({
+          id: cashierId,
+          name: 'Thu ngân CS1',
+          username: 'tn1_cs1',
+          branchCode: 'cs1',
+          orderCount: totals.orderCount,
+        }),
+      ]);
+    });
+  });
+
+  describe('rooms', () => {
+    it('validates the grouping', async () => {
+      await as('ql1_cs1').get(`/reports/rooms?${period}&by=floor`).expect(400);
+      await as('tn1_cs1').get(`/reports/rooms?${period}`).expect(403);
+    });
+
+    it('adds up per room, every room listed, with the occupancy', async () => {
+      const { totals } = await report('ql1_cs1');
+      const res = await breakdown('ql1_cs1', '/reports/rooms?by=room');
+      expect(res.totals).toEqual(totals);
+      expectSameTotals(res.rows, totals);
+      expect(res.days).toBe(3);
+      expect(res.rows.map((r) => r.name).sort()).toEqual([
+        'P101',
+        'P102',
+        'P103',
+      ]);
+
+      const p101 = res.rows.find((r) => r.name === 'P101')!;
+      expect(p101).toMatchObject({
+        type: 'NORMAL',
+        branchCode: 'cs1',
+        rooms: 1,
+      });
+      expect(p101.orderCount).toBeGreaterThanOrEqual(1);
+      expect(p101.occupancy).toBeCloseTo(Number(p101.roomMinutes) / (3 * 1110));
+      // P102's only bill was voided: listed, with nothing.
+      expect(res.rows.find((r) => r.name === 'P102')).toMatchObject({
+        orderCount: 0,
+        revenue: 0,
+        occupancy: 0,
+      });
+      expect(res.occupancy).toBeCloseTo(totals.roomMinutes / (3 * 1110 * 3));
+    });
+
+    it('adds up per room type', async () => {
+      const { totals } = await report('ql1_cs1');
+      const res = await breakdown('ql1_cs1', '/reports/rooms?by=type');
+      expectSameTotals(res.rows, totals);
+      expect(res.rows.map((r) => [r.id, r.rooms]).sort()).toEqual([
+        ['NORMAL', 2],
+        ['VIP', 1],
+      ]);
+      const normal = res.rows.find((r) => r.id === 'NORMAL')!;
+      expect(normal.occupancy).toBeCloseTo(
+        Number(normal.roomMinutes) / (3 * 1110 * 2),
+      );
     });
   });
 });

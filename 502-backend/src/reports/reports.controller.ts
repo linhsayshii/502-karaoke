@@ -6,14 +6,22 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/auth-user';
 import { MANAGERS } from '../auth/roles';
 import { ReportsService } from './reports.service';
-import { ReportQuery } from './dto/report-query';
+import { BreakdownReportsService } from './breakdown-reports.service';
+import {
+  ReportQuery,
+  RoomReportQuery,
+  StaffReportQuery,
+} from './dto/report-query';
 
 @ApiTags('reports')
 @ApiBearerAuth()
 @Roles(...MANAGERS)
 @Controller('reports')
 export class ReportsController {
-  constructor(private readonly reportsService: ReportsService) {}
+  constructor(
+    private readonly reportsService: ReportsService,
+    private readonly breakdowns: BreakdownReportsService,
+  ) {}
 
   // Revenue (before VAT, VAT apart) per period; the whole chain when the
   // chain manager leaves out ?branch.
@@ -27,5 +35,17 @@ export class ReportsController {
   @Roles(Role.CHAIN_MANAGER)
   branches(@Query() query: ReportQuery) {
     return this.reportsService.branches(query);
+  }
+
+  // Revenue per CSKH, server or cashier; each bill counts in full for each.
+  @Get('staff')
+  staff(@CurrentUser() user: AuthUser, @Query() query: StaffReportQuery) {
+    return this.breakdowns.staff(user, query);
+  }
+
+  // Revenue and occupancy per room or room type.
+  @Get('rooms')
+  rooms(@CurrentUser() user: AuthUser, @Query() query: RoomReportQuery) {
+    return this.breakdowns.rooms(user, query);
   }
 }

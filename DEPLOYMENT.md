@@ -94,19 +94,19 @@ Lần đầu build mất vài phút.
 
 ### 2.5. Tạo dữ liệu ban đầu
 
-Tạo các cơ sở `cs1`–`cs4` và tài khoản quản lý hệ thống `admin` / `admin123`. **Chỉ chạy một lần** trên database mới (không chạy khi chuyển từ bản cũ sang):
+Tạo các cơ sở `cs1`–`cs4` và các tài khoản mặc định, tất cả có mật khẩu `12345678`: `admin` (quản lý hệ thống), `ql1_cs1` (quản lý cơ sở 1), `tn1_cs1` (thu ngân cơ sở 1), `pv1_cs1` (phục vụ cơ sở 1). **Chỉ chạy một lần** trên database mới (không chạy khi chuyển từ bản cũ sang):
 
 ```bash
 docker compose exec backend node dist/prisma/seed.js
 ```
 
-Muốn thêm dữ liệu demo (tài khoản mật khẩu `demo123`, phòng và mặt hàng cho cs1/cs2), chỉ dùng khi thử nghiệm:
+Muốn thêm dữ liệu demo (tài khoản `cskh1_cs1`, `ql1_cs2`, `tn1_cs2`, `pv1_cs2` mật khẩu `12345678`, phòng và mặt hàng cho cs1/cs2), chỉ dùng khi thử nghiệm:
 
 ```bash
 docker compose exec -e SEED_DEMO=1 backend node dist/prisma/seed.js
 ```
 
-Mở `http://<địa chỉ máy chủ>:3000`, đăng nhập `admin` / `admin123` rồi **đổi mật khẩu ngay**.
+Mở `http://<địa chỉ máy chủ>:3000`, đăng nhập `admin` / `12345678` rồi **đổi mật khẩu ngay** cho `admin` và các tài khoản mặc định (hoặc khoá những tài khoản không dùng).
 
 ## 3. Tên miền, Nginx và HTTPS
 

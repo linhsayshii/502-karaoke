@@ -462,7 +462,7 @@ export default function UsersPage() {
                     <Input
                       id="user-username"
                       autoCapitalize="none"
-                      placeholder="vd: tn_cs1"
+                      placeholder="vd: tn1_cs1"
                       value={form.username}
                       disabled={!isNew}
                       aria-invalid={invalid.username || undefined}

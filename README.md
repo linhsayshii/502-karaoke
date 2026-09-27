@@ -28,10 +28,23 @@ Cần [Docker](https://docs.docker.com/get-docker/) có Compose v2.
 ```bash
 cp .env.docker.example .env        # rồi đổi POSTGRES_PASSWORD, JWT_SECRET, JWT_REFRESH_SECRET
 docker compose up -d --build
-docker compose exec backend node dist/prisma/seed.js   # chỉ lần đầu: tạo cs1–cs4 và tài khoản admin
+docker compose exec backend node dist/prisma/seed.js   # chỉ lần đầu: tạo cs1–cs4 và các tài khoản mặc định
 ```
 
-Mở http://localhost:3000 và đăng nhập `admin` / `admin123` (đổi mật khẩu ngay). Dữ liệu nằm trong `./data/postgres` và vẫn còn sau `docker compose down`.
+Mở http://localhost:3000 và đăng nhập `admin` / `12345678`. Dữ liệu nằm trong `./data/postgres` và vẫn còn sau `docker compose down`.
+
+### Tài khoản mặc định
+
+Seed tạo sẵn các tài khoản sau, tất cả có mật khẩu **`12345678`** — **đổi mật khẩu ngay** sau lần đăng nhập đầu tiên:
+
+| Tài khoản | Vai trò | Cơ sở |
+|-----------|---------|-------|
+| `admin` | Quản lý hệ thống | Tất cả |
+| `ql1_cs1` | Quản lý cơ sở | Cơ sở 1 |
+| `tn1_cs1` | Thu ngân | Cơ sở 1 |
+| `pv1_cs1` | Nhân viên (phục vụ) | Cơ sở 1 |
+
+Chạy lại seed không tạo trùng và không đặt lại mật khẩu của tài khoản đã có.
 
 ## Tài liệu
 

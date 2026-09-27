@@ -14,7 +14,7 @@ echo "NEXT_PUBLIC_API_URL=http://localhost:4000/api" > .env.development.local
 npm run dev        # http://localhost:3000
 ```
 
-Đăng nhập bằng tài khoản đã seed ở backend (`admin` / `admin123`).
+Đăng nhập bằng tài khoản đã seed ở backend (`admin`, `ql1_cs1`, `tn1_cs1` hoặc `pv1_cs1`, mật khẩu `12345678`).
 
 ## Kết nối API
 

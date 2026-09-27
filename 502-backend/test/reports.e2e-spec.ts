@@ -173,6 +173,11 @@ describe('Reports (e2e)', () => {
           totals.productDiscount +
           totals.serviceFee,
       );
+
+      const fund = (
+        await as('ql_cs1').get(`/funds/summary?${period}`).expect(200)
+      ).body as Json;
+      expect(fund).toMatchObject({ salesIncome: paid, salesVat: vat });
     });
 
     it('adds up the whole chain for the chain manager only', async () => {
@@ -268,6 +273,12 @@ describe('Reports (e2e)', () => {
         count: 1,
         amount: Number(bill.finalAmount),
       });
+
+      const fund = (
+        await as('ql_cs1').get(`/funds/summary?${period}`).expect(200)
+      ).body as Json;
+      expect(fund.salesIncome).toBe(after.totals.collected);
+      expect(fund.salesVat).toBe(after.totals.vat);
     });
   });
 });

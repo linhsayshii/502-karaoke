@@ -22,9 +22,26 @@ const utcTimestamp = (date: Date) =>
 
 const DAY_START = Prisma.raw(`interval '${BUSINESS_DAY_START_HOUR} hours'`);
 
+// Local wall-clock time of a UTC timestamp column (the time zone of
+// businessDateOf()).
+export function localTimeSql(column: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`((${column} AT TIME ZONE 'UTC') AT TIME ZONE ${localTimeZone()})`;
+}
+
 // YYYY-MM-DD business day of a timestamp column.
 export function businessDateSql(column: Prisma.Sql): Prisma.Sql {
-  return Prisma.sql`to_char(((${column} AT TIME ZONE 'UTC') AT TIME ZONE ${localTimeZone()}) - ${DAY_START}, 'YYYY-MM-DD')`;
+  return Prisma.sql`to_char(${localTimeSql(column)} - ${DAY_START}, 'YYYY-MM-DD')`;
+}
+
+// ISO weekday (1 = Monday … 7 = Sunday) of the business day of a column:
+// a session started at 01:00 on Saturday belongs to Friday.
+export function businessWeekdaySql(column: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`EXTRACT(ISODOW FROM ${localTimeSql(column)} - ${DAY_START})::int`;
+}
+
+// Local hour (0–23) of a timestamp column.
+export function localHourSql(column: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`EXTRACT(HOUR FROM ${localTimeSql(column)})::int`;
 }
 
 // Paid bills (`"Order" o`) of the business days from..to, by payment time;

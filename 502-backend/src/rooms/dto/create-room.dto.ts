@@ -15,10 +15,11 @@ export class CreateRoomDto {
   @IsNotEmpty()
   name: string;
 
-  @ApiProperty({ description: 'VIP | NORMAL' })
-  @IsString()
-  @IsNotEmpty()
-  type: string;
+  // Rooms are VIP unless said otherwise (database default).
+  @ApiProperty({ required: false, enum: ['VIP', 'NORMAL'], default: 'VIP' })
+  @IsOptional()
+  @IsIn(['VIP', 'NORMAL'])
+  type?: string;
 
   @ApiProperty()
   @IsNumber()

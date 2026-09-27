@@ -105,6 +105,10 @@ export interface Order {
   createdBy?: StaffRef | null;
   checkedOutBy?: StaffRef | null;
   cancelledBy?: StaffRef | null;
+  // Last correction of a paid bill by a manager.
+  editedBy?: StaffRef | null;
+  editedAt?: string | null;
+  editReason?: string | null;
   startTime: string;
   endTime: string | null;
   updatedAt: string;

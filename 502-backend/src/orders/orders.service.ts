@@ -23,11 +23,17 @@ import {
   businessDayRange,
 } from '../common/dates';
 import { InventoryService } from '../inventory/inventory.service';
-import { cancelLinkedEntry, recordSaleReceipt } from '../funds/fund-ledger';
+import {
+  cancelLinkedEntry,
+  recordSaleReceipt,
+  syncSaleReceipt,
+} from '../funds/fund-ledger';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
+import { EditPaidOrderDto } from './dto/edit-paid-order.dto';
+import { OrderItemDto } from './dto/order-item.dto';
 import { ListOrdersQuery, StatisticsQuery } from './dto/order-queries';
-import { Bill, computeBill } from './billing';
+import { Bill, billedHoursOf, computeBill } from './billing';
 
 const staffRef = { select: { id: true, fullName: true } };
 const orderInclude = {
@@ -37,6 +43,7 @@ const orderInclude = {
   createdBy: staffRef,
   checkedOutBy: staffRef,
   cancelledBy: staffRef,
+  editedBy: staffRef,
   items: { include: { product: true }, orderBy: { id: 'asc' } },
   fundTransaction: {
     select: { id: true, method: true, amount: true, cancelledAt: true },
@@ -70,6 +77,12 @@ function billOf(order: BillableOrder, endTime: Date): Bill {
       price: Number(i.price),
       quantity: i.quantity,
     })),
+    ...adjustmentsOf(order),
+  });
+}
+
+function adjustmentsOf(order: BillableOrder) {
+  return {
     discountPercent: order.discountPercent,
     discountAmount: Number(order.discountAmount),
     hourlyDiscountPercent: order.hourlyDiscountPercent,
@@ -77,8 +90,26 @@ function billOf(order: BillableOrder, endTime: Date): Bill {
     serviceFeePercent: order.serviceFeePercent,
     serviceFeeAmount: Number(order.serviceFeeAmount),
     taxPercent: order.taxPercent,
-  });
+  };
 }
+
+// DTO fields that were not sent are own `undefined` properties; drop them
+// so they do not overwrite stored values.
+const sentFields = <T extends object>(dto: T) =>
+  Object.fromEntries(
+    Object.entries(dto).filter(([, value]) => value !== undefined),
+  ) as Partial<T>;
+
+// The amounts of a computed bill as stored on the order.
+const billAmounts = (bill: Bill) => ({
+  hourlyFee: bill.hourlyFee,
+  totalProductPrice: bill.totalProductPrice,
+  discountAmount: bill.discountAmount,
+  hourlyDiscountAmount: bill.hourlyDiscountAmount,
+  serviceFeeAmount: bill.serviceFeeAmount,
+  taxAmount: bill.taxAmount,
+  finalAmount: bill.finalAmount,
+});
 
 @Injectable()
 export class OrdersService {
@@ -245,38 +276,7 @@ export class OrdersService {
       const data: Prisma.OrderUncheckedUpdateInput = { ...fields };
 
       if (items) {
-        // Merge duplicate lines; keep the price each product was ordered at.
-        const quantities = new Map<number, number>();
-        for (const item of items) {
-          quantities.set(
-            item.productId,
-            (quantities.get(item.productId) ?? 0) + item.quantity,
-          );
-        }
-        const snapshot = new Map<number, Prisma.Decimal>();
-        for (const item of order.items) {
-          if (!snapshot.has(item.productId)) {
-            snapshot.set(item.productId, item.price);
-          }
-        }
-
-        const products = await tx.product.findMany({
-          where: { id: { in: [...quantities.keys()] } },
-        });
-        const productById = new Map(products.map((p) => [p.id, p]));
-
-        const lines = [...quantities].map(([productId, quantity]) => {
-          const product = productById.get(productId);
-          const price = snapshot.get(productId);
-          if (!product || product.branchId !== order.branchId) {
-            throw new BadRequestException('Sản phẩm không thuộc cơ sở này');
-          }
-          if (!price && !product.active) {
-            throw new BadRequestException(`"${product.name}" đã ngừng bán`);
-          }
-          return { productId, quantity, price: price ?? product.price };
-        });
-
+        const lines = await this.resolveLines(tx, order, items);
         data.items = { deleteMany: {}, create: lines };
         data.totalProductPrice = lines.reduce(
           (sum, l) => sum + Number(l.price) * l.quantity,
@@ -292,6 +292,48 @@ export class OrdersService {
     });
   }
 
+  // New item lines of an order: duplicates merged, each product keeps the
+  // price it was ordered at, new ones take the current price.
+  private async resolveLines(
+    tx: Db,
+    order: {
+      branchId: number;
+      items: { productId: number; price: Prisma.Decimal }[];
+    },
+    items: OrderItemDto[],
+  ) {
+    const quantities = new Map<number, number>();
+    for (const item of items) {
+      quantities.set(
+        item.productId,
+        (quantities.get(item.productId) ?? 0) + item.quantity,
+      );
+    }
+    const snapshot = new Map<number, Prisma.Decimal>();
+    for (const item of order.items) {
+      if (!snapshot.has(item.productId)) {
+        snapshot.set(item.productId, item.price);
+      }
+    }
+
+    const products = await tx.product.findMany({
+      where: { id: { in: [...quantities.keys()] } },
+    });
+    const productById = new Map(products.map((p) => [p.id, p]));
+
+    return [...quantities].map(([productId, quantity]) => {
+      const product = productById.get(productId);
+      const price = snapshot.get(productId);
+      if (!product || product.branchId !== order.branchId) {
+        throw new BadRequestException('Sản phẩm không thuộc cơ sở này');
+      }
+      if (!price && !product.active) {
+        throw new BadRequestException(`"${product.name}" đã ngừng bán`);
+      }
+      return { productId, quantity, price: price ?? product.price };
+    });
+  }
+
   // Live bill for an open session; closed bills show what was stored.
   async preview(user: AuthUser, id: number) {
     const order = await this.findOne(user, id);
@@ -300,9 +342,11 @@ export class OrdersService {
         order.startTime && order.endTime
           ? (order.endTime.getTime() - order.startTime.getTime()) / 60000
           : 0;
+      const durationMinutes = Math.max(0, Math.ceil(minutes));
       return {
         ...order,
-        durationMinutes: Math.max(0, Math.ceil(minutes)),
+        durationMinutes,
+        billedHours: billedHoursOf(durationMinutes),
         hourlyFee: Number(order.hourlyFee),
         totalProductPrice: Number(order.totalProductPrice),
         discountAmount: Number(order.discountAmount),
@@ -339,13 +383,7 @@ export class OrdersService {
           data: {
             status: OrderStatus.COMPLETED,
             endTime,
-            hourlyFee: bill.hourlyFee,
-            totalProductPrice: bill.totalProductPrice,
-            discountAmount: bill.discountAmount,
-            hourlyDiscountAmount: bill.hourlyDiscountAmount,
-            serviceFeeAmount: bill.serviceFeeAmount,
-            taxAmount: bill.taxAmount,
-            finalAmount: bill.finalAmount,
+            ...billAmounts(bill),
             paymentMethod: method,
             checkedOutById: user.id,
           },
@@ -458,19 +496,14 @@ export class OrdersService {
           },
         });
 
-        // Put back exactly what checkout took out.
-        const sales = await tx.stockMovement.groupBy({
-          by: ['productId'],
-          where: { orderId: id, type: StockMovementType.SALE },
-          _sum: { quantity: true },
-          orderBy: { productId: 'asc' },
-        });
-        for (const sale of sales) {
-          const quantity = -(sale._sum.quantity ?? 0);
+        // Put back exactly what the bill took out (checkout and later
+        // corrections).
+        const taken = await this.stockTakenBy(tx, id);
+        for (const [productId, quantity] of taken) {
           if (quantity <= 0) continue;
           await this.inventory.applyMovement(tx, {
             branchId: order.branchId,
-            productId: sale.productId,
+            productId,
             type: StockMovementType.REVERSAL,
             quantity,
             orderId: id,
@@ -494,6 +527,176 @@ export class OrdersService {
       },
       { timeout: 15000 },
     );
+  }
+
+  // Managers only: correct a paid bill (items, adjustments, staff, times,
+  // price, payment method). The bill is recomputed; stock follows the new
+  // quantities and the fund receipt the new total, method and payment time,
+  // so revenue, stock and fund stay in step. The room fee that was charged
+  // is kept unless the times or the price change.
+  editPaid(user: AuthUser, id: number, dto: EditPaidOrderDto) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const order = await this.lockOrder(
+          tx,
+          user,
+          id,
+          OrderStatus.COMPLETED,
+          'Chỉ sửa được hóa đơn đã thanh toán',
+        );
+        await this.assertFloorStaff(tx, order.branchId, [
+          dto.cskhId,
+          dto.serverId,
+        ]);
+        if (!order.startTime || !order.endTime) {
+          throw new BadRequestException('Hóa đơn không có giờ vào/giờ ra');
+        }
+
+        const {
+          items,
+          reason,
+          startTime: newStart,
+          endTime: newEnd,
+          pricePerHour: newPrice,
+          paymentMethod,
+          ...rest
+        } = dto;
+        const fields = sentFields(rest);
+        const startTime = newStart ? new Date(newStart) : order.startTime;
+        const endTime = newEnd ? new Date(newEnd) : order.endTime;
+        if (endTime <= startTime) {
+          throw new BadRequestException('Giờ ra phải sau giờ vào');
+        }
+        if (endTime > new Date()) {
+          throw new BadRequestException('Giờ ra không được ở tương lai');
+        }
+        const pricePerHour = newPrice ?? Number(order.pricePerHour);
+        const roomFeeChanged =
+          startTime.getTime() !== order.startTime.getTime() ||
+          endTime.getTime() !== order.endTime.getTime() ||
+          pricePerHour !== Number(order.pricePerHour);
+
+        const lines = items
+          ? await this.resolveLines(tx, order, items)
+          : order.items;
+        const bill = computeBill({
+          startTime,
+          endTime,
+          pricePerHour,
+          items: lines.map((l) => ({
+            price: Number(l.price),
+            quantity: l.quantity,
+          })),
+          ...adjustmentsOf(order),
+          ...fields,
+          hourlyFee: roomFeeChanged ? undefined : Number(order.hourlyFee),
+        });
+        const method =
+          paymentMethod ?? order.paymentMethod ?? PaymentMethod.CASH;
+
+        await tx.order.update({
+          where: { id },
+          data: {
+            ...fields,
+            ...(items && {
+              items: {
+                deleteMany: {},
+                create: lines.map(({ productId, quantity, price }) => ({
+                  productId,
+                  quantity,
+                  price,
+                })),
+              },
+            }),
+            startTime,
+            endTime,
+            pricePerHour,
+            ...billAmounts(bill),
+            paymentMethod: method,
+            editedAt: new Date(),
+            editedById: user.id,
+            editReason: reason.trim(),
+          },
+        });
+
+        await this.syncSoldStock(tx, order.branchId, id, user.id);
+        await syncSaleReceipt(
+          tx,
+          {
+            branchId: order.branchId,
+            orderId: id,
+            amount: bill.finalAmount,
+            method,
+            occurredAt: endTime,
+            roomName: order.room?.name,
+            createdById: user.id,
+          },
+          Number(order.finalAmount) === 0,
+        );
+
+        return tx.order.findUniqueOrThrow({
+          where: { id },
+          include: orderInclude,
+        });
+      },
+      { timeout: 15000 },
+    );
+  }
+
+  // Net quantity each product's stock gave to a bill, by product id.
+  private async stockTakenBy(tx: Db, orderId: number) {
+    const rows = await tx.stockMovement.groupBy({
+      by: ['productId'],
+      where: { orderId },
+      _sum: { quantity: true },
+      orderBy: { productId: 'asc' },
+    });
+    return new Map(rows.map((r) => [r.productId, -(r._sum.quantity ?? 0)]));
+  }
+
+  // Brings the stock taken by a paid bill in line with its items: more of a
+  // product is sold (SALE), less is put back (REVERSAL). Products that are no
+  // longer stock-tracked are left alone. Locks rows by product id, as
+  // checkout does.
+  private async syncSoldStock(
+    tx: Db,
+    branchId: number,
+    orderId: number,
+    userId: number,
+  ) {
+    const items = await tx.orderItem.findMany({ where: { orderId } });
+    const wanted = new Map<number, number>();
+    for (const item of items) {
+      wanted.set(
+        item.productId,
+        (wanted.get(item.productId) ?? 0) + item.quantity,
+      );
+    }
+    const taken = await this.stockTakenBy(tx, orderId);
+    const ids = [...new Set([...wanted.keys(), ...taken.keys()])];
+    const tracked = new Set(
+      (
+        await tx.product.findMany({
+          where: { id: { in: ids }, trackStock: true },
+          select: { id: true },
+        })
+      ).map((p) => p.id),
+    );
+
+    for (const productId of ids.sort((a, b) => a - b)) {
+      if (!tracked.has(productId)) continue;
+      const delta = (wanted.get(productId) ?? 0) - (taken.get(productId) ?? 0);
+      if (delta === 0) continue;
+      await this.inventory.applyMovement(tx, {
+        branchId,
+        productId,
+        type: delta > 0 ? StockMovementType.SALE : StockMovementType.REVERSAL,
+        quantity: -delta,
+        orderId,
+        createdById: userId,
+        allowNegative: true,
+      });
+    }
   }
 
   // Revenue of paid bills per business day of payment, with its make-up.

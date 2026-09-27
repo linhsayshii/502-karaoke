@@ -27,6 +27,23 @@ interface Report {
   byBranch: { code: string; collected: number }[] | null;
   voided: { count: number; amount: number };
 }
+interface BranchesReport {
+  totals: Metrics;
+  previous: { from: string; to: string; totals: Metrics } | null;
+  buckets: { key: string }[];
+  branches: (Metrics & {
+    code: string;
+    share: number | null;
+    previous: Metrics | null;
+    series: number[];
+  })[];
+}
+// A row of a breakdown report: a subject (id null: none) and its numbers.
+interface Row {
+  id: number | string | null;
+  name: string | null;
+  [field: string]: number | string | null;
+}
 
 describe('Reports (e2e)', () => {
   let app: INestApplication<App>;
@@ -70,6 +87,22 @@ describe('Reports (e2e)', () => {
   const report = async (username: string, query = '') =>
     (await as(username).get(`/reports/revenue?${period}${query}`).expect(200))
       .body as Report;
+  const sumOf = (rows: Row[], field: string) =>
+    rows.reduce((sum, row) => sum + Number(row[field]), 0);
+  // The rows of a breakdown add up to the revenue report's totals. Not used
+  // by this task's tests yet — scaffolding for the breakdown reports of the
+  // next task.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const expectSameTotals = (rows: Row[], totals: Metrics) => {
+    for (const field of [
+      'orderCount',
+      'roomMinutes',
+      'revenue',
+      'vat',
+      'collected',
+    ])
+      expect(sumOf(rows, field)).toBe(totals[field]);
+  };
 
   // Opens a room, orders 2 beers, applies `adjustments` and pays.
   const payBill = async (
@@ -295,6 +328,45 @@ describe('Reports (e2e)', () => {
       ).body as Json;
       expect(fund.salesIncome).toBe(after.totals.collected);
       expect(fund.salesVat).toBe(after.totals.vat);
+    });
+  });
+
+  describe('branches', () => {
+    it('is for the chain manager only', async () => {
+      await as('ql1_cs1').get(`/reports/branches?${period}`).expect(403);
+      await as('tn1_cs1').get(`/reports/branches?${period}`).expect(403);
+    });
+
+    it('compares the branches with the numbers of the revenue report', async () => {
+      const res = (
+        await as('admin')
+          .get(`/reports/branches?${period}&compare=1`)
+          .expect(200)
+      ).body as BranchesReport;
+      const chain = await report('admin');
+
+      expect(res.totals).toEqual(chain.totals);
+      expect(res.branches.map((b) => b.code)).toEqual([
+        'cs1',
+        'cs2',
+        'cs3',
+        'cs4',
+      ]);
+      for (const branch of res.branches) {
+        const same = chain.byBranch!.find((b) => b.code === branch.code)!;
+        expect(branch.revenue).toBe((same as unknown as Metrics).revenue);
+        expect(branch.collected).toBe(same.collected);
+        expect(branch.series).toHaveLength(res.buckets.length);
+        expect(branch.series.reduce((s, v) => s + v, 0)).toBe(branch.revenue);
+        expect(branch.previous).toMatchObject({ orderCount: 0 });
+      }
+      expect(res.branches.reduce((s, b) => s + b.revenue, 0)).toBe(
+        res.totals.revenue,
+      );
+      expect(res.branches.reduce((s, b) => s + (b.share ?? 0), 0)).toBeCloseTo(
+        1,
+      );
+      expect(res.previous).toMatchObject({ totals: { orderCount: 0 } });
     });
   });
 });

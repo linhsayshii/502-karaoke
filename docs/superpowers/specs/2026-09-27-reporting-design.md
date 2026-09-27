@@ -117,7 +117,7 @@ Bỏ `GET /orders/statistics` (`OrdersService.getStatistics`, DTO `StatisticsQue
 - `stat-tile.tsx`: thay hai bản chép ở trang Doanh thu và Sổ quỹ; có badge Δ% (xanh khi tăng, đỏ khi giảm, "—" khi kỳ trước bằng 0).
 - `heatmap.tsx`: CSS grid 7 × 24, cường độ màu theo `--chart-1`, không thêm thư viện.
 
-**Trạng thái bộ lọc:** `hooks/use-report-query.ts` giữ `from`, `to`, `groupBy`, `compare`, `scope` trên URL search params, nên chia sẻ được link và tải lại không mất bộ lọc. Dữ liệu lấy qua `useApiData`, và cần `Suspense` vì dùng `useSearchParams`.
+**Trạng thái bộ lọc:** `hooks/use-report-filters.ts` giữ `from`, `to`, `groupBy`, `compare`, `scope` trên URL search params, nên chia sẻ được link và tải lại không mất bộ lọc. Dữ liệu lấy qua `useApiData`, và cần `Suspense` vì dùng `useSearchParams`.
 
 **Bộ chọn ngày:** `components/date-range-picker.tsx` thêm các lựa chọn nhanh Quý này, Quý trước, Năm nay, Năm trước.
 
@@ -138,12 +138,13 @@ Bỏ `GET /orders/statistics` (`OrdersService.getStatistics`, DTO `StatisticsQue
 - `GET /reports/revenue` trả về:
   ```ts
   {
-    range: { from, to },
-    previous?: { from, to },
-    totals: Metrics, previousTotals?: Metrics,
+    branchId: number | null,                              // null = toàn chuỗi
+    range: { from, to }, groupBy,
+    totals: Metrics,                                      // gồm cả cash/transfer
+    previous: { from, to, totals: Metrics } | null,       // khi compare
     buckets: ({ key, label, from, to } & Metrics)[],
-    byMethod: { method: 'CASH'|'TRANSFER', collected, orderCount }[],
-    byBranch?: ({ branchId, code, name } & Metrics)[]   // chỉ khi xem toàn chuỗi
+    byBranch: ({ branchId, code, name } & Metrics)[] | null, // chỉ khi xem toàn chuỗi
+    voided: { count, amount }                             // hóa đơn thanh toán rồi bị hủy
   }
   ```
 - `GET /funds/summary`: thêm `salesVat`, là tổng `taxAmount` của các hóa đơn có phiếu thu còn hiệu lực trong kỳ (theo `occurredAt`).
@@ -151,7 +152,7 @@ Bỏ `GET /orders/statistics` (`OrdersService.getStatistics`, DTO `StatisticsQue
 
 **Frontend** — trang `/reports/revenue`:
 - Ô tổng: Doanh thu (chưa VAT); VAT; Tổng thu (tiền mặt / CK); Hóa đơn (TB/HĐ); Giờ phòng. Mỗi ô có Δ% khi so kỳ trước.
-- Biểu đồ cột chồng theo kỳ (tiền giờ thuần, tiền hàng thuần, phí DV), cộng một đường doanh thu kỳ trước khi so sánh.
+- Biểu đồ cột chồng theo kỳ (tiền giờ thuần, tiền hàng thuần, phí DV). Kết quả so kỳ trước chỉ hiện trên các ô tổng (Δ%), không vẽ lên biểu đồ vì các kỳ của hai khoảng không khớp nhau từng cột.
 - Bảng theo kỳ: Tiền giờ, Tiền hàng, Giảm giá, Phí DV, Doanh thu, VAT, Tổng thu, có dòng tổng; mỗi dòng mở trang Hóa đơn của kỳ đó.
 - Khi xem toàn chuỗi, thêm bảng nhỏ theo cơ sở.
 - Nút Xuất Excel: sheet "Theo kỳ", cộng sheet "Theo cơ sở" khi xem toàn chuỗi.

@@ -71,7 +71,9 @@ function BillsView() {
     [orders, status, keyword],
   );
   const paid = (orders ?? []).filter((o) => o.status === "COMPLETED");
-  const revenue = paid.reduce((sum, o) => sum + Number(o.finalAmount), 0);
+  // What was paid (VAT included) and the VAT in it; revenue is before VAT.
+  const collected = paid.reduce((sum, o) => sum + Number(o.finalAmount), 0);
+  const vat = paid.reduce((sum, o) => sum + Number(o.taxAmount), 0);
   const cancelledCount = (orders ?? []).length - paid.length;
 
   return (
@@ -86,7 +88,8 @@ function BillsView() {
         <CardHeader>
           <CardTitle>{formatDateRange(range)}</CardTitle>
           <CardDescription>
-            {paid.length} hóa đơn đã thanh toán · doanh thu {formatMoney(revenue)}
+            {paid.length} hóa đơn đã thanh toán · doanh thu {formatMoney(collected - vat)} · VAT {formatMoney(vat)} ·
+            tổng thu {formatMoney(collected)}
             {cancelledCount > 0 && ` · ${cancelledCount} hóa đơn đã hủy`}
           </CardDescription>
         </CardHeader>

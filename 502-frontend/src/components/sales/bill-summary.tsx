@@ -1,4 +1,5 @@
 import { Separator } from "@/components/ui/separator";
+import { billedHoursOf } from "@/lib/billing";
 import { formatDuration, formatMoney, formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -54,7 +55,10 @@ export function BillSummary({
             Tiền giờ{" "}
             <span className="text-muted-foreground">
               ({formatDuration(bill.durationMinutes)}
-              {pricePerHour ? ` × ${formatNumber(pricePerHour)}/giờ` : ""})
+              {pricePerHour
+                ? ` = ${formatNumber(billedHoursOf(bill.durationMinutes))} giờ × ${formatNumber(pricePerHour)}/giờ`
+                : ""}
+              )
             </span>
           </>
         }

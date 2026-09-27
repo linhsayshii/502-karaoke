@@ -328,6 +328,15 @@ Migration chỉ thêm cột/bảng, không xoá dữ liệu. Sau khi cập nhậ
 - Giá giờ của phiên hát được **chốt lúc mở phòng**; phiên đang mở lúc cập nhật lấy giá phòng hiện tại.
 - Quản lý **hủy được** hóa đơn đã thanh toán, phiếu nhập/xuất và phiếu thu/chi thủ công (bắt buộc ghi lý do). Hủy hóa đơn: hoàn kho + hủy phiếu thu; hủy phiếu kho: đảo tồn kho + hủy phiếu chi đi kèm. Chứng từ đã hủy vẫn được giữ, không tính vào tổng.
 
+### 6.7. Bản cập nhật "tính giờ, VAT 10%, sửa hóa đơn đã thanh toán" (migration `20260927000000_edit_paid_bills`)
+
+Migration chỉ thêm cột và đổi giá trị mặc định, không sửa dữ liệu cũ. Sau khi cập nhật:
+
+- **Tiền giờ** = số giờ (số phút đã bắt đầu ÷ 60, **làm tròn đến 0,01 giờ**) × giá giờ, không còn làm tròn lên 1.000 đ. Ví dụ 83 phút = 1,38 giờ × 150.000 = 207.000 đ. Hóa đơn đã thanh toán giữ nguyên số tiền cũ.
+- **Thuế VAT mặc định 10%** cho phiên hát mở sau khi cập nhật (vẫn sửa được trên từng phiên). Phiên đang mở lúc cập nhật giữ mức thuế cũ.
+- **Phòng mới mặc định là VIP** (form thêm phòng, API và nhập Excel khi bỏ trống loại phòng).
+- Quản lý cơ sở và quản lý hệ thống **sửa được hóa đơn đã thanh toán** (Bán hàng → Hóa đơn → mở hóa đơn → *Sửa hóa đơn*, bắt buộc ghi lý do): món, giảm giá/phí/thuế, CSKH/phục vụ, giờ vào/ra, giá giờ, hình thức thanh toán. Tồn kho, phiếu thu trong Sổ quỹ và doanh thu được cập nhật theo số tiền mới. Tiền giờ đã thu được giữ nguyên nếu không đổi giờ hoặc giá giờ. Hóa đơn thanh toán trước bản 6.6 (không có phiếu thu) vẫn không được sinh phiếu thu khi sửa.
+
 ## 7. Xử lý sự cố
 
 | Hiện tượng | Nguyên nhân / cách xử lý |

@@ -352,7 +352,7 @@ export class ImportsService {
           creates.push({
             branchId,
             name,
-            type: r.type ?? 'NORMAL',
+            type: r.type ?? 'VIP',
             pricePerHour: r.pricePerHour,
           });
           return result('CREATE');

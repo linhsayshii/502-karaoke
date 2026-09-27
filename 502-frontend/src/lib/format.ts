@@ -61,6 +61,12 @@ export function toDateInput(date: Date = new Date()) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
+// YYYY-MM-DDTHH:mm in local time, for <input type="datetime-local">.
+export function toDateTimeInput(date: Date) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${toDateInput(date)}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 // A business day runs 06:00 → 06:00 next morning (as on the server): before
 // 06:00 still belongs to the previous day. Report filters default to it.
 export const BUSINESS_DAY_START_HOUR = 6;

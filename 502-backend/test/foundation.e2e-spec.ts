@@ -698,6 +698,108 @@ describe('Foundation (e2e)', () => {
       expect((await summary()).salesIncome).toBe(0);
     });
 
+    it('lets managers correct a paid bill: stock, fund and revenue follow', async () => {
+      const id = await openSession([{ productId: beerId, quantity: 2 }]);
+      const paid = (
+        await as('tn_cs2')
+          .post(`/orders/${id}/checkout`, { paymentMethod: 'CASH' })
+          .expect(200)
+      ).body as Json;
+      expect(paid.taxPercent).toBe(10); // VAT 10% unless changed
+      expect((await stockOf(beerId)).stockQuantity).toBe(18);
+
+      const edit = (body: Json) =>
+        as('ql_cs2').patch(`/orders/${id}/paid`, body);
+      const items = [{ productId: beerId, quantity: 5 }];
+      await as('tn_cs2')
+        .patch(`/orders/${id}/paid`, { reason: 'x', items })
+        .expect(403);
+      await edit({ items }).expect(400);
+      await edit({
+        reason: 'x',
+        endTime: new Date(Date.now() + 3600000),
+      }).expect(400);
+
+      // More beer, a fixed discount, paid by transfer instead.
+      let order = (
+        await edit({
+          reason: 'Khách gọi thêm',
+          items,
+          discountAmount: 5000,
+          paymentMethod: 'TRANSFER',
+        }).expect(200)
+      ).body as Json;
+      expect(order).toMatchObject({
+        status: 'COMPLETED',
+        paymentMethod: 'TRANSFER',
+        editReason: 'Khách gọi thêm',
+        editedBy: { fullName: 'Quản lý CS2' },
+        fundTransaction: { method: 'TRANSFER', cancelledAt: null },
+      });
+      // The room fee charged at checkout is kept.
+      expect(Number(order.hourlyFee)).toBe(Number(paid.hourlyFee));
+      const beforeTax = 125000 - 5000 + Number(paid.hourlyFee);
+      expect(Number(order.taxAmount)).toBe(
+        Math.ceil((beforeTax * 0.1) / 1000) * 1000,
+      );
+      let finalAmount = Number(order.finalAmount);
+      expect(finalAmount).toBe(beforeTax + Number(order.taxAmount));
+      expect(Number((order.fundTransaction as Json).amount)).toBe(finalAmount);
+      expect(await revenue()).toBe(finalAmount);
+      expect((await summary()).salesIncome).toBe(finalAmount);
+      expect((await stockOf(beerId)).stockQuantity).toBe(15);
+
+      // 83 minutes = 1.38 h × 120,000; one beer: 4 go back to stock.
+      const endTime = new Date(order.endTime as string);
+      order = (
+        await edit({
+          reason: 'Sai giờ vào',
+          startTime: new Date(endTime.getTime() - 83 * 60000),
+          items: [{ productId: beerId, quantity: 1 }],
+        }).expect(200)
+      ).body as Json;
+      expect(Number(order.hourlyFee)).toBe(165600);
+      finalAmount = Number(order.finalAmount);
+      expect(finalAmount).toBe(
+        Number(order.totalProductPrice) -
+          Number(order.discountAmount) +
+          165600 +
+          Number(order.taxAmount),
+      );
+      expect(Number((order.fundTransaction as Json).amount)).toBe(finalAmount);
+      expect(await revenue()).toBe(finalAmount);
+      expect((await stockOf(beerId)).stockQuantity).toBe(19);
+      const movements = (
+        await as('ql_cs2')
+          .get(`/inventory/movements?productId=${beerId}`)
+          .expect(200)
+      ).body as Json[];
+      expect(movements[0]).toMatchObject({
+        type: 'REVERSAL',
+        quantity: 4,
+        orderId: id,
+      });
+
+      // Voiding puts back what the bill holds after the corrections.
+      await as('ql_cs2')
+        .post(`/orders/${id}/void`, { reason: 'Khách không ở' })
+        .expect(200);
+      await edit({ reason: 'x' }).expect(409);
+      expect((await stockOf(beerId)).stockQuantity).toBe(20);
+      expect(await revenue()).toBe(0);
+      expect((await summary()).salesIncome).toBe(0);
+    });
+
+    it('makes new rooms VIP by default', async () => {
+      const res = await as('ql_cs2')
+        .post('/rooms', { name: 'P2VIP', pricePerHour: 300000 })
+        .expect(201);
+      expect(res.body).toMatchObject({ type: 'VIP' });
+      await as('ql_cs2')
+        .delete(`/rooms/${(res.body as Json).id as number}`)
+        .expect(200);
+    });
+
     it('never lets an item edit and a checkout disagree', async () => {
       for (let round = 0; round < 3; round++) {
         const id = await openSession([{ productId: waterId, quantity: 1 }]);

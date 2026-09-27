@@ -190,7 +190,7 @@ export const IMPORT_DEFINITIONS: ImportDefinition[] = [
         kind: "enum",
         options: { NORMAL: ["thường", "normal", "bình thường", "thuong"], VIP: ["vip"] },
         aliases: ["loại phòng", "loại", "type"],
-        hint: "Thường hoặc VIP; bỏ trống là Thường",
+        hint: "Thường hoặc VIP; bỏ trống là VIP",
         example: "VIP",
       },
       {

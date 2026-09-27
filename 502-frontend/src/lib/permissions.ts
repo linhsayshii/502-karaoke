@@ -16,6 +16,7 @@ export type Permission =
   | "branch.switch" // pick any branch
   | "sales.operate" // open rooms, order, checkout
   | "sales.cancel"
+  | "sales.editPaid" // correct a paid bill (stock and fund follow)
   | "sales.reports"
   | "sales.settings" // rooms, categories, products
   | "inventory"
@@ -30,6 +31,7 @@ const MATRIX: Record<Permission, Role[]> = {
   "branch.switch": ["CHAIN_MANAGER"],
   "sales.operate": [...MANAGERS, "CASHIER"],
   "sales.cancel": MANAGERS,
+  "sales.editPaid": MANAGERS,
   "sales.reports": MANAGERS,
   "sales.settings": MANAGERS,
   inventory: MANAGERS,

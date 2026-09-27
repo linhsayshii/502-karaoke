@@ -59,7 +59,7 @@ interface RoomForm {
   pricePerHour: string;
 }
 
-const EMPTY_FORM: RoomForm = { name: "", type: "NORMAL", pricePerHour: "" };
+const EMPTY_FORM: RoomForm = { name: "", type: "VIP", pricePerHour: "" };
 
 // Rooms of the branch and their hourly price. A running session keeps the
 // price it was opened with.

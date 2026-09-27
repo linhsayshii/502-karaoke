@@ -15,7 +15,7 @@ import { Role } from '@prisma/client';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
-import { ListOrdersQuery, StatisticsQuery } from './dto/order-queries';
+import { ListOrdersQuery } from './dto/order-queries';
 import { CheckoutOrderDto } from './dto/checkout-order.dto';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { CancelReasonDto } from '../common/dto/cancel-reason.dto';
@@ -35,15 +35,6 @@ export class OrdersController {
   @Roles(...SALES)
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateOrderDto) {
     return this.ordersService.create(user, dto);
-  }
-
-  @Get('statistics')
-  @Roles(...MANAGERS)
-  getStatistics(
-    @CurrentUser() user: AuthUser,
-    @Query() query: StatisticsQuery,
-  ) {
-    return this.ordersService.getStatistics(user, query);
   }
 
   // Bill history is a report (managers); staff get their open sessions.

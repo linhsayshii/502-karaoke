@@ -146,7 +146,7 @@ describe('Foundation (e2e)', () => {
       await as('tn_cs1').get('/inventory/stock').expect(403);
       await as('tn_cs1').get('/funds').expect(403);
       await as('tn_cs1')
-        .get('/orders/statistics?from=2026-01-01&to=2026-01-02')
+        .get('/reports/revenue?from=2026-01-01&to=2026-01-02')
         .expect(403);
       await as('tn_cs1').get('/orders').expect(403);
       await as('tn_cs1').get('/users').expect(403);
@@ -340,10 +340,10 @@ describe('Foundation (e2e)', () => {
       const yesterday = new Date(today);
       yesterday.setDate(today.getDate() - 1);
       const res = await as('ql_cs1')
-        .get(`/orders/statistics?from=${ymd(yesterday)}&to=${ymd(today)}`)
+        .get(`/reports/revenue?from=${ymd(yesterday)}&to=${ymd(today)}`)
         .expect(200);
-      const stats = res.body as Json[];
-      expect(stats.reduce((s, d) => s + (d.orderCount as number), 0)).toBe(1);
+      const report = res.body as { totals: { orderCount: number } };
+      expect(report.totals.orderCount).toBe(1);
     });
   });
 
@@ -487,12 +487,13 @@ describe('Foundation (e2e)', () => {
     const summary = async () =>
       (await as('ql_cs2').get(`/funds/summary?${period}`).expect(200))
         .body as Json;
-    const revenue = async () => {
-      const days = (
-        await as('ql_cs2').get(`/orders/statistics?${period}`).expect(200)
-      ).body as Json[];
-      return days.reduce((s, d) => s + (d.totalRevenue as number), 0);
-    };
+    const revenueTotals = async () =>
+      (
+        (await as('ql_cs2').get(`/reports/revenue?${period}`).expect(200))
+          .body as { totals: { collected: number; transfer: number } }
+      ).totals;
+    // What the guests paid (VAT included), as the fund's sales receipts.
+    const revenue = async () => (await revenueTotals()).collected;
     const openSession = async (items: Json[]) => {
       const opened = await as('tn_cs2').post('/orders', { roomId }).expect(201);
       const id = (opened.body as Json).id as number;
@@ -625,12 +626,7 @@ describe('Foundation (e2e)', () => {
       ).toMatchObject({ income: finalAmount });
       expect((await stockOf(beerId)).stockQuantity).toBe(16);
 
-      const days = (
-        await as('ql_cs2').get(`/orders/statistics?${period}`).expect(200)
-      ).body as Json[];
-      expect(days.reduce((s, d) => s + (d.transfer as number), 0)).toBe(
-        finalAmount,
-      );
+      expect((await revenueTotals()).transfer).toBe(finalAmount);
       const bills = (
         await as('ql_cs2').get(`/orders?${period}&status=COMPLETED`).expect(200)
       ).body as Json[];

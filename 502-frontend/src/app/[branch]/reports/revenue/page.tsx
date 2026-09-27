@@ -28,7 +28,7 @@ import { useBranchCode } from "@/lib/branch";
 import { exportWorkbook, toSheet, type ExportColumn } from "@/lib/excel-export";
 import { formatDate, formatHours, formatMoney, formatNumber } from "@/lib/format";
 import { BUSINESS_DAY_HINT } from "@/lib/labels";
-import { delta, reportFileName } from "@/lib/reports";
+import { delta, reportFileName, withinBillsRange } from "@/lib/reports";
 import { SHOW_FROM } from "@/lib/responsive";
 import type { GroupBy, ReportBucket, RevenueMetrics, RevenueReport } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -94,9 +94,14 @@ function RevenueView() {
     "Không thể tải báo cáo doanh thu",
   );
 
-  const scopeName = filters.chain
-    ? "Toàn chuỗi"
-    : (branches.find((b) => b.code === branch)?.name ?? branch.toUpperCase());
+  // The scope of the data actually shown, not the toolbar's current filter
+  // (which may not match yet while a request is in flight or failed).
+  const isChainData = data?.branchId === null;
+  const scopeName = !data
+    ? ""
+    : isChainData
+      ? "Toàn chuỗi"
+      : (branches.find((b) => b.code === branch)?.name ?? branch.toUpperCase());
   const billsHref = (from: string, to: string) => `/${branch}/sales/statistics/bills?from=${from}&to=${to}`;
 
   const exportExcel = async () => {
@@ -114,7 +119,7 @@ function RevenueView() {
       tables.push(toSheet("Theo cơ sở", branchColumns, data.byBranch, { name: "Tổng", ...data.totals }));
     }
     await exportWorkbook(
-      reportFileName("doanh-thu", filters.chain ? "toan-chuoi" : branch, data.range.from, data.range.to),
+      reportFileName("doanh-thu", isChainData ? "toan-chuoi" : branch, data.range.from, data.range.to),
       tables,
     );
   };
@@ -125,13 +130,15 @@ function RevenueView() {
     data?.previous && t ? delta(pick(t), pick(data.previous.totals)) : undefined;
   // Periods with sales, newest first (the chart shows every period).
   const rows = [...(data?.buckets ?? [])].filter((b) => b.orderCount > 0).reverse();
-  const chartData = (data?.buckets ?? []).map((b) => ({
-    tick: tickLabel(b, filters.groupBy),
-    label: b.label,
-    roomNet: roomNet(b),
-    productNet: productNet(b),
-    serviceFee: b.serviceFee,
-  }));
+  const chartData = data
+    ? data.buckets.map((b) => ({
+        tick: tickLabel(b, data.groupBy),
+        label: b.label,
+        roomNet: roomNet(b),
+        productNet: productNet(b),
+        serviceFee: b.serviceFee,
+      }))
+    : [];
 
   return (
     <>
@@ -244,7 +251,7 @@ function RevenueView() {
               <CardTitle>Chi tiết theo kỳ</CardTitle>
               <CardDescription>
                 Các kỳ có doanh thu
-                {!filters.chain && "; bấm mũi tên để xem hóa đơn của kỳ đó"}.
+                {!isChainData && "; bấm mũi tên để xem hóa đơn của kỳ đó"}.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -267,14 +274,14 @@ function RevenueView() {
                       <TableHead className="text-right">Doanh thu</TableHead>
                       <TableHead className={cn("text-right", SHOW_FROM.sm)}>VAT</TableHead>
                       <TableHead className={cn("text-right", SHOW_FROM.sm)}>Tổng thu</TableHead>
-                      {!filters.chain && <TableHead className="w-10" />}
+                      {!isChainData && <TableHead className="w-10" />}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {rows.map((row) => (
                       <TableRow key={row.key}>
                         <TableCell className="font-medium">
-                          {filters.groupBy === "day" ? formatDate(row.key) : row.label}
+                          {data.groupBy === "day" ? formatDate(row.key) : row.label}
                         </TableCell>
                         <TableCell className={cn(NUM, SHOW_FROM.xs)}>{row.orderCount}</TableCell>
                         <TableCell className={cn(NUM, SHOW_FROM.md)}>{formatNumber(row.roomFee)}</TableCell>
@@ -288,7 +295,7 @@ function RevenueView() {
                         </TableCell>
                         <TableCell className={cn(NUM, SHOW_FROM.sm)}>{formatNumber(row.vat)}</TableCell>
                         <TableCell className={cn(NUM, SHOW_FROM.sm)}>{formatNumber(row.collected)}</TableCell>
-                        {!filters.chain && (
+                        {!isChainData && (
                           <TableCell className="px-1">
                             <Button variant="ghost" size="icon-sm" asChild>
                               <Link href={billsHref(row.from, row.to)} aria-label={`Hóa đơn ${row.label}`}>
@@ -314,13 +321,18 @@ function RevenueView() {
                         <TableCell className="text-right tabular-nums">{formatNumber(t.revenue)}</TableCell>
                         <TableCell className={cn(NUM, SHOW_FROM.sm)}>{formatNumber(t.vat)}</TableCell>
                         <TableCell className={cn(NUM, SHOW_FROM.sm)}>{formatNumber(t.collected)}</TableCell>
-                        {!filters.chain && (
+                        {!isChainData && (
                           <TableCell className="px-1">
-                            <Button variant="ghost" size="icon-sm" asChild>
-                              <Link href={billsHref(data.range.from, data.range.to)} aria-label="Tất cả hóa đơn trong kỳ">
-                                <ChevronRightIcon />
-                              </Link>
-                            </Button>
+                            {withinBillsRange(data.range.from, data.range.to) && (
+                              <Button variant="ghost" size="icon-sm" asChild>
+                                <Link
+                                  href={billsHref(data.range.from, data.range.to)}
+                                  aria-label="Tất cả hóa đơn trong kỳ"
+                                >
+                                  <ChevronRightIcon />
+                                </Link>
+                              </Button>
+                            )}
                           </TableCell>
                         )}
                       </TableRow>

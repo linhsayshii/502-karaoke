@@ -182,14 +182,22 @@ function ProfitView() {
                 <CardHeader>
                   <CardTitle>Báo cáo lãi lỗ</CardTitle>
                   <CardDescription>
-                    {formatDateRange(data.range)} · Khoản mục chi bằng 0 được ẩn (vẫn có trong file Excel).
+                    {formatDateRange(data.range)} · Khoản mục chi bằng 0 được ẩn (vẫn có trong file Excel). Tiền
+                    nhập hàng thành hàng tồn, không tính là chi phí.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className={cn(STICKY, "min-w-40")}>Khoản mục</TableHead>
+                        <TableHead
+                          className={cn(
+                            STICKY,
+                            "w-36 min-w-36 max-w-36 whitespace-normal @md/main:w-auto @md/main:max-w-none",
+                          )}
+                        >
+                          Khoản mục
+                        </TableHead>
                         <TableHead className={NUM}>Tổng</TableHead>
                         {data.buckets.length > 1 &&
                           data.buckets.map((bucket) => (
@@ -206,7 +214,11 @@ function ProfitView() {
                           className={cn(line.strong && "font-medium", line.info && "text-muted-foreground")}
                         >
                           <TableCell
-                            className={cn(STICKY, line.level === 1 && "pl-6 text-muted-foreground")}
+                            className={cn(
+                              STICKY,
+                              "w-36 min-w-36 max-w-36 whitespace-normal @md/main:w-auto @md/main:max-w-none",
+                              line.level === 1 && "pl-6 text-muted-foreground",
+                            )}
                           >
                             {line.label}
                           </TableCell>

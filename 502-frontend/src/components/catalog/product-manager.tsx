@@ -43,7 +43,7 @@ import { useApiData } from "@/hooks/use-api-data";
 import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
-import { formatNumber } from "@/lib/format";
+import { formatAmount, formatNumber } from "@/lib/format";
 import { ONLY_NARROW, SHOW_FROM } from "@/lib/responsive";
 import type { Category, Product } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -253,7 +253,7 @@ export function ProductManager() {
                   <TableCell className={SHOW_FROM.sm}>{product.unit}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatNumber(product.price)}</TableCell>
                   <TableCell className={cn("text-right tabular-nums", SHOW_FROM.lg)}>
-                    {formatNumber(product.costPrice)}
+                    {formatAmount(Number(product.costPrice))}
                   </TableCell>
                   <TableCell className={cn("text-right tabular-nums", SHOW_FROM.sm)}>
                     {product.trackStock ? formatNumber(product.stockQuantity) : "—"}

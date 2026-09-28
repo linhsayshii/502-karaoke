@@ -84,7 +84,15 @@ function InventoryView() {
   const scope = useReportScope(data);
 
   const categories = new Map<string, string>();
-  for (const row of data?.rows ?? []) categories.set(categoryKey(row), row.categoryName ?? NO_CATEGORY);
+  for (const row of data?.rows ?? []) {
+    const label =
+      row.categoryId === null
+        ? NO_CATEGORY
+        : scope.chain
+          ? `${row.categoryName ?? NO_CATEGORY} · ${row.branchCode.toUpperCase()}`
+          : (row.categoryName ?? NO_CATEGORY);
+    categories.set(categoryKey(row), label);
+  }
   // A category that is gone after a reload falls back to all of them.
   const selected = category === ALL || categories.has(category) ? category : ALL;
   const rows = (data?.rows ?? []).filter((row) => selected === ALL || categoryKey(row) === selected);

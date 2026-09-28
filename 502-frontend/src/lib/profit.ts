@@ -37,6 +37,6 @@ export function profitLines(categories: string[]): ProfitLine[] {
     { key: "profit", label: "Lợi nhuận", strong: true, value: (m) => m.profit },
     { key: "profitMargin", label: "Tỷ suất lợi nhuận", level: 1, kind: "percent", value: (m) => m.profitMargin },
     { key: "vat", label: "VAT phải nộp", info: true, value: (m) => m.vat },
-    { key: "purchases", label: "Tiền nhập hàng (thành hàng tồn, không phải chi phí)", info: true, value: (m) => m.purchases },
+    { key: "purchases", label: "Tiền nhập hàng", info: true, value: (m) => m.purchases },
   ];
 }

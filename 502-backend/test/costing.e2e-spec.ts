@@ -338,4 +338,93 @@ describe('Costing and accounting reports (e2e)', () => {
       });
     });
   });
+
+  describe('profit and loss', () => {
+    interface Profit {
+      branchId: number | null;
+      categories: string[];
+      totals: Record<string, number> & { expenses: Record<string, number> };
+      buckets: { profit: number; cogs: number }[];
+    }
+
+    it('counts exports as losses, not the cancelled ones', async () => {
+      await exportBeer(2);
+      const cancelled = await exportBeer(1);
+      await cancelDocument(cancelled.id as number);
+      // An export and its cancellation leave the average as it was.
+      expect(await costOf()).toBe(18404.62);
+      expect((await stockOf(beerId)).stockQuantity).toBe(24);
+    });
+
+    it('is revenue − cost of goods − expenses − losses + other income', async () => {
+      const revenue = (
+        (await get(`/reports/revenue?${period}`).expect(200)).body as {
+          totals: Record<string, number>;
+        }
+      ).totals;
+      const res = (await get(`/reports/profit?${period}`).expect(200))
+        .body as Profit;
+      const t = res.totals;
+      expect(res.categories).toEqual([
+        'Lương',
+        'Mặt bằng',
+        'Điện nước',
+        'Sửa chữa – bảo trì',
+        'Marketing',
+        'Vật tư tiêu hao',
+        'Thuế – phí',
+        'Khác',
+      ]);
+      expect(t.revenue).toBe(revenue.revenue);
+      expect(t.vat).toBe(revenue.vat);
+      // The voided first bill is out; the corrected second one took 1 beer.
+      expect(t.cogs).toBe(17980);
+      expect(t.grossProfit).toBeCloseTo(revenue.revenue - 17980, 2);
+      expect(t.expenses).toEqual({
+        Lương: 1000000,
+        'Mặt bằng': 0,
+        'Điện nước': 500000,
+        'Sửa chữa – bảo trì': 0,
+        Marketing: 0,
+        'Vật tư tiêu hao': 0,
+        'Thuế – phí': 0,
+        Khác: 30000,
+      });
+      expect(t.expenseTotal).toBe(1530000);
+      expect(t.losses).toBeCloseTo(2 * 18404.62, 2);
+      expect(t.otherIncome).toBe(200000);
+      // Imports of 10 × 10,000, 10 × 20,000, 4 × 30,000 and 3 × 25,500 (the
+      // cancelled one left out); the paid import's phiếu chi is no expense.
+      expect(t.purchases).toBe(496500);
+      expect(t.profit).toBeCloseTo(
+        revenue.revenue - 17980 - 1530000 - 2 * 18404.62 + 200000,
+        2,
+      );
+      expect(
+        res.buckets.reduce((sum, bucket) => sum + bucket.profit, 0),
+      ).toBeCloseTo(t.profit, 2);
+
+      // The products report sees the same cost of goods.
+      const products = (await get(`/reports/products?${period}`).expect(200))
+        .body as { totals: { cost: number } };
+      expect(products.totals.cost).toBe(t.cogs);
+    });
+
+    it('covers the whole chain for the chain manager, managers only', async () => {
+      const branch = (await get(`/reports/profit?${period}`).expect(200))
+        .body as Profit;
+      const chain = (
+        await api()
+          .get(`/api/reports/profit?${period}&groupBy=month`)
+          .set('Authorization', `Bearer ${tokens.admin}`)
+          .expect(200)
+      ).body as Profit;
+      expect(chain.branchId).toBeNull();
+      expect(chain.totals.profit).toBeCloseTo(branch.totals.profit, 2);
+      await api()
+        .get(`/api/reports/profit?${period}`)
+        .set('Authorization', `Bearer ${tokens.tn1_cs1}`)
+        .expect(403);
+    });
+  });
 });

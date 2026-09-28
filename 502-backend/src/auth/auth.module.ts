@@ -8,7 +8,8 @@ import { JwtModule } from '@nestjs/jwt';
 import { JwtStrategy } from './jwt.strategy';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { RolesGuard } from './roles.guard';
-import { jwtSecret } from '../config/env';
+import { LoginThrottle } from './login-throttle';
+import { ACCESS_TOKEN_TTL_SECONDS, jwtSecret } from '../config/env';
 
 @Module({
   imports: [
@@ -17,7 +18,7 @@ import { jwtSecret } from '../config/env';
     JwtModule.registerAsync({
       useFactory: () => ({
         secret: jwtSecret(),
-        signOptions: { expiresIn: '15m' },
+        signOptions: { expiresIn: ACCESS_TOKEN_TTL_SECONDS },
       }),
     }),
   ],
@@ -25,6 +26,7 @@ import { jwtSecret } from '../config/env';
   providers: [
     AuthService,
     JwtStrategy,
+    LoginThrottle,
     // Order matters: authenticate first, then check roles.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },

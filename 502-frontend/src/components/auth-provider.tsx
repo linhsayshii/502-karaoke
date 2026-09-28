@@ -1,9 +1,9 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { toast } from "sonner";
-import api, { setAccessToken } from "@/lib/api";
+import api, { getSessionExpiresAt, onSessionChange, onSessionExpired, setSession } from "@/lib/api";
 import { BrandMark } from "@/components/brand";
 import { Spinner } from "@/components/ui/spinner";
 import type { Branch, User } from "@/lib/types";
@@ -43,8 +43,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
+  // End of the login session (ms), kept in step with lib/api.
+  const [sessionExpiresAt, setSessionExpiresAt] = useState(getSessionExpiresAt);
+  const userRef = useRef<User | null>(null);
   const router = useRouter();
   const pathname = usePathname();
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
+  useEffect(() => onSessionChange(setSessionExpiresAt), []);
 
   const fetchBranches = async () => {
     const res = await api.get<Branch[]>("/branches");
@@ -61,7 +70,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       setUser(null);
       setBranches([]);
-      setAccessToken(null);
+      setSession(null);
     } finally {
       setLoading(false);
     }
@@ -96,7 +105,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (data: LoginData) => {
     const response = await api.post("/auth/login", data);
-    setAccessToken(response.data.access_token);
+    setSession(response.data.access_token, response.data.sessionExpiresAt);
     const loggedIn = response.data.user as User;
     const list = await fetchBranches();
     setUser(loggedIn);
@@ -104,18 +113,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     toast.success(`Xin chào ${loggedIn.fullName}!`);
   };
 
-  const logout = useCallback(async () => {
-    try {
-      await api.post("/auth/logout");
-    } catch (error) {
-      console.error("Logout failed", error);
-    }
-    setAccessToken(null);
-    setUser(null);
-    setBranches([]);
-    router.push("/");
-    toast("Đã đăng xuất. Hẹn gặp lại!");
-  }, [router]);
+  // Ends the session here and on the server (clears the refresh cookie).
+  const signOut = useCallback(
+    async (reason?: string) => {
+      userRef.current = null;
+      try {
+        await api.post("/auth/logout");
+      } catch (error) {
+        console.error("Logout failed", error);
+      }
+      setSession(null);
+      setUser(null);
+      setBranches([]);
+      router.push("/");
+      if (reason) toast.error(reason);
+      else toast("Đã đăng xuất. Hẹn gặp lại!");
+    },
+    [router],
+  );
+
+  const logout = useCallback(() => signOut(), [signOut]);
+
+  // The server ends every login after 24 hours: sign out right then.
+  useEffect(() => {
+    if (!user || !sessionExpiresAt) return;
+    const timeoutId = setTimeout(
+      () => signOut("Phiên đăng nhập đã hết 24 giờ. Vui lòng đăng nhập lại."),
+      Math.max(0, sessionExpiresAt - Date.now()),
+    );
+    return () => clearTimeout(timeoutId);
+  }, [user, sessionExpiresAt, signOut]);
+
+  // A request found the session over (expired, password changed, account locked).
+  useEffect(
+    () =>
+      onSessionExpired(() => {
+        if (!userRef.current) return;
+        userRef.current = null;
+        setUser(null);
+        setBranches([]);
+        toast.error("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
+      }),
+    [],
+  );
 
   // Auto logout after 15 hours without activity.
   useEffect(() => {
@@ -125,8 +165,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let timeoutId: NodeJS.Timeout;
 
     const handleLogout = () => {
-      logout();
-      toast.error("Bạn đã bị đăng xuất do không hoạt động trong 15 giờ.");
+      signOut("Bạn đã bị đăng xuất do không hoạt động trong 15 giờ.");
     };
 
     const resetTimer = () => {
@@ -153,7 +192,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clearTimeout(timeoutId);
       events.forEach((event) => window.removeEventListener(event, handleActivity));
     };
-  }, [user, logout]);
+  }, [user, signOut]);
 
   const reloadBranches = async () => {
     await fetchBranches();

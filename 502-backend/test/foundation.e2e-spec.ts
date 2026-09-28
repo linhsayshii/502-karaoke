@@ -1,5 +1,6 @@
 import { execSync } from 'child_process';
 import { INestApplication } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
@@ -107,6 +108,108 @@ describe('Foundation (e2e)', () => {
         branch: { code: 'cs1' },
       });
       expect(res.body).not.toHaveProperty('password');
+    });
+
+    // The refresh cookie ("Refresh=…") of a login / password change response.
+    const refreshCookie = (res: request.Response) => {
+      const cookies = res.headers['set-cookie'] as unknown as string[];
+      return cookies.find((c) => c.startsWith('Refresh='))!;
+    };
+    const refresh = (cookie: string) =>
+      api().post('/api/auth/refresh').set('Cookie', cookie.split(';')[0]);
+    const tokenExp = (token: string) =>
+      (
+        JSON.parse(
+          Buffer.from(token.split('.')[1], 'base64url').toString(),
+        ) as { exp: number }
+      ).exp;
+
+    it('opens a 24-hour session that refreshing does not extend', async () => {
+      const res = await api()
+        .post('/api/auth/login')
+        .send({ username: 'pv1_cs2', password: '12345678' })
+        .expect(200);
+      const cookie = refreshCookie(res);
+      expect(cookie).toContain('Max-Age=86400');
+      expect(cookie).toContain('HttpOnly');
+      const expiresAt = Date.parse(
+        (res.body as Json).sessionExpiresAt as string,
+      );
+      expect(Math.abs(expiresAt - Date.now() - 86_400_000)).toBeLessThan(
+        60_000,
+      );
+
+      const refreshed = (await refresh(cookie).expect(200)).body as Json;
+      expect(refreshed.sessionExpiresAt).toBe(
+        (res.body as Json).sessionExpiresAt,
+      );
+      expect(
+        tokenExp(refreshed.access_token as string) * 1000,
+      ).toBeLessThanOrEqual(expiresAt);
+    });
+
+    it('rejects refresh tokens issued before password stamps', async () => {
+      const legacy = new JwtService().sign(
+        { sub: 1 },
+        { secret: process.env.JWT_REFRESH_SECRET, expiresIn: '7d' },
+      );
+      await refresh(`Refresh=${legacy}`).expect(401);
+    });
+
+    it('ends the other sessions when the password changes', async () => {
+      const loginAs = async () =>
+        api()
+          .post('/api/auth/login')
+          .send({ username: 'pv1_cs2', password: '12345678' })
+          .expect(200);
+      const first = await loginAs();
+      const other = await loginAs();
+
+      const changed = await api()
+        .post('/api/auth/change-password')
+        .set(
+          'Authorization',
+          `Bearer ${(first.body as Json).access_token as string}`,
+        )
+        .send({ oldPassword: '12345678', newPassword: 'mat-khau-moi' })
+        .expect(200);
+      expect((changed.body as Json).message).toBe('Đổi mật khẩu thành công');
+
+      const res = await refresh(refreshCookie(other)).expect(401);
+      expect((res.body as Json).message).toBe(
+        'Phiên đăng nhập không còn hiệu lực, vui lòng đăng nhập lại',
+      );
+      await refresh(refreshCookie(first)).expect(401);
+      // The caller keeps working with the session handed back.
+      await refresh(refreshCookie(changed)).expect(200);
+
+      await api()
+        .post('/api/auth/change-password')
+        .set(
+          'Authorization',
+          `Bearer ${(changed.body as Json).access_token as string}`,
+        )
+        .send({ oldPassword: 'mat-khau-moi', newPassword: '12345678' })
+        .expect(200);
+    });
+
+    it('locks a username after repeated wrong passwords', async () => {
+      const attempt = () =>
+        api()
+          .post('/api/auth/login')
+          .send({ username: 'khong_ton_tai', password: 'sai' });
+      for (let i = 0; i < 5; i++) await attempt().expect(401);
+      const res = await attempt().expect(429);
+      expect((res.body as Json).message).toBe(
+        'Đăng nhập sai quá nhiều lần. Vui lòng thử lại sau 15 phút.',
+      );
+    });
+
+    it('sends security headers', async () => {
+      const res = await api().get('/api/rooms').expect(401);
+      expect(res.headers['x-content-type-options']).toBe('nosniff');
+      expect(res.headers['x-frame-options']).toBe('SAMEORIGIN');
+      expect(res.headers).not.toHaveProperty('x-powered-by');
     });
   });
 

@@ -34,6 +34,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Đặt JWT_SECRET trong .env}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Đặt JWT_REFRESH_SECRET trong .env}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
       TZ: Asia/Ho_Chi_Minh
     # Không mở cổng ra ngoài: trình duyệt gọi /api qua frontend.
     # Cần gọi trực tiếp (Swagger, debug) thì bỏ comment:

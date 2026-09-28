@@ -17,9 +17,24 @@ import { CurrentUser } from './decorators/current-user.decorator';
 import type { AuthUser } from './auth-user';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
-import { cookieSecure } from '../config/env';
+import { SESSION_TTL_SECONDS, cookieSecure } from '../config/env';
 
 const REFRESH_COOKIE = 'Refresh';
+
+const refreshCookieOptions = () => ({
+  httpOnly: true,
+  secure: cookieSecure(),
+  sameSite: 'lax' as const,
+  path: '/',
+});
+
+// The cookie lives exactly as long as the session in the token it holds.
+function setRefreshCookie(response: Response, refreshToken: string) {
+  response.cookie(REFRESH_COOKIE, refreshToken, {
+    ...refreshCookieOptions(),
+    maxAge: SESSION_TTL_SECONDS * 1000,
+  });
+}
 
 @ApiTags('auth')
 @Controller('auth')
@@ -39,16 +54,11 @@ export class AuthController {
       loginDto.password,
     );
 
-    response.cookie(REFRESH_COOKIE, result.refresh_token, {
-      httpOnly: true,
-      secure: cookieSecure(),
-      sameSite: 'lax',
-      path: '/',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
+    setRefreshCookie(response, result.refresh_token);
 
     return {
       access_token: result.access_token,
+      sessionExpiresAt: result.sessionExpiresAt,
       user: result.user,
     };
   }
@@ -72,7 +82,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'User logout' })
   logout(@Res({ passthrough: true }) response: Response) {
-    response.clearCookie(REFRESH_COOKIE, { path: '/' });
+    response.clearCookie(REFRESH_COOKIE, refreshCookieOptions());
     return { message: 'Đã đăng xuất' };
   }
 
@@ -87,14 +97,23 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Change user password' })
-  changePassword(
+  async changePassword(
     @CurrentUser() user: AuthUser,
     @Body() changePasswordDto: ChangePasswordDto,
+    @Res({ passthrough: true }) response: Response,
   ) {
-    return this.authService.changePassword(
-      user.id,
+    // The new password ends every earlier session, this one included:
+    // hand the caller a fresh one.
+    const result = await this.authService.changePassword(
+      user,
       changePasswordDto.oldPassword,
       changePasswordDto.newPassword,
     );
+    setRefreshCookie(response, result.refresh_token);
+    return {
+      message: result.message,
+      access_token: result.access_token,
+      sessionExpiresAt: result.sessionExpiresAt,
+    };
   }
 }

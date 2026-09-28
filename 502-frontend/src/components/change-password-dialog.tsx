@@ -14,7 +14,7 @@ import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { useNotify } from "@/hooks/use-notify";
-import api from "@/lib/api";
+import api, { setSession } from "@/lib/api";
 
 export function ChangePasswordDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const notify = useNotify();
@@ -41,7 +41,9 @@ export function ChangePasswordDialog({ open, onOpenChange }: { open: boolean; on
     if (!oldPassword || tooShort || mismatch) return;
     setSaving(true);
     try {
-      await api.post("/auth/change-password", { oldPassword, newPassword });
+      // The new password ends the other sessions; this one continues with a fresh session.
+      const res = await api.post("/auth/change-password", { oldPassword, newPassword });
+      setSession(res.data.access_token, res.data.sessionExpiresAt);
       notify.success("Đổi mật khẩu thành công");
       onOpenChange(false);
     } catch (error) {

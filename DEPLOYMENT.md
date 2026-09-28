@@ -74,6 +74,8 @@ nano .env
 | `POSTGRES_PASSWORD` | Mật khẩu database. Chỉ dùng chữ và số vì nó nằm trong `DATABASE_URL`. |
 | `JWT_SECRET`, `JWT_REFRESH_SECRET` | Hai chuỗi bí mật khác nhau để ký token đăng nhập. Đổi chúng sẽ đăng xuất mọi người. |
 | `COOKIE_SECURE` | `true` khi truy cập qua HTTPS, `false` khi dùng HTTP (mạng nội bộ). Sai giá trị này là bị đăng xuất mỗi khi tải lại trang. |
+| `CORS_ORIGINS` | Không cần đặt (để trống): trình duyệt gọi `/api` trên cùng tên miền. Chỉ đặt khi một trang ở tên miền khác phải gọi API, dạng `https://a.example.com,https://b.example.com`. |
+| `SWAGGER_ENABLED` | `false` (mặc định): tắt trang tài liệu API `/api/docs` để không lộ danh sách API ra Internet. `true` khi cần xem tạm. |
 | `APP_PORT` | Cổng web. Có Nginx phía trước thì đặt `127.0.0.1:3000` để cổng 3000 không lộ ra Internet (Docker bỏ qua `ufw`). Không dùng Nginx thì để `3000` hoặc `80`. |
 
 Tạo chuỗi ngẫu nhiên:
@@ -149,6 +151,39 @@ sudo ufw allow 'Nginx Full' && sudo ufw allow OpenSSH && sudo ufw enable
 ```
 
 Sau khi có HTTPS: đặt `COOKIE_SECURE=true` trong `.env`, rồi `docker compose up -d`.
+
+### 3.1. Chống dò mật khẩu và bắt buộc HTTPS
+
+Backend đã tự khoá một tên đăng nhập 15 phút sau 5 lần sai mật khẩu liên tiếp. Nginx thêm giới hạn theo địa chỉ IP (chặn một máy thử hàng loạt tên đăng nhập) và ẩn phiên bản Nginx. Tạo file giới hạn (nằm ngoài khối `server`):
+
+```bash
+sudo tee /etc/nginx/conf.d/karaoke502-limits.conf <<'CONF'
+# Mỗi IP tối đa 10 lần đăng nhập mỗi phút (cho phép dồn 5 lần)
+limit_req_zone $binary_remote_addr zone=kara_login:10m rate=10r/m;
+server_tokens off;
+CONF
+```
+
+Rồi trong khối `server` của `/etc/nginx/sites-available/karaoke502` (khối `listen 443` do certbot tạo), thêm trước `location /`:
+
+```nginx
+    # Chỉ dùng HTTPS trong 1 năm (chỉ thêm khi HTTPS đã chạy ổn)
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    client_max_body_size 6m;
+
+    location = /api/auth/login {
+        limit_req zone=kara_login burst=5 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+```
+
+`sudo nginx -t && sudo systemctl reload nginx`. Các bước giữ an toàn khác (mật khẩu, sao lưu, cập nhật) xem `docs/security-review.md`.
 
 ## 4. Vận hành hằng ngày
 
@@ -381,6 +416,14 @@ Sau khi cập nhật:
   Phiếu cũ ghi khoản mục khác vẫn giữ nguyên chữ, và được tính vào "Khác" trong báo cáo Lãi lỗ.
 - Mọi phiếu chi thủ công được tính là chi phí hoạt động, và mọi phiếu thu thủ công được tính là "Thu khác" trong Lãi lỗ — bất kể lý do thực tế. Vì vậy, trả tiền nhà cung cấp sau (cho một phiếu nhập đã ghi nhận nhưng chưa thanh toán) bằng một phiếu chi thủ công, góp vốn, hay chuyển tiền giữa tiền mặt và chuyển khoản bằng phiếu thu/chi thủ công đều làm lệch lợi nhuận. Hãy thanh toán phiếu nhập ngay bằng phương thức thanh toán của chính phiếu nhập đó thay vì lập phiếu chi thủ công sau.
 
+### 6.11. Bảo mật: phiên đăng nhập 24 giờ (không có migration)
+
+- Mỗi lần đăng nhập chỉ dùng được **24 giờ**, dùng liên tục cũng không kéo dài. Hết 24 giờ, ứng dụng tự đăng xuất và báo "Phiên đăng nhập đã hết 24 giờ". Tự đăng xuất sau 15 giờ không thao tác vẫn giữ nguyên.
+- Đổi mật khẩu (hoặc quản lý đặt lại mật khẩu) sẽ đăng xuất tài khoản đó trên mọi máy khác trong tối đa 15 phút. Khoá tài khoản thì đăng xuất ngay như trước.
+- Sai mật khẩu 5 lần trong 15 phút: tên đăng nhập đó bị khoá đăng nhập 15 phút.
+- Sau khi cập nhật, **mọi người phải đăng nhập lại một lần**: phiên cũ (7 ngày) không còn được nhận.
+- Trang `/api/docs` bị tắt (bật lại bằng `SWAGGER_ENABLED=true`). Backend chỉ nhận lời gọi từ chính tên miền của ứng dụng (xem `CORS_ORIGINS`). Bản cũ chạy PM2 với Nginx có `location /api` trên cùng tên miền vẫn hoạt động bình thường.
+
 ## 7. Xử lý sự cố
 
 | Hiện tượng | Nguyên nhân / cách xử lý |
@@ -389,6 +432,7 @@ Sau khi cập nhật:
 | `password authentication failed for user` | Đã đổi `POSTGRES_PASSWORD` sau khi `data/postgres` được tạo. PostgreSQL chỉ đọc biến này lần đầu. Đổi lại giá trị cũ, hoặc vào psql chạy `ALTER USER karaoke_user PASSWORD '<mới>';`. |
 | `docker compose up` báo thiếu `POSTGRES_PASSWORD` / `JWT_SECRET` | Chưa có file `.env` cạnh `docker-compose.yml`, hoặc thiếu biến. |
 | Đăng nhập được nhưng tải lại trang là bị đăng xuất | `COOKIE_SECURE=true` trong khi đang truy cập bằng `http://`. |
+| "Đăng nhập sai quá nhiều lần. Vui lòng thử lại sau … phút." | Tên đăng nhập bị khoá tạm vì sai mật khẩu 5 lần. Chờ hết thời gian, hoặc `docker compose restart backend` để mở khoá ngay. |
 | Nginx báo `502 Bad Gateway` | Container `frontend` chưa chạy, hoặc `proxy_pass` khác cổng `APP_PORT`. |
 | `port is already allocated` | Cổng `APP_PORT` đang bị chương trình khác dùng (ví dụ frontend cũ chạy bằng PM2). |
 | Doanh thu rơi sai ngày | Ngày kinh doanh (06:00 → 06:00 hôm sau, giờ mở cửa 11:30 → 06:00) tính theo giờ container, đã cố định `Asia/Ho_Chi_Minh` trong `docker-compose.yml`. Đừng xoá biến `TZ`. |

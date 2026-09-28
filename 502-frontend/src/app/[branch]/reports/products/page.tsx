@@ -16,7 +16,7 @@ import { useApiData } from "@/hooks/use-api-data";
 import { rangeParams, useReportFilters, useReportOption, useReportScope } from "@/hooks/use-report-filters";
 import { useBranchCode } from "@/lib/branch";
 import { exportWorkbook, toSheet, type ExportColumn } from "@/lib/excel-export";
-import { formatMoney, formatNumber, formatPercent } from "@/lib/format";
+import { formatAmount, formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { BUSINESS_DAY_HINT, NO_CATEGORY } from "@/lib/labels";
 import { PRODUCT_GROUPS, reportFileName } from "@/lib/reports";
 import { SHOW_FROM } from "@/lib/responsive";
@@ -43,6 +43,9 @@ function columnsFor(by: ProductGroup): ExportColumn<ProductReportRow>[] {
     { header: "Thành tiền", type: "money", value: (r) => r.gross },
     { header: "Giảm giá phân bổ", type: "money", value: (r) => r.discount },
     { header: "Doanh thu thuần (chưa VAT)", type: "money", value: (r) => r.net },
+    { header: "Giá vốn", type: "money", value: (r) => r.cost },
+    { header: "Lãi gộp", type: "money", value: (r) => r.grossProfit },
+    { header: "% biên", type: "percent", value: (r) => r.margin },
     { header: "Tỷ trọng", type: "percent", value: (r) => r.share },
   ];
 }
@@ -51,10 +54,13 @@ function SalesCells({ m, share }: { m: ProductSales; share: number | null }) {
   return (
     <>
       <TableCell className={cn(NUM, SHOW_FROM.xs)}>{formatNumber(m.quantity)}</TableCell>
-      <TableCell className={cn(NUM, SHOW_FROM.md)}>{formatNumber(m.gross)}</TableCell>
-      <TableCell className={cn(NUM, SHOW_FROM.md)}>{formatNumber(m.discount)}</TableCell>
+      <TableCell className={cn(NUM, SHOW_FROM.lg)}>{formatNumber(m.gross)}</TableCell>
+      <TableCell className={cn(NUM, SHOW_FROM.lg)}>{formatNumber(m.discount)}</TableCell>
       <TableCell className="text-right font-medium tabular-nums">{formatNumber(m.net)}</TableCell>
-      <TableCell className={cn(NUM, SHOW_FROM.sm)}>{formatPercent(share)}</TableCell>
+      <TableCell className={cn(NUM, SHOW_FROM.md)}>{formatAmount(m.cost)}</TableCell>
+      <TableCell className={cn(NUM, SHOW_FROM.sm)}>{formatAmount(m.grossProfit)}</TableCell>
+      <TableCell className={cn(NUM, SHOW_FROM.md)}>{formatPercent(m.margin)}</TableCell>
+      <TableCell className={cn(NUM, SHOW_FROM.lg)}>{formatPercent(share)}</TableCell>
     </>
   );
 }
@@ -102,7 +108,7 @@ function ProductsView() {
     <>
       <PageHeader
         title="Hàng hóa"
-        description={`${scope.name} · Doanh thu thuần = thành tiền − giảm giá của hóa đơn phân bổ theo tỷ lệ tiền từng món; chưa gồm VAT. ${BUSINESS_DAY_HINT}`}
+        description={`${scope.name} · Doanh thu thuần = thành tiền − giảm giá của hóa đơn phân bổ theo tỷ lệ tiền từng món; chưa gồm VAT. Giá vốn là giá bình quân lúc bán. ${BUSINESS_DAY_HINT}`}
       />
       <ReportToolbar filters={filters} onChange={setFilters} onExport={data && !loading ? exportExcel : undefined} periods={false} />
       <Tabs value={by} onValueChange={(value) => setBy(value as ProductGroup)}>
@@ -117,8 +123,8 @@ function ProductsView() {
 
       {!data || !t ? (
         <>
-          <div className="grid gap-4 @xl/main:grid-cols-2 @5xl/main:grid-cols-4">
-            {Array.from({ length: 4 }, (_, i) => (
+          <div className="grid gap-4 @xl/main:grid-cols-2 @5xl/main:grid-cols-3 @7xl/main:grid-cols-5">
+            {Array.from({ length: 5 }, (_, i) => (
               <Skeleton key={i} className="h-32 rounded-xl" />
             ))}
           </div>
@@ -126,8 +132,13 @@ function ProductsView() {
         </>
       ) : (
         <div className={cn("flex flex-col gap-4 transition-opacity md:gap-6", loading && "opacity-60")}>
-          <div className="grid gap-4 @xl/main:grid-cols-2 @5xl/main:grid-cols-4">
+          <div className="grid gap-4 @xl/main:grid-cols-2 @5xl/main:grid-cols-3 @7xl/main:grid-cols-5">
             <StatTile label="Doanh thu thuần (chưa VAT)" value={formatMoney(t.net)} footer="Tiền hàng sau giảm giá" />
+            <StatTile
+              label="Lãi gộp"
+              value={formatMoney(t.grossProfit)}
+              footer={`Giá vốn ${formatMoney(t.cost)} · biên ${formatPercent(t.margin)}`}
+            />
             <StatTile label="Thành tiền" value={formatMoney(t.gross)} footer="Số lượng × đơn giá" />
             <StatTile label="Giảm giá" value={formatMoney(t.discount)} footer="Giảm tiền hàng của các hóa đơn" />
             <StatTile label="Số lượng bán" value={formatNumber(t.quantity)} footer={`${data.rows.length} ${data.by === "product" ? "món" : "danh mục"}`} />
@@ -167,10 +178,13 @@ function ProductsView() {
                       <TableRow>
                         <TableHead>{data.by === "product" ? "Món" : "Danh mục"}</TableHead>
                         <TableHead className={cn("text-right", SHOW_FROM.xs)}>SL</TableHead>
-                        <TableHead className={cn("text-right", SHOW_FROM.md)}>Thành tiền</TableHead>
-                        <TableHead className={cn("text-right", SHOW_FROM.md)}>Giảm giá</TableHead>
+                        <TableHead className={cn("text-right", SHOW_FROM.lg)}>Thành tiền</TableHead>
+                        <TableHead className={cn("text-right", SHOW_FROM.lg)}>Giảm giá</TableHead>
                         <TableHead className="text-right">Doanh thu</TableHead>
-                        <TableHead className={cn("text-right", SHOW_FROM.sm)}>Tỷ trọng</TableHead>
+                        <TableHead className={cn("text-right", SHOW_FROM.md)}>Giá vốn</TableHead>
+                        <TableHead className={cn("text-right", SHOW_FROM.sm)}>Lãi gộp</TableHead>
+                        <TableHead className={cn("text-right", SHOW_FROM.md)}>% biên</TableHead>
+                        <TableHead className={cn("text-right", SHOW_FROM.lg)}>Tỷ trọng</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>

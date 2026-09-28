@@ -311,4 +311,31 @@ describe('Costing and accounting reports (e2e)', () => {
       });
     });
   });
+
+  describe('products report', () => {
+    it('adds the cost of goods, the gross profit and the margin', async () => {
+      const res = (await get(`/reports/products?${period}`).expect(200))
+        .body as { totals: Json; rows: Json[] };
+      const beer = res.rows.find((r) => r.id === beerId)!;
+      expect(beer).toMatchObject({
+        quantity: 1,
+        gross: 30000,
+        net: 30000,
+        cost: 17980,
+        grossProfit: 12020,
+      });
+      expect(beer.margin as number).toBeCloseTo(12020 / 30000, 6);
+      expect(res.rows.find((r) => r.id === feeId)).toMatchObject({
+        quantity: 1,
+        cost: 0,
+        grossProfit: 50000,
+        margin: 1,
+      });
+      expect(res.totals).toMatchObject({
+        net: 80000,
+        cost: 17980,
+        grossProfit: 62020,
+      });
+    });
+  });
 });

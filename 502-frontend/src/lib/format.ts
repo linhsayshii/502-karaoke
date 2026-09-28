@@ -15,6 +15,9 @@ export function initials(fullName: string) {
 export const formatNumber = (value: number | string | null | undefined) =>
   Number(value ?? 0).toLocaleString("vi-VN");
 
+// An amount that may carry cents (costs), to the đồng.
+export const formatAmount = (value: number) => (Math.round(value) || 0).toLocaleString("vi-VN");
+
 export const formatDateTime = (value: string | Date | null | undefined) =>
   value
     ? new Date(value).toLocaleString("vi-VN", {

@@ -238,6 +238,9 @@ export interface ProductSales {
   gross: number;
   discount: number;
   net: number;
+  cost: number; // giá vốn: Σ quantity × unit cost at checkout (may carry cents)
+  grossProfit: number; // net − cost
+  margin: number | null; // grossProfit / net; null when net is 0
 }
 
 export interface ProductReportRow extends ProductSales {

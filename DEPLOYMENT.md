@@ -362,6 +362,23 @@ SELECT count(*) FROM "Order" o WHERE o.status = 'COMPLETED' AND o."totalProductP
 
 Cả hai đều phải trả về 0; nếu không: câu đầu là hóa đơn có phòng thuộc cơ sở khác, báo cáo phòng sẽ xếp các hóa đơn đó vào "Không phòng"; câu sau là hóa đơn có tổng tiền hàng lệch với tổng món trên hóa đơn, báo cáo hàng hóa sẽ có thành tiền khác tiền hàng của báo cáo Doanh thu.
 
+### 6.10. Giá vốn bình quân và báo cáo kế toán (migration `20260928000000_reports_costing`)
+
+Migration thêm 3 cột, không sửa dữ liệu cũ:
+- `OrderItem.unitCost`: giá vốn một đơn vị của món trên hóa đơn, chụp lúc thanh toán.
+- `StockMovement.unitCost` và `StockMovement.costAfter`: giá vốn của lần biến động kho và giá vốn bình quân sau lần đó.
+
+Thêm cột có giá trị mặc định chỉ đổi metadata trên PostgreSQL 11 trở lên, nên chạy ngay, không cần chọn giờ vắng khách.
+
+Sau khi cập nhật:
+- `Product.costPrice` giữ giá đang có và trở thành giá vốn bình quân ban đầu. Từ đó mọi phiếu nhập, bán, xuất, hủy phiếu và hủy/sửa hóa đơn đều cập nhật nó theo bình quân gia quyền.
+- Không tính lại quá khứ. Hóa đơn thanh toán trước khi cập nhật có giá vốn 0, nên Lãi lỗ và cột Giá vốn của báo cáo Hàng hóa chỉ đúng từ các hóa đơn sau đó. Biến động kho cũ có giá trị 0, nên giá trị "Tồn đầu" của báo cáo Nhập – xuất – tồn chỉ đúng từ biến động đầu tiên sau khi cập nhật.
+- Phiếu thu/chi thủ công chỉ nhận các khoản mục cố định:
+  - Chi: Lương, Mặt bằng, Điện nước, Sửa chữa – bảo trì, Marketing, Vật tư tiêu hao, Thuế – phí, Khác.
+  - Thu: Thu khác.
+
+  Phiếu cũ ghi khoản mục khác vẫn giữ nguyên chữ, và được tính vào "Khác" trong báo cáo Lãi lỗ.
+
 ## 7. Xử lý sự cố
 
 | Hiện tượng | Nguyên nhân / cách xử lý |

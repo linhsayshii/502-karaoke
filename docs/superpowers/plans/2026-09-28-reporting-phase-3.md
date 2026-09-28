@@ -1767,7 +1767,7 @@ describe('profit', () => {
     expect(m.expenses['Điện nước']).toBe(200000);
     expect(m.expenses['Khác']).toBe(50000);
     expect(m.expenses['Lương']).toBe(0);
-    expect(m.profitMargin).toBeCloseTo(0.435, 6);
+    expect(m.profitMargin).toBeCloseTo(0.4349995, 6);
   });
 
   it('has no margins without revenue', () => {

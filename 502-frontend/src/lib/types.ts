@@ -260,6 +260,37 @@ export interface ProductReport {
   rows: ProductReportRow[];
 }
 
+// GET /reports/profit: revenue before VAT − cost of goods sold = gross
+// profit; − expenses (by category) − losses + other income = profit. VAT
+// and purchases are shown apart.
+export interface ProfitMetrics {
+  roomFee: number;
+  roomDiscount: number;
+  productSales: number;
+  productDiscount: number;
+  revenue: number;
+  vat: number;
+  cogs: number;
+  expenses: Record<string, number>; // by expense category
+  losses: number;
+  otherIncome: number;
+  purchases: number;
+  grossProfit: number;
+  grossMargin: number | null;
+  expenseTotal: number;
+  profit: number;
+  profitMargin: number | null;
+}
+
+export interface ProfitReport {
+  branchId: number | null;
+  range: { from: string; to: string };
+  groupBy: GroupBy;
+  categories: string[];
+  totals: ProfitMetrics;
+  buckets: (ReportBucket & ProfitMetrics)[];
+}
+
 // GET /reports/hours: weekday 1 = Monday … 7 = Sunday (of the business day).
 export interface HourCell {
   weekday: number;

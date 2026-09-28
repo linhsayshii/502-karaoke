@@ -21,8 +21,8 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Report filters kept in the URL (?from&to&groupBy&compare=1&scope=chain), so
 // a report can be shared as a link and survives a reload. Default: this
-// month by day, this branch.
-export function useReportFilters() {
+// month by day (or `defaults.groupBy`), this branch.
+export function useReportFilters(defaults: { groupBy?: GroupBy } = {}) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -36,11 +36,11 @@ export function useReportFilters() {
     return {
       from: validRange ? from : firstDayOfMonth(),
       to: validRange ? to : businessDate(),
-      groupBy: groupBy && GROUP_BYS.includes(groupBy) ? groupBy : "day",
+      groupBy: groupBy && GROUP_BYS.includes(groupBy) ? groupBy : (defaults.groupBy ?? "day"),
       compare: searchParams.get("compare") === "1",
       chain: can(user, "reports.chain") && searchParams.get("scope") === "chain",
     };
-  }, [searchParams, user]);
+  }, [searchParams, user, defaults.groupBy]);
 
   const setFilters = useCallback(
     (patch: Partial<ReportFilters>) => {

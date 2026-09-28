@@ -20,6 +20,7 @@ export function ReportToolbar({
   onChange,
   onExport,
   periods = true,
+  compare = true,
   scope = true,
 }: {
   filters: ReportFilters;
@@ -27,6 +28,8 @@ export function ReportToolbar({
   onExport?: () => Promise<void>;
   // false for the reports that are not a time series: no grouping, no comparison.
   periods?: boolean;
+  // false for a time series without a comparison (Lãi lỗ).
+  compare?: boolean;
   // false where the scope is fixed (So sánh cơ sở is always the whole chain).
   scope?: boolean;
 }) {
@@ -48,10 +51,12 @@ export function ReportToolbar({
               ))}
             </SelectContent>
           </Select>
-          <Label className="flex items-center gap-2 px-1 text-sm font-normal">
-            <Switch checked={filters.compare} onCheckedChange={(compare) => onChange({ compare })} />
-            So kỳ trước
-          </Label>
+          {compare && (
+            <Label className="flex items-center gap-2 px-1 text-sm font-normal">
+              <Switch checked={filters.compare} onCheckedChange={(compare) => onChange({ compare })} />
+              So kỳ trước
+            </Label>
+          )}
         </>
       )}
       {scope && can(user, "reports.chain") && (

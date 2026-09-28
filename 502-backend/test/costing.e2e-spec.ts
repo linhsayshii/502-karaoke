@@ -174,4 +174,81 @@ describe('Costing and accounting reports (e2e)', () => {
       expect(Number(movement.costAfter)).toBe(15000);
     });
   });
+
+  describe('cost of the bills', () => {
+    let firstBill: Json;
+    let secondBill: Json;
+
+    const payBill = async (beers: number) => {
+      const order = (await post('/orders', { roomId }).expect(201))
+        .body as Json;
+      await patch(`/orders/${order.id as number}`, {
+        items: [{ productId: beerId, quantity: beers }],
+      }).expect(200);
+      return (
+        await post(`/orders/${order.id as number}/checkout`, {
+          paymentMethod: 'CASH',
+        }).expect(200)
+      ).body as Json;
+    };
+    const itemCost = (order: Json, productId: number) =>
+      Number(
+        (order.items as Json[]).find((i) => i.productId === productId)!
+          .unitCost,
+      );
+
+    it('snapshots the average cost on the bill at checkout', async () => {
+      firstBill = await payBill(4);
+      expect(itemCost(firstBill, beerId)).toBe(15000);
+      expect(await costOf()).toBe(15000);
+      expect((await stockOf(beerId)).stockQuantity).toBe(16);
+    });
+
+    it('puts a voided bill back at the cost it left at', async () => {
+      await importBeer(4, 30000);
+      // (16 × 15,000 + 4 × 30,000) / 20
+      expect(await costOf()).toBe(18000);
+      await post(`/orders/${firstBill.id as number}/void`, {
+        reason: 'Khách trả lại',
+      }).expect(200);
+      // (20 × 18,000 + 4 × 15,000) / 24
+      expect(await costOf()).toBe(17500);
+      const movement = await lastMovement();
+      expect(movement).toMatchObject({ type: 'REVERSAL', quantity: 4 });
+      expect(Number(movement.unitCost)).toBe(15000);
+    });
+
+    it('follows a corrected bill: more at the current average, less at the bill’s own cost', async () => {
+      secondBill = await payBill(2);
+      expect(itemCost(secondBill, beerId)).toBe(17500);
+      await importBeer(3, 25500);
+      // (22 × 17,500 + 3 × 25,500) / 25
+      expect(await costOf()).toBe(18460);
+
+      const more = (
+        await patch(`/orders/${secondBill.id as number}/paid`, {
+          reason: 'Thêm bia',
+          items: [{ productId: beerId, quantity: 4 }],
+        }).expect(200)
+      ).body as Json;
+      // (2 × 17,500 + 2 × 18,460) / 4
+      expect(itemCost(more, beerId)).toBe(17980);
+      expect(await costOf()).toBe(18460);
+
+      const less = (
+        await patch(`/orders/${secondBill.id as number}/paid`, {
+          reason: 'Trả bớt',
+          items: [
+            { productId: beerId, quantity: 1 },
+            { productId: feeId, quantity: 1 },
+          ],
+        }).expect(200)
+      ).body as Json;
+      expect(itemCost(less, beerId)).toBe(17980);
+      expect(itemCost(less, feeId)).toBe(0);
+      // (23 × 18,460 + 3 × 17,980) / 26 = 18,404.615…
+      expect(await costOf()).toBe(18404.62);
+      expect((await stockOf(beerId)).stockQuantity).toBe(26);
+    });
+  });
 });

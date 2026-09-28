@@ -101,7 +101,7 @@ function InventoryView() {
   const exportExcel = async () => {
     if (!data) return;
     await exportWorkbook(reportFileName("nhap-xuat-ton", scope.fileScope, data.range.from, data.range.to), [
-      toSheet("Nhập – xuất – tồn", columns, rows, {
+      toSheet("Xuất nhập tồn", columns, rows, {
         productId: 0,
         name: "Tổng",
         unit: "",
@@ -116,7 +116,7 @@ function InventoryView() {
   return (
     <>
       <PageHeader
-        title="Nhập – xuất – tồn"
+        title="Xuất nhập tồn"
         description={`${scope.name} · Số lượng và giá trị theo giá vốn bình quân của từng lần nhập, bán, xuất. ${BUSINESS_DAY_HINT}`}
       />
       <ReportToolbar filters={filters} onChange={setFilters} onExport={data && !loading ? exportExcel : undefined} periods={false} />

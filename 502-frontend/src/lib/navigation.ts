@@ -65,7 +65,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: "Hàng hóa", path: "/reports/products", icon: Package, permission: "reports" },
       { title: "Khung giờ", path: "/reports/hours", icon: Clock, permission: "reports" },
       { title: "Lãi lỗ", path: "/reports/profit", icon: Scale, permission: "reports" },
-      { title: "Nhập – xuất – tồn", path: "/reports/inventory", icon: Warehouse, permission: "reports" },
+      { title: "Xuất nhập tồn", path: "/reports/inventory", icon: Warehouse, permission: "reports" },
       { title: "So sánh cơ sở", path: "/reports/branches", icon: ChartLine, permission: "reports.chain" },
     ],
   },

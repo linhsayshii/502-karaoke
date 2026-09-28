@@ -111,7 +111,7 @@ function BillsView() {
     <>
       <PageHeader
         title="Hóa đơn"
-        description={`Hóa đơn đã thanh toán hoặc đã hủy, theo ngày kinh doanh lúc thanh toán/hủy. ${BUSINESS_DAY_HINT}`}
+        info={`Hóa đơn đã thanh toán hoặc đã hủy, theo ngày kinh doanh lúc thanh toán/hủy. ${BUSINESS_DAY_HINT}`}
         actions={<DateRangePicker value={range} onChange={setRange} align="end" />}
       />
 

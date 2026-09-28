@@ -166,7 +166,7 @@ export function StockDocumentForm({ type }: { type: StockDocType }) {
     <>
       <PageHeader
         title={isImport ? "Nhập hàng" : "Xuất hàng"}
-        description={
+        info={
           isImport
             ? "Nhập hàng vào kho; đơn giá nhập trở thành giá vốn của mặt hàng. Nếu đã trả tiền, phiếu chi được ghi vào sổ quỹ."
             : "Xuất hủy, dùng nội bộ, trả nhà cung cấp… Không xuất quá số tồn kho."

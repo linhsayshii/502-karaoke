@@ -117,7 +117,8 @@ function InventoryView() {
     <>
       <PageHeader
         title="Xuất nhập tồn"
-        description={`${scope.name} · Số lượng và giá trị theo giá vốn bình quân của từng lần nhập, bán, xuất. ${BUSINESS_DAY_HINT}`}
+        description={scope.name}
+        info={`Số lượng và giá trị theo giá vốn bình quân của từng lần nhập, bán, xuất. ${BUSINESS_DAY_HINT}`}
       />
       <ReportToolbar filters={filters} onChange={setFilters} onExport={data && !loading ? exportExcel : undefined} periods={false} />
 

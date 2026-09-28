@@ -12,7 +12,7 @@ export default function SalesSettingsPage() {
     <>
       <PageHeader
         title="Cài đặt bán hàng"
-        description="Phòng, mặt hàng và danh mục của cơ sở. Nhân viên được quản lý trong Quản trị → Tài khoản."
+        info="Phòng, mặt hàng và danh mục của cơ sở. Nhân viên được quản lý trong Quản trị → Tài khoản."
       />
       <Tabs defaultValue="rooms" className="gap-4">
         <TabsList>

@@ -118,7 +118,8 @@ function BranchesView() {
     <>
       <PageHeader
         title="So sánh cơ sở"
-        description={`Toàn chuỗi · Doanh thu chưa gồm VAT, VAT tính riêng. Theo giờ thanh toán. ${BUSINESS_DAY_HINT}`}
+        description="Toàn chuỗi"
+        info={`Doanh thu chưa gồm VAT, VAT tính riêng. Theo giờ thanh toán. ${BUSINESS_DAY_HINT}`}
       />
       <ReportToolbar filters={filters} onChange={setFilters} onExport={data && !loading ? exportExcel : undefined} scope={false} />
 

@@ -113,7 +113,8 @@ function RevenueView() {
     <>
       <PageHeader
         title="Doanh thu"
-        description={`${scopeName} · Doanh thu chưa gồm VAT, VAT tính riêng. Theo giờ thanh toán; hóa đơn đã hủy không được tính. ${BUSINESS_DAY_HINT}`}
+        description={scopeName}
+        info={`Doanh thu chưa gồm VAT, VAT tính riêng. Theo giờ thanh toán; hóa đơn đã hủy không được tính. ${BUSINESS_DAY_HINT}`}
       />
       <ReportToolbar filters={filters} onChange={setFilters} onExport={data && !loading ? exportExcel : undefined} />
 

@@ -100,7 +100,7 @@ export default function StockPage() {
     <>
       <PageHeader
         title="Tồn kho"
-        description="Tồn kho trừ khi hóa đơn được thanh toán; phần đã gọi trong phòng đang mở hiện ở cột Đang phục vụ."
+        info="Tồn kho trừ khi hóa đơn được thanh toán; phần đã gọi trong phòng đang mở hiện ở cột Đang phục vụ."
         actions={
           <>
             <ExportExcelButton onExport={products && shown.length > 0 ? exportExcel : undefined} />

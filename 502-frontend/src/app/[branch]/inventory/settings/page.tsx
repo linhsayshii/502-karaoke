@@ -55,7 +55,7 @@ export default function InventorySettingsPage() {
     <>
       <PageHeader
         title="Danh mục hàng"
-        description="Mặt hàng và danh mục dùng chung với Bán hàng. Tồn kho thay đổi qua phiếu nhập/xuất."
+        info="Mặt hàng và danh mục dùng chung với Bán hàng. Tồn kho thay đổi qua phiếu nhập/xuất."
         actions={<ExportExcelButton onExport={exportExcel} />}
       />
       <Tabs defaultValue="products" className="gap-4">

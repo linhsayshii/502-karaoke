@@ -137,7 +137,7 @@ export default function RoomsPage() {
     <>
       <PageHeader
         title={canOperate ? "Sơ đồ phòng" : "Phòng đang phục vụ"}
-        description={
+        info={
           canOperate
             ? "Mở phòng, gọi món và thanh toán. Sơ đồ tự cập nhật mỗi 30 giây."
             : "Các phòng bạn đang được phân công phục vụ (chỉ xem)."

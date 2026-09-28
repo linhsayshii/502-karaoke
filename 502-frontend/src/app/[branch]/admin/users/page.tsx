@@ -261,7 +261,7 @@ export default function UsersPage() {
     <>
       <PageHeader
         title="Tài khoản"
-        description="Mỗi nhân viên là một tài khoản; vai trò quyết định quyền. Nhân viên CSKH/phục vụ không cần mật khẩu nếu không đăng nhập."
+        info="Mỗi nhân viên là một tài khoản; vai trò quyết định quyền. Nhân viên CSKH/phục vụ không cần mật khẩu nếu không đăng nhập."
         actions={
           <>
             <ExcelImportButton type="users" />

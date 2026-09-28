@@ -107,7 +107,7 @@ export default function BranchesPage() {
     <>
       <PageHeader
         title="Cơ sở"
-        description="Các cơ sở trong chuỗi. Mã cơ sở dùng trên đường dẫn (vd /cs1/...) và không đổi được."
+        info="Các cơ sở trong chuỗi. Mã cơ sở dùng trên đường dẫn (vd /cs1/...) và không đổi được."
         actions={
           <Button onClick={() => openForm("new")}>
             <PlusIcon data-icon="inline-start" />

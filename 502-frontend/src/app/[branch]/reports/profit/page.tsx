@@ -85,7 +85,8 @@ function ProfitView() {
     <>
       <PageHeader
         title="Lãi lỗ"
-        description={`${scope.name} · Lợi nhuận = doanh thu chưa VAT − giá vốn hàng bán − chi phí − hàng xuất kho + thu khác. Tiền nhập hàng thành hàng tồn nên không tính là chi phí. ${BUSINESS_DAY_HINT}`}
+        description={scope.name}
+        info={`Lợi nhuận = doanh thu chưa VAT − giá vốn hàng bán − chi phí − hàng xuất kho + thu khác. Tiền nhập hàng thành hàng tồn nên không tính là chi phí. ${BUSINESS_DAY_HINT}`}
       />
       <ReportToolbar
         filters={filters}

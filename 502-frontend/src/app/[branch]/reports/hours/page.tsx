@@ -92,7 +92,8 @@ function HoursView() {
     <>
       <PageHeader
         title="Khung giờ"
-        description={`${scope.name} · Theo thứ của ngày kinh doanh và giờ khách vào phòng; doanh thu chưa gồm VAT. ${BUSINESS_DAY_HINT}`}
+        description={scope.name}
+        info={`Theo thứ của ngày kinh doanh và giờ khách vào phòng; doanh thu chưa gồm VAT. ${BUSINESS_DAY_HINT}`}
       />
       <ReportToolbar filters={filters} onChange={setFilters} onExport={data && !loading ? exportExcel : undefined} periods={false} />
       <Tabs value={metric} onValueChange={(v) => setMetric(v as HourMetric)}>

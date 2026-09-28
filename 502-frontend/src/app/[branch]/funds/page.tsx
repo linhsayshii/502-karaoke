@@ -247,7 +247,7 @@ export default function FundsPage() {
     <>
       <PageHeader
         title="Sổ quỹ"
-        description={`Phiếu thu tiền hóa đơn và phiếu chi nhập hàng được ghi tự động. ${BUSINESS_DAY_HINT}`}
+        info={`Phiếu thu tiền hóa đơn và phiếu chi nhập hàng được ghi tự động. ${BUSINESS_DAY_HINT}`}
         actions={
           <>
             <Button variant="outline" onClick={() => openForm("EXPENSE")}>

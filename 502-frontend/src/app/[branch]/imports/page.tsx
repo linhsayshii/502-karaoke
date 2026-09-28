@@ -29,7 +29,7 @@ function ImportsContent() {
       <>
         <PageHeader
           title="Nhập từ Excel"
-          description="Đưa dữ liệu có sẵn trong file Excel vào cơ sở này: chọn file, ghép cột trong file với trường dữ liệu, kiểm tra rồi nhập."
+          info="Đưa dữ liệu có sẵn trong file Excel vào cơ sở này: chọn file, ghép cột trong file với trường dữ liệu, kiểm tra rồi nhập."
         />
         <div className="grid gap-3 @3xl/main:grid-cols-2">
           {available.map((d) => (
@@ -57,7 +57,7 @@ function ImportsContent() {
     <>
       <PageHeader
         title={`Nhập ${definition.title.toLowerCase()} từ Excel`}
-        description={definition.description}
+        info={definition.description}
         actions={
           <>
             <Button variant="outline" asChild>

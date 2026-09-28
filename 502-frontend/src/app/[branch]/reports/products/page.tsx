@@ -108,7 +108,8 @@ function ProductsView() {
     <>
       <PageHeader
         title="Hàng hóa"
-        description={`${scope.name} · Doanh thu thuần = thành tiền − giảm giá của hóa đơn phân bổ theo tỷ lệ tiền từng món; chưa gồm VAT. Giá vốn là giá bình quân lúc bán. ${BUSINESS_DAY_HINT}`}
+        description={scope.name}
+        info={`Doanh thu thuần = thành tiền − giảm giá của hóa đơn phân bổ theo tỷ lệ tiền từng món; chưa gồm VAT. Giá vốn là giá bình quân lúc bán. ${BUSINESS_DAY_HINT}`}
       />
       <ReportToolbar filters={filters} onChange={setFilters} onExport={data && !loading ? exportExcel : undefined} periods={false} />
       <Tabs value={by} onValueChange={(value) => setBy(value as ProductGroup)}>

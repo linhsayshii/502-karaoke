@@ -67,7 +67,7 @@ export default function StockDocumentsPage() {
     <>
       <PageHeader
         title="Phiếu kho"
-        description={`Phiếu nhập và phiếu xuất của cơ sở. ${BUSINESS_DAY_HINT}`}
+        info={`Phiếu nhập và phiếu xuất của cơ sở. ${BUSINESS_DAY_HINT}`}
         actions={<DateRangePicker value={range} onChange={setRange} align="end" />}
       />
 

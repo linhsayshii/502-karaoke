@@ -108,7 +108,8 @@ function RoomsView() {
     <>
       <PageHeader
         title="Phòng"
-        description={`${scope.name} · Công suất = giờ có khách / giờ mở cửa (11:30 – 06:00, 18,5 giờ mỗi ngày). Doanh thu chưa gồm VAT. ${BUSINESS_DAY_HINT}`}
+        description={scope.name}
+        info={`Công suất = giờ có khách / giờ mở cửa (11:30 – 06:00, 18,5 giờ mỗi ngày). Doanh thu chưa gồm VAT. ${BUSINESS_DAY_HINT}`}
       />
       <ReportToolbar filters={filters} onChange={setFilters} onExport={data && !loading ? exportExcel : undefined} periods={false} />
       <Tabs value={by} onValueChange={(value) => setBy(value as RoomGroup)}>

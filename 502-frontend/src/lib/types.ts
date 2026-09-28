@@ -291,6 +291,38 @@ export interface ProfitReport {
   buckets: (ReportBucket & ProfitMetrics)[];
 }
 
+// GET /reports/inventory (nhập – xuất – tồn). imports, sales and exports
+// are positive; others (reversals, adjustments) signed.
+export interface StockFlow {
+  quantity: number;
+  value: number;
+}
+
+export interface InventoryFlows {
+  opening: StockFlow;
+  imports: StockFlow;
+  sales: StockFlow;
+  exports: StockFlow;
+  others: StockFlow;
+  closing: StockFlow;
+}
+
+export interface InventoryReportRow extends InventoryFlows {
+  productId: number;
+  name: string;
+  unit: string;
+  categoryId: number | null;
+  categoryName: string | null;
+  branchCode: string;
+}
+
+export interface InventoryReport {
+  branchId: number | null;
+  range: { from: string; to: string };
+  totals: InventoryFlows;
+  rows: InventoryReportRow[];
+}
+
 // GET /reports/hours: weekday 1 = Monday … 7 = Sunday (of the business day).
 export interface HourCell {
   weekday: number;

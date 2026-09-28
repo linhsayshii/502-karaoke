@@ -427,4 +427,89 @@ describe('Costing and accounting reports (e2e)', () => {
         .expect(403);
     });
   });
+
+  describe('stock ledger (nhập – xuất – tồn)', () => {
+    interface Flow {
+      quantity: number;
+      value: number;
+    }
+    type Flows = Record<
+      'opening' | 'imports' | 'sales' | 'exports' | 'others' | 'closing',
+      Flow
+    >;
+    interface Ledger {
+      branchId: number | null;
+      totals: Flows;
+      rows: (Flows & { productId: number; name: string; branchCode: string })[];
+    }
+
+    it("values each flow at its movements' cost", async () => {
+      const res = (await get(`/reports/inventory?${period}`).expect(200))
+        .body as Ledger;
+      // The fee is not stock-tracked: it never moves.
+      expect(res.rows).toHaveLength(1);
+      const beer = res.rows[0];
+      expect(beer).toMatchObject({
+        productId: beerId,
+        name: 'Bia Sài Gòn',
+        branchCode: 'cs3',
+        opening: { quantity: 0, value: 0 },
+        // 10 × 10,000 + 10 × 20,000 + 4 × 30,000 (cancelled later)
+        // + 4 × 30,000 + 3 × 25,500
+        imports: { quantity: 31, value: 616500 },
+        // 4 × 15,000 (voided later) + 2 × 17,500 + 2 × 18,460
+        sales: { quantity: 8, value: 131920 },
+      });
+      expect(beer.exports.quantity).toBe(3);
+      expect(beer.exports.value).toBeCloseTo(3 * 18404.62, 2);
+      // −4 × 30,000 (cancelled import) + 4 × 15,000 (void) + 3 × 17,980
+      // (correction) + 1 × 18,404.62 (cancelled export)
+      expect(beer.others.quantity).toBe(4);
+      expect(beer.others.value).toBeCloseTo(12344.62, 2);
+      expect(beer.closing.quantity).toBe(24);
+      expect(beer.closing.value).toBeCloseTo(24 * 18404.62, 2);
+
+      // Quantities always balance; values up to the rounding of the average.
+      expect(
+        beer.opening.quantity +
+          beer.imports.quantity -
+          beer.sales.quantity -
+          beer.exports.quantity +
+          beer.others.quantity,
+      ).toBe(beer.closing.quantity);
+      expect(
+        beer.opening.value +
+          beer.imports.value -
+          beer.sales.value -
+          beer.exports.value +
+          beer.others.value,
+      ).toBeCloseTo(beer.closing.value, 0);
+      expect(res.totals.closing).toEqual(beer.closing);
+    });
+
+    it('opens a later day with the closing balance', async () => {
+      const day = ymd(daysFromToday(2));
+      const res = (
+        await get(`/reports/inventory?from=${day}&to=${day}`).expect(200)
+      ).body as Ledger;
+      const beer = res.rows[0];
+      expect(beer).toMatchObject({
+        opening: { quantity: 24 },
+        imports: { quantity: 0, value: 0 },
+        closing: { quantity: 24 },
+      });
+      expect(beer.opening.value).toBeCloseTo(24 * 18404.62, 2);
+    });
+
+    it('covers the whole chain for the chain manager', async () => {
+      const chain = (
+        await api()
+          .get(`/api/reports/inventory?${period}`)
+          .set('Authorization', `Bearer ${tokens.admin}`)
+          .expect(200)
+      ).body as Ledger;
+      expect(chain.branchId).toBeNull();
+      expect(chain.rows.map((r) => r.name)).toEqual(['Bia Sài Gòn']);
+    });
+  });
 });

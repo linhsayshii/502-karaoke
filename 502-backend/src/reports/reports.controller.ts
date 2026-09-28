@@ -72,4 +72,10 @@ export class ReportsController {
   profit(@CurrentUser() user: AuthUser, @Query() query: ReportQuery) {
     return this.accounting.profit(user, query);
   }
+
+  // Nhập – xuất – tồn per product, valued at the movements' cost.
+  @Get('inventory')
+  inventory(@CurrentUser() user: AuthUser, @Query() query: ReportRangeQuery) {
+    return this.accounting.inventory(user, query);
+  }
 }

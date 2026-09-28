@@ -251,4 +251,64 @@ describe('Costing and accounting reports (e2e)', () => {
       expect((await stockOf(beerId)).stockQuantity).toBe(26);
     });
   });
+
+  describe('expense categories', () => {
+    it('takes only the fixed categories of the entry type', async () => {
+      await post('/funds', {
+        type: 'EXPENSE',
+        amount: 500000,
+        category: 'Điện nước',
+      }).expect(201);
+      await post('/funds', {
+        type: 'EXPENSE',
+        method: 'TRANSFER',
+        amount: 1000000,
+        category: 'Lương',
+      }).expect(201);
+      const other = (
+        await post('/funds', { type: 'EXPENSE', amount: 20000 }).expect(201)
+      ).body as Json;
+      expect(other.category).toBe('Khác');
+      const income = (
+        await post('/funds', { type: 'INCOME', amount: 200000 }).expect(201)
+      ).body as Json;
+      expect(income.category).toBe('Thu khác');
+
+      await post('/funds', {
+        type: 'EXPENSE',
+        amount: 1000,
+        category: 'Mua đá',
+      }).expect(400);
+      await post('/funds', {
+        type: 'INCOME',
+        amount: 1000,
+        category: 'Lương',
+      }).expect(400);
+
+      // Cancelled: out of every total.
+      const marketing = (
+        await post('/funds', {
+          type: 'EXPENSE',
+          amount: 300000,
+          category: 'Marketing',
+        }).expect(201)
+      ).body as Json;
+      await post(`/funds/${marketing.id as number}/cancel`, {
+        reason: 'Ghi nhầm',
+      }).expect(200);
+
+      // An entry from before the fixed list (free text).
+      const branch = await prisma.branch.findUniqueOrThrow({
+        where: { code: 'cs3' },
+      });
+      await prisma.fundTransaction.create({
+        data: {
+          branchId: branch.id,
+          type: 'EXPENSE',
+          amount: 10000,
+          category: 'Chi linh tinh',
+        },
+      });
+    });
+  });
 });

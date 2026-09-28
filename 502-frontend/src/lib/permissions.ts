@@ -60,6 +60,7 @@ const ROUTE_PERMISSIONS: [string, Permission][] = [
   ["/funds", "funds"],
   ["/admin/branches", "branches"],
   ["/imports", "imports"],
+  ["/admin/reports", "reports"],
   ["/admin", "users"],
 ];
 

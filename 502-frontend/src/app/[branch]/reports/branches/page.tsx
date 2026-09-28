@@ -20,13 +20,13 @@ import { DeltaBadge, StatTile } from "@/components/stat-tile";
 import { useApiData } from "@/hooks/use-api-data";
 import { reportParams, useReportFilters } from "@/hooks/use-report-filters";
 import { useBranchCode } from "@/lib/branch";
-import { exportWorkbook, toSheet, type ExportColumn } from "@/lib/excel-export";
-import { formatCompact, formatDate, formatMoney, formatNumber, formatPercent } from "@/lib/format";
+import { exportWorkbook } from "@/lib/excel-export";
+import { formatCompact, formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { BUSINESS_DAY_HINT } from "@/lib/labels";
-import { METRIC_COLUMNS } from "@/lib/report-columns";
+import { branchPeriodsSheet, branchesSheet } from "@/lib/report-sheets";
 import { delta, reportFileName, tickLabel } from "@/lib/reports";
 import { SHOW_FROM } from "@/lib/responsive";
-import type { BranchReportRow, BranchesReport, ReportBucket, RevenueMetrics } from "@/lib/types";
+import type { BranchesReport, RevenueMetrics } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const NUM = "text-right tabular-nums";
@@ -73,44 +73,9 @@ function BranchesView() {
 
   const exportExcel = async () => {
     if (!data) return;
-    const branchColumns: ExportColumn<BranchReportRow>[] = [
-      { header: "Cơ sở", value: (r) => r.name },
-      ...METRIC_COLUMNS,
-      { header: "Tỷ trọng doanh thu", type: "percent", value: (r) => r.share },
-      ...(data.previous
-        ? [{ header: "Doanh thu kỳ trước", type: "money" as const, value: (r: BranchReportRow) => r.previous?.revenue ?? 0 }]
-        : []),
-    ];
-    type PeriodRow = ReportBucket & { values: number[]; total: number };
-    const periodColumns: ExportColumn<PeriodRow>[] = [
-      { header: "Kỳ", value: (r) => r.label },
-      { header: "Từ ngày", value: (r) => formatDate(r.from) },
-      { header: "Đến ngày", value: (r) => formatDate(r.to) },
-      ...data.branches.map((b, i) => ({ header: b.name, type: "money" as const, value: (r: PeriodRow) => r.values[i] })),
-      { header: "Toàn chuỗi", type: "money", value: (r) => r.total },
-    ];
-    const periods = data.buckets.map((bucket, i) => {
-      const values = data.branches.map((b) => b.series[i]);
-      return { ...bucket, values, total: values.reduce((sum, v) => sum + v, 0) };
-    });
     await exportWorkbook(reportFileName("so-sanh-co-so", "toan-chuoi", data.range.from, data.range.to), [
-      toSheet("Theo cơ sở", branchColumns, data.branches, {
-        branchId: 0,
-        code: "",
-        name: "Toàn chuỗi",
-        share: data.totals.revenue ? 1 : null,
-        previous: data.previous?.totals ?? null,
-        series: [],
-        ...data.totals,
-      }),
-      toSheet("Doanh thu theo kỳ", periodColumns, periods, {
-        key: "",
-        label: "Tổng",
-        from: data.range.from,
-        to: data.range.to,
-        values: data.branches.map((b) => b.revenue),
-        total: data.totals.revenue,
-      }),
+      branchesSheet(data),
+      branchPeriodsSheet(data),
     ]);
   };
 

@@ -15,41 +15,20 @@ import { StatTile } from "@/components/stat-tile";
 import { useApiData } from "@/hooks/use-api-data";
 import { rangeParams, useReportFilters, useReportOption, useReportScope } from "@/hooks/use-report-filters";
 import { useBranchCode } from "@/lib/branch";
-import { exportWorkbook, toSheet, type ExportColumn } from "@/lib/excel-export";
+import { exportWorkbook } from "@/lib/excel-export";
 import { formatHours, formatMoney, formatNumber, formatPercent } from "@/lib/format";
-import { BUSINESS_DAY_HINT, NO_ROOM, roomTypeLabel } from "@/lib/labels";
-import { METRIC_COLUMNS } from "@/lib/report-columns";
+import { BUSINESS_DAY_HINT, roomTypeLabel } from "@/lib/labels";
+import { ROOM_GROUP_LABELS, roomRowName, roomsSheet } from "@/lib/report-sheets";
 import { reportFileName, ROOM_GROUPS } from "@/lib/reports";
 import { SHOW_FROM } from "@/lib/responsive";
-import type { RevenueMetrics, RoomGroup, RoomReport, RoomReportRow } from "@/lib/types";
+import type { RevenueMetrics, RoomGroup, RoomReport } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const NUM = "text-right tabular-nums";
-const GROUP_LABELS: Record<RoomGroup, string> = { room: "Theo phòng", type: "Theo loại phòng" };
 
 // After their discounts.
 const roomNet = (m: RevenueMetrics) => m.roomFee - m.roomDiscount;
 const productNet = (m: RevenueMetrics) => m.productSales - m.productDiscount;
-
-// A room, a room type (by=type) or "Không phòng" (id null).
-function rowName(row: RoomReportRow, by: RoomGroup) {
-  if (row.id === null) return row.name ?? NO_ROOM;
-  return by === "type" ? roomTypeLabel(row.type) : (row.name ?? "");
-}
-
-function columnsFor(by: RoomGroup): ExportColumn<RoomReportRow>[] {
-  return [
-    { header: by === "room" ? "Phòng" : "Loại phòng", value: (r) => rowName(r, by) },
-    ...(by === "room"
-      ? [
-          { header: "Loại", value: (r: RoomReportRow) => (r.type ? roomTypeLabel(r.type) : null) },
-          { header: "Cơ sở", value: (r: RoomReportRow) => r.branchCode?.toUpperCase() ?? null },
-        ]
-      : [{ header: "Số phòng", type: "number" as const, value: (r: RoomReportRow) => r.rooms }]),
-    { header: "Công suất", type: "percent", value: (r) => r.occupancy },
-    ...METRIC_COLUMNS,
-  ];
-}
 
 function MetricCells({ m, occupancy }: { m: RevenueMetrics; occupancy: number | null }) {
   return (
@@ -81,16 +60,7 @@ function RoomsView() {
   const exportExcel = async () => {
     if (!data) return;
     await exportWorkbook(reportFileName(`phong-${data.by}`, scope.fileScope, data.range.from, data.range.to), [
-      // id null + a name: rowName() shows "Tổng".
-      toSheet(GROUP_LABELS[data.by], columnsFor(data.by), data.rows, {
-        id: null,
-        name: "Tổng",
-        type: null,
-        branchCode: null,
-        rooms: data.rows.reduce((sum, r) => sum + r.rooms, 0),
-        occupancy: data.occupancy,
-        ...data.totals,
-      }),
+      roomsSheet(data),
     ]);
   };
 
@@ -99,7 +69,7 @@ function RoomsView() {
     ? data.rows
         .filter((row) => row.id !== null)
         .map((row) => ({
-          name: rowName(row, data.by) + (scope.chain && row.branchCode ? ` · ${row.branchCode.toUpperCase()}` : ""),
+          name: roomRowName(row, data.by) + (scope.chain && row.branchCode ? ` · ${row.branchCode.toUpperCase()}` : ""),
           value: row.revenue,
         }))
     : [];
@@ -116,7 +86,7 @@ function RoomsView() {
         <TabsList>
           {ROOM_GROUPS.map((g) => (
             <TabsTrigger key={g} value={g}>
-              {GROUP_LABELS[g]}
+              {ROOM_GROUP_LABELS[g]}
             </TabsTrigger>
           ))}
         </TabsList>
@@ -173,7 +143,7 @@ function RoomsView() {
 
           <Card>
             <CardHeader>
-              <CardTitle>{GROUP_LABELS[data.by]}</CardTitle>
+              <CardTitle>{ROOM_GROUP_LABELS[data.by]}</CardTitle>
               <CardDescription>
                 {formatDateRange(data.range)} · Tiền giờ và tiền hàng đã trừ giảm giá.
               </CardDescription>
@@ -195,7 +165,7 @@ function RoomsView() {
                   {data.rows.map((row) => (
                     <TableRow key={row.id ?? "none"}>
                       <TableCell className="font-medium">
-                        <div className={cn(row.id === null && "text-muted-foreground")}>{rowName(row, data.by)}</div>
+                        <div className={cn(row.id === null && "text-muted-foreground")}>{roomRowName(row, data.by)}</div>
                         {row.id !== null && (
                           <div className="text-xs font-normal text-muted-foreground">
                             {data.by === "room"

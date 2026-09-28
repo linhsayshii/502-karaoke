@@ -26,11 +26,15 @@ export function reportFileName(report: string, scope: string, from: string, to: 
   return `${report}_${scope}_${from}_${to}.xlsx`;
 }
 
-// GET /orders (Hóa đơn) caps a range at this many days (common/dates.ts MAX_REPORT_DAYS).
+// GET /orders (Hóa đơn) and GET /funds cap a range at this many days
+// (common/dates.ts MAX_REPORT_DAYS).
 export const MAX_BILLS_RANGE_DAYS = 366;
 
+// GET /reports/* cap a range at this many days (reports MAX_REPORT_RANGE_DAYS).
+export const MAX_REPORT_RANGE_DAYS = 1830;
+
 // Number of days between two local YYYY-MM-DD dates, both included.
-function dayCount(from: string, to: string): number {
+export function dayCount(from: string, to: string): number {
   const start = new Date(`${from}T00:00:00`);
   const end = new Date(`${to}T00:00:00`);
   return Math.round((end.getTime() - start.getTime()) / 86400000) + 1;

@@ -15,10 +15,11 @@ import { StatTile } from "@/components/stat-tile";
 import { useApiData } from "@/hooks/use-api-data";
 import { rangeParams, useReportFilters, useReportScope } from "@/hooks/use-report-filters";
 import { useBranchCode } from "@/lib/branch";
-import { exportWorkbook, toSheet, type ExportColumn } from "@/lib/excel-export";
+import { exportWorkbook } from "@/lib/excel-export";
 import { formatAmount, formatCompact, formatMoney, formatPercent } from "@/lib/format";
 import { BUSINESS_DAY_HINT } from "@/lib/labels";
 import { profitLines, type ProfitLine } from "@/lib/profit";
+import { profitSheet } from "@/lib/report-sheets";
 import { reportFileName, tickLabel } from "@/lib/reports";
 import type { ProfitMetrics, ProfitReport } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -33,10 +34,6 @@ const cellText = (line: ProfitLine, m: ProfitMetrics) => {
   const value = line.value(m);
   return line.kind === "percent" ? formatPercent(value) : formatAmount(value ?? 0);
 };
-
-// Percent lines go to Excel as text: their columns are formatted as money.
-const excelValue = (line: ProfitLine, m: ProfitMetrics) =>
-  line.kind === "percent" ? formatPercent(line.value(m)) : line.value(m);
 
 const hasFigures = (m: ProfitMetrics) =>
   [m.revenue, m.cogs, m.expenseTotal, m.losses, m.otherIncome, m.purchases].some((value) => value !== 0);
@@ -60,19 +57,8 @@ function ProfitView() {
 
   const exportExcel = async () => {
     if (!data) return;
-    const columns: ExportColumn<ProfitLine>[] = [
-      { header: "Khoản mục", value: (line) => (line.level ? `   ${line.label}` : line.label) },
-      { header: "Tổng", type: "money", value: (line) => excelValue(line, data.totals) },
-      ...data.buckets.map(
-        (bucket): ExportColumn<ProfitLine> => ({
-          header: bucket.label,
-          type: "money",
-          value: (line) => excelValue(line, bucket),
-        }),
-      ),
-    ];
     await exportWorkbook(reportFileName("lai-lo", scope.fileScope, data.range.from, data.range.to), [
-      toSheet("Lãi lỗ", columns, lines),
+      profitSheet(data),
     ]);
   };
 

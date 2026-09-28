@@ -14,27 +14,16 @@ import { ReportToolbar } from "@/components/reports/report-toolbar";
 import { useApiData } from "@/hooks/use-api-data";
 import { rangeParams, useReportFilters, useReportOption, useReportScope } from "@/hooks/use-report-filters";
 import { useBranchCode } from "@/lib/branch";
-import { exportWorkbook, toSheet, type ExportColumn } from "@/lib/excel-export";
+import { exportWorkbook } from "@/lib/excel-export";
 import { formatHours, formatNumber } from "@/lib/format";
 import { BUSINESS_DAY_HINT, STAFF_ROLE_LABELS, UNASSIGNED_STAFF } from "@/lib/labels";
-import { METRIC_COLUMNS } from "@/lib/report-columns";
+import { staffName, staffSheet } from "@/lib/report-sheets";
 import { reportFileName, STAFF_ROLES } from "@/lib/reports";
 import { SHOW_FROM } from "@/lib/responsive";
-import type { RevenueMetrics, StaffReport, StaffReportRow, StaffRole } from "@/lib/types";
+import type { RevenueMetrics, StaffReport, StaffRole } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const NUM = "text-right tabular-nums";
-
-// id null: the bills nobody was assigned to in this role.
-const staffName = (row: StaffReportRow) => row.name ?? (row.id === null ? UNASSIGNED_STAFF : `#${row.id}`);
-
-const columns: ExportColumn<StaffReportRow>[] = [
-  { header: "Nhân viên", value: staffName },
-  { header: "Tài khoản", value: (r) => r.username },
-  { header: "Cơ sở", value: (r) => r.branchCode?.toUpperCase() ?? null },
-  ...METRIC_COLUMNS,
-  { header: "TB/hóa đơn", type: "money", value: (r) => r.avgRevenue },
-];
 
 // The number cells of a row (the same for the total).
 function MetricCells({ m }: { m: RevenueMetrics }) {
@@ -71,13 +60,7 @@ function StaffView() {
   const exportExcel = async () => {
     if (!data) return;
     await exportWorkbook(reportFileName(`nhan-vien-${data.role}`, scope.fileScope, data.range.from, data.range.to), [
-      toSheet(STAFF_ROLE_LABELS[data.role], columns, data.rows, {
-        id: null,
-        name: "Tổng",
-        username: null,
-        branchCode: null,
-        ...data.totals,
-      }),
+      staffSheet(data),
     ]);
   };
 

@@ -15,40 +15,16 @@ import { StatTile } from "@/components/stat-tile";
 import { useApiData } from "@/hooks/use-api-data";
 import { rangeParams, useReportFilters, useReportOption, useReportScope } from "@/hooks/use-report-filters";
 import { useBranchCode } from "@/lib/branch";
-import { exportWorkbook, toSheet, type ExportColumn } from "@/lib/excel-export";
+import { exportWorkbook } from "@/lib/excel-export";
 import { formatAmount, formatMoney, formatNumber, formatPercent } from "@/lib/format";
 import { BUSINESS_DAY_HINT, NO_CATEGORY } from "@/lib/labels";
+import { PRODUCT_GROUP_LABELS, productRowName, productsSheet } from "@/lib/report-sheets";
 import { PRODUCT_GROUPS, reportFileName } from "@/lib/reports";
 import { SHOW_FROM } from "@/lib/responsive";
-import type { ProductGroup, ProductReport, ProductReportRow, ProductSales } from "@/lib/types";
+import type { ProductGroup, ProductReport, ProductSales } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const NUM = "text-right tabular-nums";
-const GROUP_LABELS: Record<ProductGroup, string> = { product: "Theo món", category: "Theo danh mục" };
-
-// A category row with id null: the products without a category.
-const rowName = (row: ProductReportRow) => row.name ?? (row.id === null ? NO_CATEGORY : "");
-
-function columnsFor(by: ProductGroup): ExportColumn<ProductReportRow>[] {
-  return [
-    { header: by === "product" ? "Món" : "Danh mục", value: rowName },
-    ...(by === "product"
-      ? [
-          { header: "Danh mục", value: (r: ProductReportRow) => (r.id === null ? null : (r.categoryName ?? NO_CATEGORY)) },
-          { header: "Đơn vị", value: (r: ProductReportRow) => r.unit },
-        ]
-      : []),
-    { header: "Cơ sở", value: (r) => r.branchCode?.toUpperCase() ?? null },
-    { header: "Số lượng", type: "number", value: (r) => r.quantity },
-    { header: "Thành tiền", type: "money", value: (r) => r.gross },
-    { header: "Giảm giá phân bổ", type: "money", value: (r) => r.discount },
-    { header: "Doanh thu thuần (chưa VAT)", type: "money", value: (r) => r.net },
-    { header: "Giá vốn", type: "money", value: (r) => r.cost },
-    { header: "Lãi gộp", type: "money", value: (r) => r.grossProfit },
-    { header: "% biên", type: "percent", value: (r) => r.margin },
-    { header: "Tỷ trọng", type: "percent", value: (r) => r.share },
-  ];
-}
 
 function SalesCells({ m, share }: { m: ProductSales; share: number | null }) {
   return (
@@ -83,16 +59,7 @@ function ProductsView() {
   const exportExcel = async () => {
     if (!data) return;
     await exportWorkbook(reportFileName(`hang-hoa-${data.by}`, scope.fileScope, data.range.from, data.range.to), [
-      // id null + a name: rowName() shows "Tổng", the category column stays empty.
-      toSheet(GROUP_LABELS[data.by], columnsFor(data.by), data.rows, {
-        id: null,
-        name: "Tổng",
-        unit: null,
-        categoryName: null,
-        branchCode: null,
-        share: data.totals.net ? 1 : null,
-        ...data.totals,
-      }),
+      productsSheet(data),
     ]);
   };
 
@@ -100,7 +67,7 @@ function ProductsView() {
   const chartRows = (data?.rows ?? [])
     .filter((row) => row.id !== null)
     .map((row) => ({
-      name: rowName(row) + (scope.chain && row.branchCode ? ` · ${row.branchCode.toUpperCase()}` : ""),
+      name: productRowName(row) + (scope.chain && row.branchCode ? ` · ${row.branchCode.toUpperCase()}` : ""),
       value: row.net,
     }));
 
@@ -116,7 +83,7 @@ function ProductsView() {
         <TabsList>
           {PRODUCT_GROUPS.map((g) => (
             <TabsTrigger key={g} value={g}>
-              {GROUP_LABELS[g]}
+              {PRODUCT_GROUP_LABELS[g]}
             </TabsTrigger>
           ))}
         </TabsList>
@@ -170,7 +137,7 @@ function ProductsView() {
               )}
               <Card>
                 <CardHeader>
-                  <CardTitle>{GROUP_LABELS[data.by]}</CardTitle>
+                  <CardTitle>{PRODUCT_GROUP_LABELS[data.by]}</CardTitle>
                   <CardDescription>{formatDateRange(data.range)} · Tỷ trọng trên doanh thu thuần.</CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -192,7 +159,7 @@ function ProductsView() {
                       {data.rows.map((row) => (
                         <TableRow key={row.id ?? "none"}>
                           <TableCell className="font-medium">
-                            <div className={cn(row.id === null && "text-muted-foreground")}>{rowName(row)}</div>
+                            <div className={cn(row.id === null && "text-muted-foreground")}>{productRowName(row)}</div>
                             <div className="text-xs font-normal text-muted-foreground">
                               {[
                                 data.by === "product" ? (row.categoryName ?? NO_CATEGORY) : null,

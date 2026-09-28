@@ -24,13 +24,13 @@ import { StatTile } from "@/components/stat-tile";
 import { useApiData } from "@/hooks/use-api-data";
 import { reportParams, useReportFilters, useReportScope } from "@/hooks/use-report-filters";
 import { useBranchCode } from "@/lib/branch";
-import { exportWorkbook, toSheet, type ExportColumn } from "@/lib/excel-export";
+import { exportWorkbook } from "@/lib/excel-export";
 import { formatDate, formatHours, formatMoney, formatNumber } from "@/lib/format";
 import { BUSINESS_DAY_HINT } from "@/lib/labels";
-import { METRIC_COLUMNS } from "@/lib/report-columns";
 import { delta, reportFileName, tickLabel, withinBillsRange } from "@/lib/reports";
+import { revenueBranchesSheet, revenuePeriodsSheet } from "@/lib/report-sheets";
 import { SHOW_FROM } from "@/lib/responsive";
-import type { ReportBucket, RevenueMetrics, RevenueReport } from "@/lib/types";
+import type { RevenueMetrics, RevenueReport } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const chartConfig = {
@@ -45,18 +45,6 @@ const percent = new Intl.NumberFormat("vi-VN", { style: "percent", maximumFracti
 // After their discounts.
 const roomNet = (m: RevenueMetrics) => m.roomFee - m.roomDiscount;
 const productNet = (m: RevenueMetrics) => m.productSales - m.productDiscount;
-
-type PeriodRow = ReportBucket & RevenueMetrics;
-type BranchRow = { name: string } & RevenueMetrics;
-
-const periodColumns: ExportColumn<PeriodRow>[] = [
-  { header: "Kỳ", value: (r) => r.label },
-  { header: "Từ ngày", value: (r) => formatDate(r.from) },
-  { header: "Đến ngày", value: (r) => formatDate(r.to) },
-  ...METRIC_COLUMNS,
-];
-
-const branchColumns: ExportColumn<BranchRow>[] = [{ header: "Cơ sở", value: (r) => r.name }, ...METRIC_COLUMNS];
 
 // Revenue of paid bills by business day of payment (06:00 → 06:00), before
 // VAT with VAT apart; the fund's sales receipts cover the same bills.
@@ -79,19 +67,11 @@ function RevenueView() {
 
   const exportExcel = async () => {
     if (!data) return;
-    const tables = [
-      toSheet("Theo kỳ", periodColumns, data.buckets, {
-        key: "",
-        label: "Tổng",
-        from: data.range.from,
-        to: data.range.to,
-        ...data.totals,
-      }),
-    ];
-    if (data.byBranch) {
-      tables.push(toSheet("Theo cơ sở", branchColumns, data.byBranch, { name: "Tổng", ...data.totals }));
-    }
-    await exportWorkbook(reportFileName("doanh-thu", scope.fileScope, data.range.from, data.range.to), tables);
+    const byBranch = revenueBranchesSheet(data);
+    await exportWorkbook(reportFileName("doanh-thu", scope.fileScope, data.range.from, data.range.to), [
+      revenuePeriodsSheet(data),
+      ...(byBranch ? [byBranch] : []),
+    ]);
   };
 
   const t = data?.totals;

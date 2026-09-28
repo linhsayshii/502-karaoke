@@ -14,9 +14,10 @@ import { StatTile } from "@/components/stat-tile";
 import { useApiData } from "@/hooks/use-api-data";
 import { rangeParams, useReportFilters, useReportScope } from "@/hooks/use-report-filters";
 import { useBranchCode } from "@/lib/branch";
-import { exportWorkbook, toSheet, type ExportColumn } from "@/lib/excel-export";
+import { exportWorkbook } from "@/lib/excel-export";
 import { formatAmount, formatMoney, formatNumber } from "@/lib/format";
 import { BUSINESS_DAY_HINT, NO_CATEGORY } from "@/lib/labels";
+import { INVENTORY_FLOWS, inventorySheet, sumFlows } from "@/lib/report-sheets";
 import { reportFileName } from "@/lib/reports";
 import { SHOW_FROM } from "@/lib/responsive";
 import type { InventoryFlows, InventoryReport, InventoryReportRow, StockFlow } from "@/lib/types";
@@ -26,38 +27,16 @@ const ALL = "all";
 const NONE = "none"; // products without a category
 
 // The columns, left to right, and the narrowest width that shows each.
-const FLOWS: { key: keyof InventoryFlows; label: string; show?: string }[] = [
-  { key: "opening", label: "Tồn đầu", show: SHOW_FROM.sm },
-  { key: "imports", label: "Nhập", show: SHOW_FROM.md },
-  { key: "sales", label: "Bán", show: SHOW_FROM.md },
-  { key: "exports", label: "Xuất kho", show: SHOW_FROM.lg },
-  { key: "others", label: "Hoàn / điều chỉnh", show: SHOW_FROM.lg },
-  { key: "closing", label: "Tồn cuối" },
-];
+const SHOW: Partial<Record<keyof InventoryFlows, string>> = {
+  opening: SHOW_FROM.sm,
+  imports: SHOW_FROM.md,
+  sales: SHOW_FROM.md,
+  exports: SHOW_FROM.lg,
+  others: SHOW_FROM.lg,
+};
+const FLOWS = INVENTORY_FLOWS.map((flow) => ({ ...flow, show: SHOW[flow.key] }));
 
 const categoryKey = (row: InventoryReportRow) => (row.categoryId === null ? NONE : String(row.categoryId));
-
-function sumFlows(rows: InventoryReportRow[]): InventoryFlows {
-  const totals = Object.fromEntries(FLOWS.map((f) => [f.key, { quantity: 0, value: 0 }])) as unknown as InventoryFlows;
-  for (const row of rows) {
-    for (const { key } of FLOWS) {
-      totals[key].quantity += row[key].quantity;
-      totals[key].value += row[key].value;
-    }
-  }
-  return totals;
-}
-
-const columns: ExportColumn<InventoryReportRow>[] = [
-  { header: "Món", value: (r) => r.name },
-  { header: "Danh mục", value: (r) => (r.productId ? (r.categoryName ?? NO_CATEGORY) : null) },
-  { header: "Đơn vị", value: (r) => r.unit || null },
-  { header: "Cơ sở", value: (r) => r.branchCode.toUpperCase() || null },
-  ...FLOWS.flatMap(({ key, label }): ExportColumn<InventoryReportRow>[] => [
-    { header: `${label} – SL`, type: "number", value: (r) => r[key].quantity },
-    { header: `${label} – giá trị`, type: "money", value: (r) => r[key].value },
-  ]),
-];
 
 function FlowCell({ flow, className, strong }: { flow: StockFlow; className?: string; strong?: boolean }) {
   return (
@@ -101,15 +80,7 @@ function InventoryView() {
   const exportExcel = async () => {
     if (!data) return;
     await exportWorkbook(reportFileName("nhap-xuat-ton", scope.fileScope, data.range.from, data.range.to), [
-      toSheet("Xuất nhập tồn", columns, rows, {
-        productId: 0,
-        name: "Tổng",
-        unit: "",
-        categoryId: null,
-        categoryName: null,
-        branchCode: "",
-        ...t,
-      }),
+      inventorySheet(rows),
     ]);
   };
 

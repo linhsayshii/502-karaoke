@@ -15,9 +15,10 @@ import { StatTile } from "@/components/stat-tile";
 import { useApiData } from "@/hooks/use-api-data";
 import { rangeParams, useReportFilters, useReportOption, useReportScope } from "@/hooks/use-report-filters";
 import { useBranchCode } from "@/lib/branch";
-import { exportWorkbook, toSheet, type ExportColumn } from "@/lib/excel-export";
+import { exportWorkbook } from "@/lib/excel-export";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { BUSINESS_DAY_HINT, WEEKDAY_LABELS } from "@/lib/labels";
+import { byWeekday, hoursCellsSheet, hoursWeekdaySheet } from "@/lib/report-sheets";
 import { HOUR_METRICS, reportFileName } from "@/lib/reports";
 import { SHOW_FROM } from "@/lib/responsive";
 import type { HourCell, HourMetric, HoursReport } from "@/lib/types";
@@ -25,39 +26,6 @@ import { cn } from "@/lib/utils";
 
 const NUM = "text-right tabular-nums";
 const METRIC_LABELS: Record<HourMetric, string> = { sessions: "Lượt khách", revenue: "Doanh thu" };
-
-const hourRange = (hour: number) => `${String(hour).padStart(2, "0")}:00–${String(hour).padStart(2, "0")}:59`;
-
-interface WeekdayRow {
-  label: string;
-  sessions: number;
-  revenue: number;
-}
-
-const cellColumns: ExportColumn<HourCell>[] = [
-  { header: "Thứ", value: (c) => WEEKDAY_LABELS[c.weekday - 1] },
-  { header: "Giờ bắt đầu", value: (c) => hourRange(c.hour) },
-  { header: "Lượt khách", type: "number", value: (c) => c.sessions },
-  { header: "Doanh thu (chưa VAT)", type: "money", value: (c) => c.revenue },
-];
-
-const weekdayColumns: ExportColumn<WeekdayRow>[] = [
-  { header: "Thứ", value: (r) => r.label },
-  { header: "Lượt khách", type: "number", value: (r) => r.sessions },
-  { header: "Doanh thu (chưa VAT)", type: "money", value: (r) => r.revenue },
-];
-
-// Totals per weekday of the business day (T2 → CN).
-function byWeekday(cells: HourCell[]): WeekdayRow[] {
-  return WEEKDAY_LABELS.map((label, i) => {
-    const day = cells.filter((c) => c.weekday === i + 1);
-    return {
-      label,
-      sessions: day.reduce((sum, c) => sum + c.sessions, 0),
-      revenue: day.reduce((sum, c) => sum + c.revenue, 0),
-    };
-  });
-}
 
 // When the guests come: sessions and revenue (before VAT) by weekday of the
 // business day × hour the session started. The bills are those paid in the
@@ -81,10 +49,9 @@ function HoursView() {
 
   const exportExcel = async () => {
     if (!data) return;
-    const totals = { ...data.totals };
     await exportWorkbook(reportFileName("khung-gio", scope.fileScope, data.range.from, data.range.to), [
-      toSheet("Theo thứ", weekdayColumns, weekdays, { label: "Tổng", ...totals }),
-      toSheet("Theo giờ", cellColumns, data.cells),
+      hoursWeekdaySheet(data),
+      hoursCellsSheet(data),
     ]);
   };
 

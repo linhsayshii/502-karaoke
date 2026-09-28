@@ -47,9 +47,8 @@ import { StatTile } from "@/components/stat-tile";
 import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
-import { exportWorkbook, toSheet, type ExportColumn } from "@/lib/excel-export";
+import { exportWorkbook } from "@/lib/excel-export";
 import {
-  billLabel,
   businessDate,
   firstDayOfMonth,
   formatDate,
@@ -58,7 +57,8 @@ import {
   formatNumber,
   toDateInput,
 } from "@/lib/format";
-import { BUSINESS_DAY_HINT, DEFAULT_FUND_CATEGORY, DOC_TYPE_LABELS, FUND_CATEGORIES, FUND_TYPE_LABELS, PAYMENT_METHOD_LABELS } from "@/lib/labels";
+import { BUSINESS_DAY_HINT, DEFAULT_FUND_CATEGORY, FUND_CATEGORIES, FUND_TYPE_LABELS, PAYMENT_METHOD_LABELS } from "@/lib/labels";
+import { fundEntriesSheet, fundSource, fundSummarySheet } from "@/lib/report-sheets";
 import { reportFileName } from "@/lib/reports";
 import { SHOW_FROM } from "@/lib/responsive";
 import type { FundSummary, FundTransaction, FundType, PaymentMethod } from "@/lib/types";
@@ -81,47 +81,6 @@ function nowInput() {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${toDateInput(now)}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
 }
-
-// Where an entry comes from: a paid bill, an import, or typed by hand.
-function sourceOf(t: FundTransaction) {
-  if (t.order) return `Hóa đơn ${billLabel(t.order)}${t.order.room ? ` · ${t.order.room.name}` : ""}`;
-  if (t.stockDocument) return `${DOC_TYPE_LABELS[t.stockDocument.type]} ${t.stockDocument.code}`;
-  return "Thủ công";
-}
-
-// Excel columns of the entries. Cancelled entries stay listed but out of the
-// Thu/Chi columns, as they are out of the totals.
-const entryAmount = (t: FundTransaction, type: FundType) =>
-  !t.cancelledAt && t.type === type ? Number(t.amount) : null;
-
-const entryColumns: ExportColumn<FundTransaction>[] = [
-  { header: "Thời gian", value: (t) => formatDateTime(t.occurredAt) },
-  { header: "Loại", value: (t) => FUND_TYPE_LABELS[t.type] },
-  { header: "Hình thức", value: (t) => PAYMENT_METHOD_LABELS[t.method] },
-  { header: "Khoản mục", value: (t) => t.category },
-  { header: "Diễn giải", value: (t) => t.description },
-  { header: "Nguồn", value: sourceOf },
-  { header: "Thu", type: "money", value: (t) => entryAmount(t, "INCOME") },
-  { header: "Chi", type: "money", value: (t) => entryAmount(t, "EXPENSE") },
-  { header: "Người lập", value: (t) => t.createdBy?.fullName ?? null },
-  {
-    header: "Đã hủy",
-    value: (t) =>
-      t.cancelledAt &&
-      `${formatMoney(t.amount)} · ${t.cancelReason ?? ""}${t.cancelledBy ? ` · ${t.cancelledBy.fullName}` : ""}`,
-  },
-];
-
-type SummaryRow = { label: string; amount: number };
-type MethodRow = FundSummary["byMethod"][number];
-
-const methodColumns: ExportColumn<MethodRow>[] = [
-  { header: "Hình thức", value: (m) => PAYMENT_METHOD_LABELS[m.method] },
-  { header: "Tồn đầu kỳ", type: "money", value: (m) => m.openingBalance },
-  { header: "Thu", type: "money", value: (m) => m.income },
-  { header: "Chi", type: "money", value: (m) => m.expense },
-  { header: "Tồn cuối kỳ", type: "money", value: (m) => m.closingBalance },
-];
 
 // Sổ quỹ of the branch. Bill receipts and import payments are written
 // automatically with their source; manual entries can be cancelled here.
@@ -220,26 +179,9 @@ export default function FundsPage() {
   // The entries on screen (with the filters) and the summary of the period.
   const exportExcel = async () => {
     if (!transactions || !summary) return;
-    const summaryRows: SummaryRow[] = [
-      { label: "Tồn đầu kỳ", amount: summary.openingBalance },
-      { label: "Tổng thu", amount: summary.income },
-      { label: "  Trong đó bán hàng", amount: summary.salesIncome },
-      { label: "  Trong đó VAT bán hàng", amount: summary.salesVat },
-      { label: "Tổng chi", amount: summary.expense },
-      { label: "  Trong đó nhập hàng", amount: summary.purchaseExpense },
-      { label: "Tồn cuối kỳ", amount: summary.closingBalance },
-    ];
     await exportWorkbook(reportFileName("so-quy", branch, range.from, range.to), [
-      toSheet(
-        "Tổng hợp",
-        [
-          { header: `Chỉ tiêu (${formatDateRange(range)})`, value: (r: SummaryRow) => r.label },
-          { header: "Số tiền", type: "money", value: (r: SummaryRow) => r.amount },
-        ],
-        summaryRows,
-      ),
-      toSheet("Theo hình thức", methodColumns, summary.byMethod),
-      toSheet("Phiếu thu chi", entryColumns, transactions),
+      fundSummarySheet(summary, formatDateRange(range)),
+      fundEntriesSheet(transactions),
     ]);
   };
 
@@ -405,7 +347,7 @@ export default function FundsPage() {
                         {t.description || "—"}
                       </TableCell>
                       <TableCell className={cn("max-w-44 truncate text-muted-foreground", SHOW_FROM.lg)}>
-                        {sourceOf(t)}
+                        {fundSource(t)}
                       </TableCell>
                       <TableCell
                         className={cn(

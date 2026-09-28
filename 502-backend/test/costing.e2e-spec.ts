@@ -512,4 +512,149 @@ describe('Costing and accounting reports (e2e)', () => {
       expect(chain.rows.map((r) => r.name)).toEqual(['Bia Sài Gòn']);
     });
   });
+
+  // From here on: final review fixes (F4, F7). Fresh cs3 products and a new
+  // room, so none of the numbers hand-checked above move.
+  let extraRoomId: number;
+
+  const openAndCheckout = async (
+    productId: number,
+    quantity: number,
+  ): Promise<Json> => {
+    const order = (await post('/orders', { roomId: extraRoomId }).expect(201))
+      .body as Json;
+    await patch(`/orders/${order.id as number}`, {
+      items: [{ productId, quantity }],
+    }).expect(200);
+    return (
+      await post(`/orders/${order.id as number}/checkout`, {
+        paymentMethod: 'CASH',
+      }).expect(200)
+    ).body as Json;
+  };
+
+  describe('COGS of a bill corrected after tracking was turned off (F4)', () => {
+    it('divides the value stock gave by the bill’s own quantity, not the stock taken', async () => {
+      extraRoomId = (
+        (
+          await post('/rooms', { name: 'P302', pricePerHour: 100000 }).expect(
+            201,
+          )
+        ).body as Json
+      ).id as number;
+
+      const productId = (
+        (
+          await post('/products', {
+            name: 'Bia F4 Tắt theo dõi tồn',
+            price: 30000,
+            unit: 'chai',
+          }).expect(201)
+        ).body as Json
+      ).id as number;
+
+      await post('/inventory/documents', {
+        type: 'IMPORT',
+        lines: [{ productId, quantity: 10, unitCost: 10000 }],
+      }).expect(201);
+      expect(Number((await stockOf(productId)).costPrice)).toBe(10000);
+
+      const bill = await openAndCheckout(productId, 3);
+      // 3 sold at the average of 10,000; stock 10 − 3 = 7.
+      expect((await stockOf(productId)).stockQuantity).toBe(7);
+
+      // Turning tracking off needs stock at 0 first: export what remains.
+      await post('/inventory/documents', {
+        type: 'EXPORT',
+        note: 'Xuất hết để tắt theo dõi tồn',
+        lines: [{ productId, quantity: 7 }],
+      }).expect(201);
+      expect((await stockOf(productId)).stockQuantity).toBe(0);
+
+      await patch(`/products/${productId}`, { trackStock: false }).expect(200);
+
+      // Correct the bill to 5 units. Stock gave 3 × 10,000 = 30,000 in
+      // total (syncSoldStock skips the now-untracked product, so the stock
+      // taken never grows to 5); dividing by the bill's own 5 units gives
+      // unitCost = 30,000 / 5 = 6,000, so COGS = 5 × 6,000 = 30,000 — the
+      // value stock actually gave, not 5 × 10,000.
+      const corrected = (
+        await patch(`/orders/${bill.id as number}/paid`, {
+          reason: 'Sửa sau khi tắt theo dõi tồn',
+          items: [{ productId, quantity: 5 }],
+        }).expect(200)
+      ).body as Json;
+      const unitCost = Number(
+        (corrected.items as Json[]).find((i) => i.productId === productId)!
+          .unitCost,
+      );
+      expect(unitCost).toBe(6000);
+    });
+  });
+
+  describe('e2e gaps (F7)', () => {
+    it('cancelling an import after part of it was sold averages what is left', async () => {
+      const productId = (
+        (
+          await post('/products', {
+            name: 'Bia F7 Hủy nhập sau khi bán',
+            price: 30000,
+            unit: 'chai',
+          }).expect(201)
+        ).body as Json
+      ).id as number;
+
+      await post('/inventory/documents', {
+        type: 'IMPORT',
+        lines: [{ productId, quantity: 10, unitCost: 10000 }],
+      }).expect(201);
+      const secondImport = (
+        await post('/inventory/documents', {
+          type: 'IMPORT',
+          lines: [{ productId, quantity: 10, unitCost: 20000 }],
+        }).expect(201)
+      ).body as Json;
+      // (10 × 10,000 + 10 × 20,000) / 20
+      expect(Number((await stockOf(productId)).costPrice)).toBe(15000);
+
+      await openAndCheckout(productId, 5);
+      // A sale leaves the average as it was; stock 20 − 5 = 15.
+      expect((await stockOf(productId)).stockQuantity).toBe(15);
+      expect(Number((await stockOf(productId)).costPrice)).toBe(15000);
+
+      await post(`/inventory/documents/${secondImport.id as number}/cancel`, {
+        reason: 'Sai phiếu',
+      }).expect(200);
+
+      // (15 × 15,000 − 10 × 20,000) / 5
+      expect(Number((await stockOf(productId)).costPrice)).toBe(5000);
+      expect((await stockOf(productId)).stockQuantity).toBe(5);
+    });
+
+    it('a sale into negative stock, then an import, starts the average over', async () => {
+      const productId = (
+        (
+          await post('/products', {
+            name: 'Bia F7 Bán âm kho',
+            price: 30000,
+            unit: 'chai',
+          }).expect(201)
+        ).body as Json
+      ).id as number;
+
+      await openAndCheckout(productId, 2);
+      // No stock yet: sells at the average of 0, stock goes to −2.
+      expect((await stockOf(productId)).stockQuantity).toBe(-2);
+      expect(Number((await stockOf(productId)).costPrice)).toBe(0);
+
+      await post('/inventory/documents', {
+        type: 'IMPORT',
+        lines: [{ productId, quantity: 10, unitCost: 12000 }],
+      }).expect(201);
+
+      // stockBefore ≤ 0: the average starts over at the import price.
+      expect(Number((await stockOf(productId)).costPrice)).toBe(12000);
+      expect((await stockOf(productId)).stockQuantity).toBe(8);
+    });
+  });
 });

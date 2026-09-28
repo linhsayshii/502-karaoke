@@ -693,17 +693,34 @@ export class OrdersService {
 
   // Puts on each line of a bill the cost per unit of what the bill took from
   // stock (0 for products without stock tracking), so the reports' cost of
-  // goods sold is Σ quantity × unitCost.
+  // goods sold is Σ quantity × unitCost. Divides by the bill's own item
+  // quantity (not the stock taken) so a bill correction after a product's
+  // tracking was turned off still reports the value stock actually gave,
+  // even though syncSoldStock can no longer true up the taken quantity to
+  // match the item quantity for that product.
   private async snapshotItemCosts(tx: Db, orderId: number) {
     const items = await tx.orderItem.findMany({
       where: { orderId },
-      select: { productId: true },
+      select: { productId: true, quantity: true },
     });
+    const wanted = new Map<number, number>();
+    for (const item of items) {
+      wanted.set(
+        item.productId,
+        (wanted.get(item.productId) ?? 0) + item.quantity,
+      );
+    }
     const taken = await this.stockTakenBy(tx, orderId);
     for (const productId of new Set(items.map((item) => item.productId))) {
+      const entry = taken.get(productId);
+      const quantity = wanted.get(productId) ?? 0;
+      const unitCost =
+        entry && entry.quantity > 0 && quantity > 0
+          ? roundCost(entry.value / quantity)
+          : 0;
       await tx.orderItem.updateMany({
         where: { orderId, productId },
-        data: { unitCost: unitCostOf(taken.get(productId)) },
+        data: { unitCost },
       });
     }
   }

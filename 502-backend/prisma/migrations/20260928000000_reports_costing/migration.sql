@@ -8,3 +8,11 @@ ALTER TABLE "OrderItem" ADD COLUMN     "unitCost" DECIMAL(65,30) NOT NULL DEFAUL
 -- AlterTable
 ALTER TABLE "StockMovement" ADD COLUMN     "costAfter" DECIMAL(65,30) NOT NULL DEFAULT 0,
 ADD COLUMN     "unitCost" DECIMAL(65,30) NOT NULL DEFAULT 0;
+
+-- The last movement of each product carries the current cost price as its
+-- average, so stock ledger balances are valued from the upgrade on (bills and
+-- earlier movements are not backfilled).
+UPDATE "StockMovement" m SET "costAfter" = p."costPrice"
+FROM "Product" p
+WHERE p."id" = m."productId"
+  AND m."id" = (SELECT MAX(m2."id") FROM "StockMovement" m2 WHERE m2."productId" = m."productId");

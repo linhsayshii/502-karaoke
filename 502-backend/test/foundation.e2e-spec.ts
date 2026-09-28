@@ -853,7 +853,8 @@ describe('Foundation (e2e)', () => {
 
       const beer = await stockOf(beerId);
       expect(beer.stockQuantity).toBe(0);
-      expect(Number(beer.costPrice)).toBe(0);
+      // Nothing left to average with: the average cost stays.
+      expect(Number(beer.costPrice)).toBe(12000);
       expect(await summary()).toMatchObject({ expense: 0, purchaseExpense: 0 });
 
       // Goods already sold cannot be taken out of stock again.

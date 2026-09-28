@@ -18,6 +18,7 @@ import { AuthUser } from '../auth/auth-user';
 import { BranchScopeService } from '../common/branch-scope.service';
 import { businessDayRange } from '../common/dates';
 import { cancelLinkedEntry, recordPurchasePayment } from '../funds/fund-ledger';
+import { costMovement, MovementCost } from './costing';
 import { CreateStockDocumentDto } from './dto/create-stock-document.dto';
 import {
   ListDocumentsQuery,
@@ -35,6 +36,9 @@ export interface MovementInput {
   // Sales may drive stock negative (never block the cashier); exports and
   // reversals of imports may not.
   allowNegative?: boolean;
+  // Goods coming in, and cancelled imports: the unit cost they move at (see
+  // costMovement). Sales and exports ignore it: they leave at the average.
+  unitCost?: number;
 }
 
 type Db = Prisma.TransactionClient | PrismaService;
@@ -71,18 +75,36 @@ export class InventoryService {
     private branchScope: BranchScopeService,
   ) {}
 
-  // The only way stockQuantity changes: atomic increment + one ledger row.
+  // The only way stockQuantity and costPrice change: atomic increment + one
+  // ledger row, the weighted average cost moved on under the same row lock.
   // Must run inside the caller's transaction.
-  async applyMovement(tx: Prisma.TransactionClient, m: MovementInput) {
+  async applyMovement(
+    tx: Prisma.TransactionClient,
+    m: MovementInput,
+  ): Promise<{ balanceAfter: number } & MovementCost> {
     const product = await tx.product.update({
       where: { id: m.productId },
       data: { stockQuantity: { increment: m.quantity } },
-      select: { name: true, stockQuantity: true },
+      select: { name: true, stockQuantity: true, costPrice: true },
     });
     if (!m.allowNegative && m.quantity < 0 && product.stockQuantity < 0) {
       throw new BadRequestException(
         `Không đủ tồn kho cho "${product.name}" (còn ${product.stockQuantity - m.quantity})`,
       );
+    }
+    const average = Number(product.costPrice);
+    const cost = costMovement({
+      type: m.type,
+      quantity: m.quantity,
+      stockBefore: product.stockQuantity - m.quantity,
+      average,
+      unitCost: m.unitCost,
+    });
+    if (cost.costAfter !== average) {
+      await tx.product.update({
+        where: { id: m.productId },
+        data: { costPrice: cost.costAfter },
+      });
     }
     await tx.stockMovement.create({
       data: {
@@ -91,12 +113,14 @@ export class InventoryService {
         type: m.type,
         quantity: m.quantity,
         balanceAfter: product.stockQuantity,
+        unitCost: cost.unitCost,
+        costAfter: cost.costAfter,
         documentId: m.documentId,
         orderId: m.orderId,
         createdById: m.createdById,
       },
     });
-    return product.stockQuantity;
+    return { balanceAfter: product.stockQuantity, ...cost };
   }
 
   // Quantities ordered in open sessions: still in stock (deducted at
@@ -185,9 +209,10 @@ export class InventoryService {
     );
   }
 
-  // Writes a validated document with its movements, cost prices and (for a
-  // paid import) its phiếu chi. Must run inside the caller's transaction;
-  // the Excel import calls it after creating the products it needs.
+  // Writes a validated document with its movements (which move the cost
+  // price on) and, for a paid import, its phiếu chi. Must run inside the
+  // caller's transaction; the Excel import calls it after creating the
+  // products it needs.
   async writeDocument(
     tx: Prisma.TransactionClient,
     user: AuthUser,
@@ -236,15 +261,10 @@ export class InventoryService {
         productId: line.productId,
         type: isImport ? StockMovementType.IMPORT : StockMovementType.EXPORT,
         quantity: isImport ? line.quantity : -line.quantity,
+        unitCost: line.unitCost,
         documentId: created.id,
         createdById: user.id,
       });
-      if (isImport && line.unitCost > 0) {
-        await tx.product.update({
-          where: { id: line.productId },
-          data: { costPrice: line.unitCost },
-        });
-      }
     }
 
     // Paid from the fund: the phiếu chi is written with the document.
@@ -268,8 +288,9 @@ export class InventoryService {
   }
 
   // Cancels a document: its stock movements are reversed (an import can only
-  // be cancelled while its goods are still in stock), the cost price falls
-  // back to the latest remaining import, and its fund payment is cancelled.
+  // be cancelled while its goods are still in stock) at the cost each line
+  // moved at, so a cancelled import comes back out of the average cost, and
+  // its fund payment is cancelled.
   cancelDocument(user: AuthUser, id: number, reason: string) {
     return this.prisma.$transaction(
       async (tx) => {
@@ -290,6 +311,19 @@ export class InventoryService {
         });
         if (count === 0) throw new ConflictException('Phiếu đã bị hủy');
 
+        // The cost each line moved at. Movements from before costing have
+        // none (0): an import falls back to its line cost (Ruling 2).
+        const moved = await tx.stockMovement.findMany({
+          where: {
+            documentId: document.id,
+            type: { in: [StockMovementType.IMPORT, StockMovementType.EXPORT] },
+          },
+          select: { productId: true, unitCost: true },
+        });
+        const movedAt = new Map(
+          moved.map((mv) => [mv.productId, Number(mv.unitCost)]),
+        );
+
         const isImport = document.type === StockDocType.IMPORT;
         for (const line of document.lines) {
           try {
@@ -298,6 +332,7 @@ export class InventoryService {
               productId: line.productId,
               type: StockMovementType.REVERSAL,
               quantity: isImport ? -line.quantity : line.quantity,
+              unitCost: movedAt.get(line.productId) || Number(line.unitCost),
               documentId: document.id,
               createdById: user.id,
             });
@@ -308,23 +343,6 @@ export class InventoryService {
               );
             }
             throw error;
-          }
-        }
-
-        if (isImport) {
-          for (const line of document.lines) {
-            const latest = await tx.stockDocumentLine.findFirst({
-              where: {
-                productId: line.productId,
-                unitCost: { gt: 0 },
-                document: { type: StockDocType.IMPORT, cancelledAt: null },
-              },
-              orderBy: { document: { createdAt: 'desc' } },
-            });
-            await tx.product.update({
-              where: { id: line.productId },
-              data: { costPrice: latest?.unitCost ?? 0 },
-            });
           }
         }
 

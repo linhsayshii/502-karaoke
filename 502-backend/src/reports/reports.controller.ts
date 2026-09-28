@@ -7,6 +7,7 @@ import type { AuthUser } from '../auth/auth-user';
 import { MANAGERS } from '../auth/roles';
 import { ReportsService } from './reports.service';
 import { BreakdownReportsService } from './breakdown-reports.service';
+import { AccountingReportsService } from './accounting-reports.service';
 import {
   ProductReportQuery,
   ReportQuery,
@@ -23,6 +24,7 @@ export class ReportsController {
   constructor(
     private readonly reportsService: ReportsService,
     private readonly breakdowns: BreakdownReportsService,
+    private readonly accounting: AccountingReportsService,
   ) {}
 
   // Revenue (before VAT, VAT apart) per period; the whole chain when the
@@ -62,5 +64,18 @@ export class ReportsController {
   @Get('hours')
   hours(@CurrentUser() user: AuthUser, @Query() query: ReportRangeQuery) {
     return this.breakdowns.hours(user, query);
+  }
+
+  // Profit and loss per period: revenue before VAT − cost of goods sold −
+  // operating expenses − goods exported + other income.
+  @Get('profit')
+  profit(@CurrentUser() user: AuthUser, @Query() query: ReportQuery) {
+    return this.accounting.profit(user, query);
+  }
+
+  // Nhập – xuất – tồn per product, valued at the movements' cost.
+  @Get('inventory')
+  inventory(@CurrentUser() user: AuthUser, @Query() query: ReportRangeQuery) {
+    return this.accounting.inventory(user, query);
   }
 }

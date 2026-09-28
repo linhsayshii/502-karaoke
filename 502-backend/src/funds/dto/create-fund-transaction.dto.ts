@@ -4,11 +4,13 @@ import { Type } from 'class-transformer';
 import {
   IsDate,
   IsEnum,
+  IsIn,
   IsNumber,
   IsOptional,
   IsPositive,
   IsString,
 } from 'class-validator';
+import { MANUAL_CATEGORIES } from '../fund-categories';
 
 // Phiếu thu (INCOME) / phiếu chi (EXPENSE).
 export class CreateFundTransactionDto {
@@ -28,10 +30,12 @@ export class CreateFundTransactionDto {
 
   @ApiProperty({
     required: false,
-    description: 'Khoản mục, vd: Điện nước, Lương',
+    enum: MANUAL_CATEGORIES,
+    description:
+      'Khoản mục: chi theo danh sách cố định, thu là "Thu khác". Mặc định "Khác" / "Thu khác".',
   })
   @IsOptional()
-  @IsString()
+  @IsIn(MANUAL_CATEGORIES, { message: 'Khoản mục không hợp lệ' })
   category?: string;
 
   @ApiProperty({ required: false })

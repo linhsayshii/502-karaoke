@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth-user';
 import { BranchScopeService } from '../common/branch-scope.service';
+import { roundCost } from '../inventory/costing';
 import { dayCount } from './buckets';
 import {
   hourGrid,
@@ -79,12 +80,17 @@ export interface RoomReport {
 }
 
 // What a set of lines sold: `gross` = Σ quantity × price, `discount` = its
-// share of the bills' product discount, `net` = gross − discount (before VAT).
+// share of the bills' product discount, `net` = gross − discount (before
+// VAT), `cost` = Σ quantity × unitCost (cost of goods sold), `grossProfit`
+// = net − cost and `margin` = grossProfit / net (null when net is 0).
 export interface ProductSales {
   quantity: number;
   gross: number;
   discount: number;
   net: number;
+  cost: number;
+  grossProfit: number;
+  margin: number | null;
 }
 
 // A product, or a category (by=category; id null: Không danh mục).
@@ -268,13 +274,20 @@ export class BreakdownReportsService {
     // One row per line: never REVENUE_COLUMNS here (a bill would count once
     // per line).
     const lines = await this.prisma.$queryRaw<
-      { productId: number; quantity: number; gross: number; discount: number }[]
+      {
+        productId: number;
+        quantity: number;
+        gross: number;
+        discount: number;
+        cost: number;
+      }[]
     >`
       SELECT i."productId" AS "productId",
         SUM(i."quantity")::int AS "quantity",
         SUM(i."quantity" * i."price")::float8 AS "gross",
         COALESCE(SUM(i."quantity" * i."price" * o."discountAmount"
-          / NULLIF(o."totalProductPrice", 0)), 0)::float8 AS "discount"
+          / NULLIF(o."totalProductPrice", 0)), 0)::float8 AS "discount",
+        COALESCE(SUM(i."quantity" * i."unitCost"), 0)::float8 AS "cost"
       FROM "OrderItem" i
       JOIN "Order" o ON o."id" = i."orderId"
       WHERE ${paidOrdersWhere(branchId, query.from, query.to)}
@@ -293,7 +306,10 @@ export class BreakdownReportsService {
     const productOf = new Map(products.map((p) => [p.id, p]));
 
     // Discounts not rounded yet: the exact shares.
-    const groups = new Map<number | null, Omit<ProductRow, 'net' | 'share'>>();
+    const groups = new Map<
+      number | null,
+      Omit<ProductRow, 'net' | 'share' | 'grossProfit' | 'margin'>
+    >();
     for (const line of lines) {
       // productId is a foreign key and products are only soft-deleted, so
       // every line's product is always found.
@@ -311,6 +327,7 @@ export class BreakdownReportsService {
               quantity: 0,
               gross: 0,
               discount: 0,
+              cost: 0,
             }
           : {
               id,
@@ -321,10 +338,12 @@ export class BreakdownReportsService {
               quantity: 0,
               gross: 0,
               discount: 0,
+              cost: 0,
             });
       group.quantity += line.quantity;
       group.gross += line.gross;
       group.discount += line.discount;
+      group.cost += line.cost;
       groups.set(id, group);
     }
 
@@ -338,20 +357,35 @@ export class BreakdownReportsService {
     const gross = list.reduce((sum, group) => sum + group.gross, 0);
     const discount = discounts.reduce((sum, value) => sum + value, 0);
     const net = gross - discount;
+    const cost = roundCost(list.reduce((sum, group) => sum + group.cost, 0));
     const rows = list.map((group, i): ProductRow => {
       const rowNet = group.gross - discounts[i];
+      const rowCost = roundCost(group.cost);
+      const grossProfit = roundCost(rowNet - rowCost);
       return {
         ...group,
         discount: discounts[i],
         net: rowNet,
+        cost: rowCost,
+        grossProfit,
+        margin: rowNet ? grossProfit / rowNet : null,
         share: net ? rowNet / net : null,
       };
     });
+    const grossProfit = roundCost(net - cost);
     return {
       branchId: branchId ?? null,
       range: { from: query.from, to: query.to },
       by,
-      totals: { quantity, gross, discount, net },
+      totals: {
+        quantity,
+        gross,
+        discount,
+        net,
+        cost,
+        grossProfit,
+        margin: net ? grossProfit / net : null,
+      },
       rows: rank(rows, (r) => r.net),
     };
   }

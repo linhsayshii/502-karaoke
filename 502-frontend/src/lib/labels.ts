@@ -23,6 +23,14 @@ export const FUND_TYPE_LABELS: Record<FundType, string> = {
   EXPENSE: "Chi",
 };
 
+// Khoản mục of manual phiếu thu / chi: the backend's funds/fund-categories.ts.
+export const FUND_CATEGORIES: Record<FundType, string[]> = {
+  EXPENSE: ["Lương", "Mặt bằng", "Điện nước", "Sửa chữa – bảo trì", "Marketing", "Vật tư tiêu hao", "Thuế – phí", "Khác"],
+  INCOME: ["Thu khác"],
+};
+
+export const DEFAULT_FUND_CATEGORY: Record<FundType, string> = { EXPENSE: "Khác", INCOME: "Thu khác" };
+
 export const MOVEMENT_LABELS: Record<StockMovementType, string> = {
   IMPORT: "Nhập kho",
   EXPORT: "Xuất kho",

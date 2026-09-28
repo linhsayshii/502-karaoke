@@ -97,7 +97,8 @@ model Product {
   categoryId         Int?
   category           Category?           @relation(fields: [categoryId], references: [id])
   price              Decimal
-  // Latest import unit cost (giá vốn); updated by import receipts.
+  // Weighted average cost (giá vốn bình quân); changed only by stock
+  // movements (InventoryService.applyMovement, inventory/costing.ts).
   costPrice          Decimal             @default(0)
   // Only changed through StockMovement (inventory documents, checkout).
   stockQuantity      Int                 @default(0)
@@ -248,6 +249,9 @@ model OrderItem {
   product   Product @relation(fields: [productId], references: [id])
   quantity  Int
   price     Decimal // Price at the time of order
+  // Cost per unit of what the bill took from stock (weighted average), set
+  // at checkout and on corrections; 0 for products without stock tracking.
+  unitCost  Decimal @default(0)
 
   @@index([orderId])
 }
@@ -309,6 +313,10 @@ model StockMovement {
   type         StockMovementType
   quantity     Int // signed: + in, - out
   balanceAfter Int
+  // What one unit of the movement is valued at, and the product's weighted
+  // average cost after it (inventory/costing.ts).
+  unitCost     Decimal           @default(0)
+  costAfter    Decimal           @default(0)
   documentId   Int?
   document     StockDocument?    @relation(fields: [documentId], references: [id])
   orderId      Int?

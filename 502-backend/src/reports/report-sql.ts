@@ -17,7 +17,7 @@ const localTimeZone = () =>
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 // A JS Date as a UTC `timestamp` (the cast drops the ISO "Z").
-const utcTimestamp = (date: Date) =>
+export const utcTimestamp = (date: Date) =>
   Prisma.sql`${date.toISOString()}::timestamp`;
 
 const DAY_START = Prisma.raw(`interval '${BUSINESS_DAY_START_HOUR} hours'`);
@@ -44,6 +44,32 @@ export function localHourSql(column: Prisma.Sql): Prisma.Sql {
   return Prisma.sql`EXTRACT(HOUR FROM ${localTimeSql(column)})::int`;
 }
 
+// `AND <column> = branchId`; nothing for the whole chain (undefined).
+export function branchWhere(
+  column: Prisma.Sql,
+  branchId: number | undefined,
+): Prisma.Sql {
+  return branchId === undefined
+    ? Prisma.empty
+    : Prisma.sql`AND ${column} = ${branchId}`;
+}
+
+// Rows dated by the timestamp `column` within the business days from..to,
+// of one branch (`branchColumn`) or of every branch when branchId is
+// undefined.
+export function periodWhere(
+  column: Prisma.Sql,
+  branchColumn: Prisma.Sql,
+  branchId: number | undefined,
+  from: string,
+  to: string,
+): Prisma.Sql {
+  const range = businessDayRange(from, to);
+  return Prisma.sql`${column} >= ${utcTimestamp(range.gte!)}
+    AND ${column} < ${utcTimestamp(range.lt!)}
+    ${branchWhere(branchColumn, branchId)}`;
+}
+
 // Paid bills (`"Order" o`) of the business days from..to, by payment time;
 // every branch when branchId is undefined.
 export function paidOrdersWhere(
@@ -51,15 +77,8 @@ export function paidOrdersWhere(
   from: string,
   to: string,
 ): Prisma.Sql {
-  const range = businessDayRange(from, to);
-  const branch =
-    branchId === undefined
-      ? Prisma.empty
-      : Prisma.sql`AND o."branchId" = ${branchId}`;
   return Prisma.sql`o."status" = 'COMPLETED'
-    AND o."endTime" >= ${utcTimestamp(range.gte!)}
-    AND o."endTime" < ${utcTimestamp(range.lt!)}
-    ${branch}`;
+    AND ${periodWhere(Prisma.sql`o."endTime"`, Prisma.sql`o."branchId"`, branchId, from, to)}`;
 }
 
 // The RevenueSums columns of a group of `"Order" o` rows. Room minutes are

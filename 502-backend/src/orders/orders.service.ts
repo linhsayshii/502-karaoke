@@ -19,6 +19,7 @@ import { AuthUser } from '../auth/auth-user';
 import { BranchScopeService } from '../common/branch-scope.service';
 import { businessDayRange } from '../common/dates';
 import { InventoryService } from '../inventory/inventory.service';
+import { roundCost } from '../inventory/costing';
 import {
   cancelLinkedEntry,
   recordSaleReceipt,
@@ -106,6 +107,13 @@ const billAmounts = (bill: Bill) => ({
   taxAmount: bill.taxAmount,
   finalAmount: bill.finalAmount,
 });
+
+// Cost per unit of what a bill took of a product (0 when it took none).
+function unitCostOf(taken?: { quantity: number; value: number }): number {
+  return taken && taken.quantity > 0
+    ? roundCost(taken.value / taken.quantity)
+    : 0;
+}
 
 @Injectable()
 export class OrdersService {
@@ -426,6 +434,7 @@ export class OrdersService {
             allowNegative: true,
           });
         }
+        await this.snapshotItemCosts(tx, order.id);
 
         if (bill.finalAmount > 0) {
           await recordSaleReceipt(tx, {
@@ -515,15 +524,16 @@ export class OrdersService {
         });
 
         // Put back exactly what the bill took out (checkout and later
-        // corrections).
+        // corrections), at the cost it left at.
         const taken = await this.stockTakenBy(tx, id);
-        for (const [productId, quantity] of taken) {
-          if (quantity <= 0) continue;
+        for (const [productId, entry] of taken) {
+          if (entry.quantity <= 0) continue;
           await this.inventory.applyMovement(tx, {
             branchId: order.branchId,
             productId,
             type: StockMovementType.REVERSAL,
-            quantity,
+            quantity: entry.quantity,
+            unitCost: unitCostOf(entry),
             orderId: id,
             createdById: user.id,
           });
@@ -638,6 +648,7 @@ export class OrdersService {
         });
 
         await this.syncSoldStock(tx, order.branchId, id, user.id);
+        await this.snapshotItemCosts(tx, id);
         await syncSaleReceipt(
           tx,
           {
@@ -662,21 +673,63 @@ export class OrdersService {
     );
   }
 
-  // Net quantity each product's stock gave to a bill, by product id.
+  // What a bill took from stock, per product in id order: the net quantity
+  // and its cost (Σ −quantity × unitCost of the bill's movements).
   private async stockTakenBy(tx: Db, orderId: number) {
-    const rows = await tx.stockMovement.groupBy({
-      by: ['productId'],
+    const movements = await tx.stockMovement.findMany({
       where: { orderId },
-      _sum: { quantity: true },
-      orderBy: { productId: 'asc' },
+      select: { productId: true, quantity: true, unitCost: true },
+      orderBy: [{ productId: 'asc' }, { id: 'asc' }],
     });
-    return new Map(rows.map((r) => [r.productId, -(r._sum.quantity ?? 0)]));
+    const taken = new Map<number, { quantity: number; value: number }>();
+    for (const m of movements) {
+      const entry = taken.get(m.productId) ?? { quantity: 0, value: 0 };
+      entry.quantity -= m.quantity;
+      entry.value -= m.quantity * Number(m.unitCost);
+      taken.set(m.productId, entry);
+    }
+    return taken;
+  }
+
+  // Puts on each line of a bill the cost per unit of what the bill took from
+  // stock (0 for products without stock tracking), so the reports' cost of
+  // goods sold is Σ quantity × unitCost. Divides by the bill's own item
+  // quantity (not the stock taken) so a bill correction after a product's
+  // tracking was turned off still reports the value stock actually gave,
+  // even though syncSoldStock can no longer true up the taken quantity to
+  // match the item quantity for that product.
+  private async snapshotItemCosts(tx: Db, orderId: number) {
+    const items = await tx.orderItem.findMany({
+      where: { orderId },
+      select: { productId: true, quantity: true },
+    });
+    const wanted = new Map<number, number>();
+    for (const item of items) {
+      wanted.set(
+        item.productId,
+        (wanted.get(item.productId) ?? 0) + item.quantity,
+      );
+    }
+    const taken = await this.stockTakenBy(tx, orderId);
+    for (const productId of new Set(items.map((item) => item.productId))) {
+      const entry = taken.get(productId);
+      const quantity = wanted.get(productId) ?? 0;
+      const unitCost =
+        entry && entry.quantity > 0 && quantity > 0
+          ? roundCost(entry.value / quantity)
+          : 0;
+      await tx.orderItem.updateMany({
+        where: { orderId, productId },
+        data: { unitCost },
+      });
+    }
   }
 
   // Brings the stock taken by a paid bill in line with its items: more of a
-  // product is sold (SALE), less is put back (REVERSAL). Products that are no
-  // longer stock-tracked are left alone. Locks rows by product id, as
-  // checkout does.
+  // product is sold (SALE, at the current average), less is put back
+  // (REVERSAL, at the cost the bill took it at). Products that are no longer
+  // stock-tracked are left alone. Locks rows by product id, as checkout
+  // does.
   private async syncSoldStock(
     tx: Db,
     branchId: number,
@@ -704,13 +757,15 @@ export class OrdersService {
 
     for (const productId of ids.sort((a, b) => a - b)) {
       if (!tracked.has(productId)) continue;
-      const delta = (wanted.get(productId) ?? 0) - (taken.get(productId) ?? 0);
+      const delta =
+        (wanted.get(productId) ?? 0) - (taken.get(productId)?.quantity ?? 0);
       if (delta === 0) continue;
       await this.inventory.applyMovement(tx, {
         branchId,
         productId,
         type: delta > 0 ? StockMovementType.SALE : StockMovementType.REVERSAL,
         quantity: -delta,
+        unitCost: unitCostOf(taken.get(productId)),
         orderId,
         createdById: userId,
         allowNegative: true,

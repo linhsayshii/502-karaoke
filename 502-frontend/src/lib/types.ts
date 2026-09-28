@@ -238,6 +238,9 @@ export interface ProductSales {
   gross: number;
   discount: number;
   net: number;
+  cost: number; // giá vốn: Σ quantity × unit cost at checkout (may carry cents)
+  grossProfit: number; // net − cost
+  margin: number | null; // grossProfit / net; null when net is 0
 }
 
 export interface ProductReportRow extends ProductSales {
@@ -255,6 +258,69 @@ export interface ProductReport {
   by: ProductGroup;
   totals: ProductSales;
   rows: ProductReportRow[];
+}
+
+// GET /reports/profit: revenue before VAT − cost of goods sold = gross
+// profit; − expenses (by category) − losses + other income = profit. VAT
+// and purchases are shown apart.
+export interface ProfitMetrics {
+  roomFee: number;
+  roomDiscount: number;
+  productSales: number;
+  productDiscount: number;
+  revenue: number;
+  vat: number;
+  cogs: number;
+  expenses: Record<string, number>; // by expense category
+  losses: number;
+  otherIncome: number;
+  purchases: number;
+  grossProfit: number;
+  grossMargin: number | null;
+  expenseTotal: number;
+  profit: number;
+  profitMargin: number | null;
+}
+
+export interface ProfitReport {
+  branchId: number | null;
+  range: { from: string; to: string };
+  groupBy: GroupBy;
+  categories: string[];
+  totals: ProfitMetrics;
+  buckets: (ReportBucket & ProfitMetrics)[];
+}
+
+// GET /reports/inventory (nhập – xuất – tồn). imports, sales and exports
+// are positive; others (reversals, adjustments) signed.
+export interface StockFlow {
+  quantity: number;
+  value: number;
+}
+
+export interface InventoryFlows {
+  opening: StockFlow;
+  imports: StockFlow;
+  sales: StockFlow;
+  exports: StockFlow;
+  others: StockFlow;
+  closing: StockFlow;
+}
+
+export interface InventoryReportRow extends InventoryFlows {
+  productId: number;
+  name: string;
+  unit: string;
+  categoryId: number | null;
+  categoryName: string | null;
+  branchCode: string;
+}
+
+export interface InventoryReport {
+  branchId: number | null;
+  range: { from: string; to: string };
+  totals: InventoryFlows;
+  rows: InventoryReportRow[];
 }
 
 // GET /reports/hours: weekday 1 = Monday … 7 = Sunday (of the business day).

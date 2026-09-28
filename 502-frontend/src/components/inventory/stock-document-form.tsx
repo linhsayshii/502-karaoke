@@ -27,7 +27,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
-import { formatMoney, formatNumber } from "@/lib/format";
+import { formatAmount, formatMoney, formatNumber } from "@/lib/format";
 import { PAYMENT_METHOD_LABELS } from "@/lib/labels";
 import type { PaymentMethod, Product, StockDocType, StockDocument } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -101,7 +101,9 @@ export function StockDocumentForm({ type }: { type: StockDocType }) {
     // Suggest the last cost price for imports.
     updateLine(key, {
       productId,
-      ...(isImport && product ? { unitCost: Number(product.costPrice) ? String(Number(product.costPrice)) : "" } : {}),
+      ...(isImport && product
+        ? { unitCost: Number(product.costPrice) ? String(Math.round(Number(product.costPrice))) : "" }
+        : {}),
     });
   };
 
@@ -279,7 +281,7 @@ export function StockDocumentForm({ type }: { type: StockDocType }) {
                       </InputGroup>
                     ) : (
                       <span id={`cost-${line.key}`} className="flex h-9 items-center tabular-nums">
-                        {product ? formatNumber(product.costPrice) : "—"}
+                        {product ? formatAmount(Number(product.costPrice)) : "—"}
                       </span>
                     )}
                   </Field>

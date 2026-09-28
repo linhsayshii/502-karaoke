@@ -362,6 +362,25 @@ SELECT count(*) FROM "Order" o WHERE o.status = 'COMPLETED' AND o."totalProductP
 
 Cả hai đều phải trả về 0; nếu không: câu đầu là hóa đơn có phòng thuộc cơ sở khác, báo cáo phòng sẽ xếp các hóa đơn đó vào "Không phòng"; câu sau là hóa đơn có tổng tiền hàng lệch với tổng món trên hóa đơn, báo cáo hàng hóa sẽ có thành tiền khác tiền hàng của báo cáo Doanh thu.
 
+### 6.10. Giá vốn bình quân và báo cáo kế toán (migration `20260928000000_reports_costing`)
+
+Migration thêm 3 cột, và chạy một câu UPDATE để định giá lại biến động cuối cùng của từng sản phẩm:
+- `OrderItem.unitCost`: giá vốn một đơn vị của món trên hóa đơn, chụp lúc thanh toán.
+- `StockMovement.unitCost` và `StockMovement.costAfter`: giá vốn của lần biến động kho và giá vốn bình quân sau lần đó.
+- Với biến động cũ, `unitCost` giữ 0, nhưng `costAfter` của **biến động cuối cùng của mỗi sản phẩm** (id lớn nhất theo `productId`) được đặt bằng `Product.costPrice` hiện tại, để sổ kho có số dư định giá đúng ngay từ bản cập nhật.
+
+Thêm cột có giá trị mặc định và chạy UPDATE chỉ đổi dữ liệu (không đổi schema thêm) trên PostgreSQL 11 trở lên, nên chạy ngay, không cần chọn giờ vắng khách.
+
+Sau khi cập nhật:
+- `Product.costPrice` giữ giá đang có và trở thành giá vốn bình quân ban đầu. Từ đó mọi phiếu nhập, bán, xuất, hủy phiếu và hủy/sửa hóa đơn đều cập nhật nó theo bình quân gia quyền.
+- Không tính lại quá khứ đối với hóa đơn và các cột nhập/bán/xuất/hoàn-điều chỉnh. Hóa đơn thanh toán trước khi cập nhật có giá vốn 0, nên Lãi lỗ và cột Giá vốn của báo cáo Hàng hóa chỉ đúng từ các hóa đơn sau đó. Các biến động kho cũ giữ giá trị 0 ở các cột dòng chảy (Nhập/Bán/Xuất/Hoàn–điều chỉnh) của báo cáo Nhập – xuất – tồn, chỉ đúng từ biến động đầu tiên sau khi cập nhật. Riêng Tồn đầu / Tồn cuối thì đúng ngay từ bản cập nhật, vì biến động cuối cùng của mỗi sản phẩm đã được định giá lại theo giá vốn hiện tại (xem UPDATE ở trên) — khớp với giá trị tồn kho hiển thị ở trang Tồn kho (`stockQuantity × costPrice`).
+- Phiếu thu/chi thủ công chỉ nhận các khoản mục cố định:
+  - Chi: Lương, Mặt bằng, Điện nước, Sửa chữa – bảo trì, Marketing, Vật tư tiêu hao, Thuế – phí, Khác.
+  - Thu: Thu khác.
+
+  Phiếu cũ ghi khoản mục khác vẫn giữ nguyên chữ, và được tính vào "Khác" trong báo cáo Lãi lỗ.
+- Mọi phiếu chi thủ công được tính là chi phí hoạt động, và mọi phiếu thu thủ công được tính là "Thu khác" trong Lãi lỗ — bất kể lý do thực tế. Vì vậy, trả tiền nhà cung cấp sau (cho một phiếu nhập đã ghi nhận nhưng chưa thanh toán) bằng một phiếu chi thủ công, góp vốn, hay chuyển tiền giữa tiền mặt và chuyển khoản bằng phiếu thu/chi thủ công đều làm lệch lợi nhuận. Hãy thanh toán phiếu nhập ngay bằng phương thức thanh toán của chính phiếu nhập đó thay vì lập phiếu chi thủ công sau.
+
 ## 7. Xử lý sự cố
 
 | Hiện tượng | Nguyên nhân / cách xử lý |

@@ -70,7 +70,7 @@ export interface BranchesReport {
 }
 
 // Sums of the paid bills of one branch on one business day.
-type DailyRow = RevenueSums & { date: string; branchId: number };
+export type DailyRow = RevenueSums & { date: string; branchId: number };
 
 interface BranchRecord {
   id: number;
@@ -176,7 +176,8 @@ export class ReportsService {
 
   // Sums per business day and branch of the paid bills. One query per
   // range, so a report's totals, periods and branches always agree.
-  private daily(branchId: number | undefined, from: string, to: string) {
+  // Also the sales lines of the profit report (AccountingReportsService).
+  daily(branchId: number | undefined, from: string, to: string) {
     return this.prisma.$queryRaw<DailyRow[]>`
       SELECT ${businessDateSql(Prisma.sql`o."endTime"`)} AS "date",
         o."branchId" AS "branchId", ${REVENUE_COLUMNS}

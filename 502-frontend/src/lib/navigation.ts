@@ -12,11 +12,13 @@ import {
   PackageMinus,
   PackagePlus,
   ReceiptText,
+  Scale,
   Settings2,
   Tags,
   UserRound,
   Users,
   Wallet,
+  Warehouse,
   type LucideIcon,
 } from "lucide-react";
 import { can, type Permission } from "@/lib/permissions";
@@ -62,6 +64,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: "Phòng", path: "/reports/rooms", icon: DoorOpen, permission: "reports" },
       { title: "Hàng hóa", path: "/reports/products", icon: Package, permission: "reports" },
       { title: "Khung giờ", path: "/reports/hours", icon: Clock, permission: "reports" },
+      { title: "Lãi lỗ", path: "/reports/profit", icon: Scale, permission: "reports" },
+      { title: "Nhập – xuất – tồn", path: "/reports/inventory", icon: Warehouse, permission: "reports" },
       { title: "So sánh cơ sở", path: "/reports/branches", icon: ChartLine, permission: "reports.chain" },
     ],
   },

@@ -21,7 +21,7 @@ import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
 import { exportWorkbook, toSheet, type ExportColumn } from "@/lib/excel-export";
-import { businessDate, formatDateTime, formatMoney, formatNumber } from "@/lib/format";
+import { businessDate, formatAmount, formatDateTime, formatMoney, formatNumber } from "@/lib/format";
 import { DOC_TYPE_LABELS, MOVEMENT_LABELS } from "@/lib/labels";
 import { SHOW_FROM } from "@/lib/responsive";
 import type { Product, StockMovement, StockMovementType } from "@/lib/types";
@@ -266,10 +266,10 @@ export default function StockPage() {
                         {formatNumber(available)}
                       </TableCell>
                       <TableCell className={cn("text-right tabular-nums", SHOW_FROM.lg)}>
-                        {formatNumber(product.costPrice)}
+                        {formatAmount(Number(product.costPrice))}
                       </TableCell>
                       <TableCell className={cn("text-right tabular-nums", SHOW_FROM.md)}>
-                        {formatNumber(Math.max(0, product.stockQuantity) * Number(product.costPrice))}
+                        {formatAmount(Math.max(0, product.stockQuantity) * Number(product.costPrice))}
                       </TableCell>
                       <TableCell className={SHOW_FROM.xs}>
                         {/* The click reaches the row, which opens the ledger. */}

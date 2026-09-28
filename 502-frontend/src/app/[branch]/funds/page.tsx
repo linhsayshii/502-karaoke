@@ -58,18 +58,13 @@ import {
   formatNumber,
   toDateInput,
 } from "@/lib/format";
-import { BUSINESS_DAY_HINT, DOC_TYPE_LABELS, FUND_TYPE_LABELS, PAYMENT_METHOD_LABELS } from "@/lib/labels";
+import { BUSINESS_DAY_HINT, DEFAULT_FUND_CATEGORY, DOC_TYPE_LABELS, FUND_CATEGORIES, FUND_TYPE_LABELS, PAYMENT_METHOD_LABELS } from "@/lib/labels";
 import { reportFileName } from "@/lib/reports";
 import { SHOW_FROM } from "@/lib/responsive";
 import type { FundSummary, FundTransaction, FundType, PaymentMethod } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const ALL = "ALL";
-
-const CATEGORY_SUGGESTIONS: Record<FundType, string[]> = {
-  INCOME: ["Thu khác", "Góp vốn", "Thu hoàn tiền"],
-  EXPENSE: ["Điện nước", "Lương", "Mua hàng", "Sửa chữa", "Thuê mặt bằng", "Chi khác"],
-};
 
 interface FundForm {
   type: FundType;
@@ -173,7 +168,7 @@ export default function FundsPage() {
 
   const openForm = (fundType: FundType) => {
     setSubmitted(false);
-    setForm({ type: fundType, method: "CASH", amount: "", category: "", description: "", occurredAt: nowInput() });
+    setForm({ type: fundType, method: "CASH", amount: "", category: DEFAULT_FUND_CATEGORY[fundType], description: "", occurredAt: nowInput() });
   };
 
   const amountInvalid = submitted && !(Number(form?.amount) > 0);
@@ -192,7 +187,7 @@ export default function FundsPage() {
           type: form.type,
           method: form.method,
           amount,
-          category: form.category.trim() || undefined,
+          category: form.category,
           description: form.description.trim() || undefined,
           occurredAt: form.occurredAt ? new Date(form.occurredAt).toISOString() : undefined,
         },
@@ -467,7 +462,9 @@ export default function FundsPage() {
                     type="single"
                     variant="outline"
                     value={form.type}
-                    onValueChange={(v) => v && setForm({ ...form, type: v as FundType })}
+                    onValueChange={(v) =>
+                      v && setForm({ ...form, type: v as FundType, category: DEFAULT_FUND_CATEGORY[v as FundType] })
+                    }
                     className="w-full"
                     aria-label="Loại phiếu"
                   >
@@ -523,18 +520,18 @@ export default function FundsPage() {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field>
                     <FieldLabel htmlFor="fund-category">Khoản mục</FieldLabel>
-                    <Input
-                      id="fund-category"
-                      list="fund-categories"
-                      placeholder={form.type === "INCOME" ? "Thu khác" : "Điện nước"}
-                      value={form.category}
-                      onChange={(e) => setForm({ ...form, category: e.target.value })}
-                    />
-                    <datalist id="fund-categories">
-                      {CATEGORY_SUGGESTIONS[form.type].map((c) => (
-                        <option key={c} value={c} />
-                      ))}
-                    </datalist>
+                    <Select value={form.category} onValueChange={(category) => setForm({ ...form, category })}>
+                      <SelectTrigger id="fund-category" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {FUND_CATEGORIES[form.type].map((category) => (
+                          <SelectItem key={category} value={category}>
+                            {category}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="fund-time">Thời gian</FieldLabel>

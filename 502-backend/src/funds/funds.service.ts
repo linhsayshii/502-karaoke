@@ -11,6 +11,7 @@ import { businessDayRange } from '../common/dates';
 import { DateRangeQuery } from '../inventory/dto/inventory-queries';
 import { CreateFundTransactionDto } from './dto/create-fund-transaction.dto';
 import { ListFundTransactionsQuery } from './dto/fund-queries';
+import { manualCategory } from './fund-categories';
 
 const userRef = { select: { id: true, fullName: true } };
 const fundInclude = {
@@ -56,7 +57,7 @@ export class FundsService {
     });
   }
 
-  // Manual phiếu thu / phiếu chi.
+  // Manual phiếu thu / phiếu chi, under a fixed category (fund-categories.ts).
   async create(
     user: AuthUser,
     branchCode: string | undefined,
@@ -66,7 +67,7 @@ export class FundsService {
     return this.prisma.fundTransaction.create({
       data: {
         ...dto,
-        category: dto.category?.trim() || null,
+        category: manualCategory(dto.type, dto.category),
         description: dto.description?.trim() || null,
         branchId,
         createdById: user.id,

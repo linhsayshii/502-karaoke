@@ -469,5 +469,31 @@ describe('PR/KTV (e2e)', () => {
         .get('/pr/stats?from=2024-01-01&to=2026-01-01')
         .expect(400);
     });
+
+    it('keeps a PR who was ever in a room', async () => {
+      // Hoa was never on a roll call but sat in rooms.
+      const res = await as('ql1_cs1').delete(`/pr/staff/${hoaId}`).expect(200);
+      expect(res.body).toEqual({ deleted: false });
+    });
+
+    // Last: it wipes cs1.
+    it('purge removes the branch PR visits', async () => {
+      const res = await as('hdqt_pr')
+        .post('/admin/purge', {
+          scope: 'branch',
+          branch: 'cs1',
+          password: '12345678',
+        })
+        .expect(200);
+      const deleted = (res.body as Json).deleted as Record<string, number>;
+      expect(deleted.prSessions).toBeGreaterThan(0);
+      const stats = (
+        await as('ql1_cs1')
+          .get(`/pr/stats?from=${today}&to=${today}`)
+          .expect(200)
+      ).body as { rows: unknown[]; totals: { sessions: number } };
+      expect(stats.rows).toEqual([]);
+      expect(stats.totals.sessions).toBe(0);
+    });
   });
 });

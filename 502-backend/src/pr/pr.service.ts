@@ -151,16 +151,22 @@ export class PrService {
     });
   }
 
-  // Removes someone never on a roll call; otherwise marks them as left, so
-  // past roll calls keep their name.
+  // Removes someone never on a roll call nor in a room; otherwise marks them
+  // as left, so past roll calls and room visits keep their name.
   async removeStaff(user: AuthUser, id: number) {
     this.assertManage(user);
     await this.getStaff(user, id);
-    const attended = await this.prisma.prAttendance.findFirst({
-      where: { prStaffId: id },
-      select: { id: true },
-    });
-    if (attended) {
+    const [attended, visited] = await Promise.all([
+      this.prisma.prAttendance.findFirst({
+        where: { prStaffId: id },
+        select: { id: true },
+      }),
+      this.prisma.prSession.findFirst({
+        where: { prStaffId: id },
+        select: { id: true },
+      }),
+    ]);
+    if (attended || visited) {
       await this.prisma.prStaff.update({
         where: { id },
         data: { active: false },

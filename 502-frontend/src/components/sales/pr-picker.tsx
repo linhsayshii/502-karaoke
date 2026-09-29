@@ -85,7 +85,7 @@ function PrTiles({
         <EmptyState
           icon={ContactIcon}
           title={data.length === 0 ? "Chưa có PR/KTV đang làm" : "Không tìm thấy PR/KTV"}
-          description={data.length === 0 ? "Thêm PR/KTV ở trang Danh sách PR/KTV." : "Thử từ khóa khác."}
+          description={data.length === 0 ? "Thêm PR/KTV ở trang Thống kê PR." : "Thử từ khóa khác."}
         />
       ) : (
         <div className={TILES}>

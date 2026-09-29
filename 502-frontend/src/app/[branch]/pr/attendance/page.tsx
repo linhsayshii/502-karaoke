@@ -214,7 +214,7 @@ export default function PrAttendancePage() {
       <PageHeader
         title="Điểm danh PR/KTV"
         description={`Ngày kinh doanh ${formatDate(date)}${isToday ? " (hôm nay)" : ""}`}
-        info="Mỗi PR/KTV được điểm danh một lần mỗi ngày kinh doanh (06:00 hôm đó đến 06:00 hôm sau): bấm “Vào” khi đến, “Ra” khi về. Ngày đã qua thì nhập giờ vào bằng tay. Thêm người mới ở Danh sách PR/KTV."
+        info="Mỗi PR/KTV được điểm danh một lần mỗi ngày kinh doanh (06:00 hôm đó đến 06:00 hôm sau): bấm “Vào” khi đến, “Ra” khi về. Ngày đã qua thì nhập giờ vào bằng tay. Thêm người mới ở Thống kê PR."
         actions={
           <Input
             type="date"

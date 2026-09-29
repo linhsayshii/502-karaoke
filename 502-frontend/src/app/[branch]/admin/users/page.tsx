@@ -551,6 +551,12 @@ export default function UsersPage() {
                         </SelectGroup>
                       </SelectContent>
                     </Select>
+                    {form.position === "SERVER" &&
+                      (isNew ? form.password === "" : !editing?.hasPassword) && (
+                        <FieldDescription className="text-warning">
+                          Phục vụ cần mật khẩu để đăng nhập và gọi món cho phòng mình.
+                        </FieldDescription>
+                      )}
                   </Field>
                 </div>
                 {!noBranchRole(form.role) && (

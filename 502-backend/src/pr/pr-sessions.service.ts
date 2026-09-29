@@ -196,6 +196,7 @@ export class PrSessionsService {
   // SQL on the report pool (PrSession(branchId, startAt) index); minutes are
   // clamped at 0 per visit like sessionMinutes().
   async stats(user: AuthUser, query: PrStatsQuery) {
+    // Also checked by PrViewGuard before the request is shared.
     if (!canViewPr(user)) {
       throw new ForbiddenException('Bạn không có quyền xem PR/KTV');
     }

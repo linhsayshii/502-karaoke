@@ -30,6 +30,10 @@ type Db = Prisma.TransactionClient;
 const CLOSED_MESSAGE = 'Phòng đã đóng, không sửa PR được nữa';
 const AVAILABLE_LIMIT = 500;
 
+// HH:mm in server local time (TZ=Asia/Ho_Chi_Minh), for messages.
+const clock = (d: Date) =>
+  `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+
 export interface AvailablePr {
   id: number;
   code: string | null;
@@ -117,6 +121,7 @@ export class PrSessionsService {
       const now = new Date();
       const startAt = dto.startAt ? new Date(dto.startAt) : now;
       this.assertTimes(order.startTime, startAt, null, now);
+      await this.assertNoOverlap(tx, staff, startAt, null);
       await tx.prSession.create({
         data: {
           branchId: order.branchId,
@@ -168,11 +173,12 @@ export class PrSessionsService {
           : dto.endAt
             ? new Date(dto.endAt)
             : null;
+      const staff = await this.lockStaff(tx, current.prStaffId);
       if (current.endAt && endAt === null) {
-        const staff = await this.lockStaff(tx, current.prStaffId);
         await this.assertNotElsewhere(tx, staff, id);
       }
       this.assertTimes(order.startTime, startAt, endAt, new Date());
+      await this.assertNoOverlap(tx, staff, startAt, endAt, id);
       await tx.prSession.update({ where: { id }, data: { startAt, endAt } });
       return this.detail(tx, order.id);
     });
@@ -287,6 +293,38 @@ export class PrSessionsService {
     if (open) {
       const room = open.order.room?.name ?? 'khác';
       throw new ConflictException(`${staff.name} đang ở phòng ${room}`);
+    }
+  }
+
+  // Visits of one PR never overlap in time, in any room: the stats would
+  // count those minutes twice. Touching visits (one ends as the next starts)
+  // are fine. Runs under the PrStaff row lock (PrSession(prStaffId, endAt) index).
+  private async assertNoOverlap(
+    tx: Db,
+    staff: { id: number; name: string },
+    startAt: Date,
+    endAt: Date | null,
+    exceptId?: number,
+  ) {
+    const other = await tx.prSession.findFirst({
+      where: {
+        prStaffId: staff.id,
+        id: exceptId ? { not: exceptId } : undefined,
+        startAt: endAt ? { lt: endAt } : undefined,
+        OR: [{ endAt: null }, { endAt: { gt: startAt } }],
+      },
+      select: {
+        startAt: true,
+        endAt: true,
+        order: { select: { room: { select: { name: true } } } },
+      },
+    });
+    if (other) {
+      const room = other.order.room?.name ?? 'khác';
+      const until = other.endAt ? clock(other.endAt) : 'đang ngồi';
+      throw new ConflictException(
+        `${staff.name} đã có lượt ở phòng ${room} (${clock(other.startAt)}–${until}) trùng giờ`,
+      );
     }
   }
 

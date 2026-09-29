@@ -375,6 +375,41 @@ describe('PR/KTV (e2e)', () => {
         .expect(200);
     });
 
+    it('refuses visits of one PR that overlap in time', async () => {
+      const cashier = as('tn1_cs1');
+      const order = (await cashier.get(`/orders/${orderA}`).expect(200))
+        .body as Json;
+      const cucVisits = sessionsOf(order).filter((s) => s.prStaffId === cucId);
+      // V1: the 90 → 30 minutes ago visit.
+      const v1 = cucVisits.find(
+        (s) =>
+          Date.now() - new Date(s.startAt as string).getTime() > 80 * 60_000,
+      )!;
+      // A new visit starting inside V1, in another room.
+      const inside = await cashier
+        .post('/pr/sessions', {
+          orderId: orderB,
+          prStaffId: cucId,
+          startAt: minutesAgo(60),
+        })
+        .expect(409);
+      expect((inside.body as Json).message).toMatch(
+        /^Cúc đã có lượt ở phòng P101 \(\d{2}:\d{2}–\d{2}:\d{2}\) trùng giờ$/,
+      );
+      // Stretching V1 over the later short visit.
+      await cashier
+        .patch(`/pr/sessions/${v1.id as number}`, {
+          endAt: new Date().toISOString(),
+        })
+        .expect(409);
+      // Nothing changed.
+      const after = (await cashier.get(`/orders/${orderA}`).expect(200))
+        .body as Json;
+      expect(
+        sessionsOf(after).filter((s) => s.prStaffId === cucId),
+      ).toHaveLength(cucVisits.length);
+    });
+
     it('lists who can be put into a room, with where they are', async () => {
       await as('ql1_cs1')
         .post('/pr/attendance', { prStaffId: cucId })

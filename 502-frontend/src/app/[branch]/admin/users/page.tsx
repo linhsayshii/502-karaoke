@@ -59,6 +59,7 @@ import { cn } from "@/lib/utils";
 const ALL = "ALL";
 const NONE = "none";
 const BRANCH_MANAGEABLE: Role[] = ["CASHIER", "STAFF"];
+const MANAGER_ROLES: Role[] = ["CHAIN_MANAGER", "BRANCH_MANAGER"];
 const USERNAME_RE = /^[a-z0-9._]{3,32}$/;
 
 interface UserForm {
@@ -68,6 +69,7 @@ interface UserForm {
   phone: string;
   role: Role;
   position: StaffPosition | typeof NONE;
+  managesPr: boolean;
   branchId: string;
 }
 
@@ -169,6 +171,7 @@ export default function UsersPage() {
             phone: "",
             role: "STAFF",
             position: NONE,
+            managesPr: false,
             branchId: String(currentBranchId ?? ""),
           }
         : {
@@ -178,6 +181,7 @@ export default function UsersPage() {
             phone: target.phone ?? "",
             role: target.role,
             position: target.position ?? NONE,
+            managesPr: target.managesPr,
             branchId: target.branchId ? String(target.branchId) : "",
           },
     );
@@ -206,6 +210,7 @@ export default function UsersPage() {
       phone: form.phone.trim() || undefined,
       role: form.role,
       position: form.position === NONE ? null : form.position,
+      managesPr: form.managesPr,
       // Branch managers can only place accounts in their own branch (server enforces it).
       branchId: noBranchRole(form.role) ? null : isChainManager ? Number(form.branchId) || null : me?.branchId,
     };
@@ -365,6 +370,7 @@ export default function UsersPage() {
                             <span className={ONLY_NARROW}>
                               {" "}
                               · {ROLE_LABELS[u.role]}
+                              {u.managesPr && " · quản lý PR/KTV"}
                               {!u.active && " · đã khóa"}
                             </span>
                           </span>
@@ -372,7 +378,10 @@ export default function UsersPage() {
                       </div>
                     </TableCell>
                     <TableCell className={SHOW_FROM.sm}>
-                      <Badge variant={u.role === "STAFF" ? "secondary" : "default"}>{ROLE_LABELS[u.role]}</Badge>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <Badge variant={u.role === "STAFF" ? "secondary" : "default"}>{ROLE_LABELS[u.role]}</Badge>
+                        {u.managesPr && <Badge variant="outline">Quản lý PR/KTV</Badge>}
+                      </div>
                     </TableCell>
                     <TableCell className={SHOW_FROM.md}>{u.position ? POSITION_LABELS[u.position] : "—"}</TableCell>
                     <TableCell className={SHOW_FROM.md}>{u.branch?.name ?? "Toàn chuỗi"}</TableCell>
@@ -544,6 +553,28 @@ export default function UsersPage() {
                     </Select>
                   </Field>
                 </div>
+                {!noBranchRole(form.role) && (
+                  <Field>
+                    <FieldLabel htmlFor="user-manages-pr">Quản lý PR/KTV</FieldLabel>
+                    <Select
+                      value={form.managesPr ? "yes" : "no"}
+                      onValueChange={(value) => setForm({ ...form, managesPr: value === "yes" })}
+                    >
+                      <SelectTrigger id="user-manages-pr" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="no">Không</SelectItem>
+                          <SelectItem value="yes">Có – thêm, sửa danh sách và điểm danh PR/KTV</SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    {MANAGER_ROLES.includes(form.role) && (
+                      <FieldDescription>Quản lý luôn quản lý được PR/KTV của cơ sở.</FieldDescription>
+                    )}
+                  </Field>
+                )}
                 {isChainManager && !noBranchRole(form.role) && (
                   <Field data-invalid={invalid.branch || undefined}>
                     <FieldLabel htmlFor="user-branch">Cơ sở</FieldLabel>

@@ -15,6 +15,7 @@ const user = (role: Role, branch: typeof cs1 | null = cs1): AuthUser => ({
   fullName: 'U',
   role,
   position: null,
+  managesPr: false,
   branchId: branch?.id ?? null,
   branch,
 });

@@ -39,7 +39,7 @@ import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
 import { computeBill } from "@/lib/billing";
 import { useBranchCode } from "@/lib/branch";
-import { formatMoney, formatNumber, toDateTimeInput } from "@/lib/format";
+import { billLabel, formatMoney, formatNumber, toDateTimeInput } from "@/lib/format";
 import { PAYMENT_METHOD_LABELS } from "@/lib/labels";
 import type { FloorStaff, Order, PaymentMethod, Product } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -226,7 +226,7 @@ function EditForm({
     setSubmitting(true);
     try {
       const res = await api.patch<Order>(`/orders/${order.id}/paid`, body);
-      notify.success(`Đã sửa hóa đơn #${order.id}: kho, phiếu thu và doanh thu đã cập nhật`);
+      notify.success(`Đã sửa hóa đơn ${billLabel(order)}: kho, phiếu thu và doanh thu đã cập nhật`);
       onSaved(res.data);
     } catch (error) {
       notify.error(error, "Không thể sửa hóa đơn");

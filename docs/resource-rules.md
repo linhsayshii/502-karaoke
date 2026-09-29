@@ -8,7 +8,7 @@ Nguyên tắc gốc: **không có gì được lớn lên mãi.** Mỗi danh sá
 
 ## 1. Backend (NestJS + Prisma)
 
-1. **Mọi truy vấn danh sách đều có `take`** và lọc theo khoảng ngày kinh doanh. Trần hiện tại: hóa đơn 1000, sổ quỹ 500, biến động kho 500, phiếu kho 200, nhật ký xóa dữ liệu 500. Thêm endpoint danh sách mới thì đặt trần tương tự, và:
+1. **Mọi truy vấn danh sách đều có `take`** và lọc theo khoảng ngày kinh doanh. Trần hiện tại: hóa đơn 1000, sổ quỹ 500, biến động kho 500, phiếu kho 200, nhật ký xóa dữ liệu 500, danh sách PR/KTV 500, điểm danh PR/KTV 500 (một ngày). Thêm endpoint danh sách mới thì đặt trần tương tự, và:
    - Service trả `[rows, total]` (`findMany` + `count` cùng một `where`). Controller dùng `withTotalCount` (`common/total-count.ts`) để gửi tổng số dòng khớp qua header `X-Total-Count`; nội dung trả về vẫn là mảng.
    - Màn hình đọc header bằng `totalCountOf(res)` (`lib/api.ts`) và hiện `ListLimitNotice` (`components/data-states.tsx`) khi danh sách bị cắt. Nếu có xuất Excel từ danh sách đó thì cảnh báo luôn.
    - **Không bao giờ cộng tổng tiền hay đếm số lượng từ một danh sách có trần.** Tổng lấy từ API tổng hợp tính trong SQL với cùng điều kiện lọc: `GET /orders/summary` (trang Hóa đơn), `GET /inventory/documents/summary` (trang Phiếu kho), `GET /funds/summary` (Sổ quỹ).
@@ -48,7 +48,7 @@ Nguyên tắc gốc: **không có gì được lớn lên mãi.** Mỗi danh sá
    - `shm_size: 256mb`: mặc định Docker cho 64 MB `/dev/shm`, không đủ khi nhiều báo cáo chạy cùng lúc (lỗi `could not resize shared memory segment`).
 
    **Không bao giờ** tắt `fsync`, `synchronous_commit` hay `full_page_writes` để đổi lấy tốc độ, vì đây là dữ liệu tiền. Đổi một tham số thì đo lại bằng `test/load`.
-2. Sổ cái (`Order`, `OrderItem`, `StockMovement`, `FundTransaction`) là dữ liệu nghiệp vụ, được giữ vĩnh viễn. **Bảng phụ hay bảng nhật ký mới** phải có cách dọn, hoặc ghi rõ lý do giữ mãi và mức tăng dự kiến (ví dụ `BillCounter`: mỗi cơ sở một dòng mỗi ngày).
+2. Sổ cái (`Order`, `OrderItem`, `StockMovement`, `FundTransaction`) là dữ liệu nghiệp vụ, được giữ vĩnh viễn. **Bảng phụ hay bảng nhật ký mới** phải có cách dọn, hoặc ghi rõ lý do giữ mãi và mức tăng dự kiến (ví dụ `BillCounter`: mỗi cơ sở một dòng mỗi ngày; `PrAttendance`: mỗi PR/KTV một dòng mỗi ngày đi làm, ~90 nghìn dòng/năm cho 5 cơ sở × 50 người, giữ như sổ sách và bị xóa cùng "Xóa dữ liệu").
 3. Không lưu file (ảnh, Excel, PDF) hay JSON lớn trong database.
 4. Thay đổi schema luôn đi qua migration (`prisma migrate`), không dùng `db push`.
 

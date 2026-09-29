@@ -211,7 +211,7 @@ function BillDetail({ orderId, onChanged }: { orderId: number; onChanged: () => 
       <ReasonDialog
         open={voidOpen}
         onOpenChange={setVoidOpen}
-        title={`Hủy hóa đơn #${order?.id ?? ""}?`}
+        title={`Hủy hóa đơn ${order ? billLabel(order) : ""}?`}
         description={`Hàng đã bán được hoàn lại kho, phiếu thu ${formatMoney(order?.finalAmount)} bị hủy và doanh thu giảm tương ứng. Hóa đơn vẫn được lưu để đối chiếu.`}
         confirmLabel="Hủy hóa đơn"
         onConfirm={voidBill}

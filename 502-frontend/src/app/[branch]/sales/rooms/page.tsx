@@ -17,7 +17,7 @@ import { useNow } from "@/hooks/use-now";
 import { usePolling } from "@/hooks/use-polling";
 import api from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
-import { formatMoney, formatTime, minutesBetween } from "@/lib/format";
+import { formatElapsed, formatMoney, formatTime, minutesBetween } from "@/lib/format";
 import { can } from "@/lib/permissions";
 import type { FloorStaff, Room, RoomStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -262,7 +262,7 @@ export default function RoomsPage() {
                         active ? "font-medium text-destructive" : "text-muted-foreground",
                       )}
                     >
-                      {active && room.startTime ? `${minutesBetween(room.startTime, now)} phút` : status.label}
+                      {active && room.startTime ? formatElapsed(minutesBetween(room.startTime, now)) : status.label}
                     </span>
                   </button>
                 );

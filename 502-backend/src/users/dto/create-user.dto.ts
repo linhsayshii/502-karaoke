@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Role, StaffPosition } from '@prisma/client';
 import {
+  IsBoolean,
   IsEnum,
   IsInt,
   IsNotEmpty,
@@ -39,6 +40,14 @@ export class CreateUserDto {
   @IsOptional()
   @IsEnum(StaffPosition)
   position?: StaffPosition | null;
+
+  @ApiProperty({
+    required: false,
+    description: 'Quản lý PR/KTV: sửa danh sách và điểm danh PR/KTV',
+  })
+  @IsOptional()
+  @IsBoolean()
+  managesPr?: boolean;
 
   @ApiProperty({
     required: false,

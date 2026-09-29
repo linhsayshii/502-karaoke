@@ -19,6 +19,8 @@ export interface User {
   fullName: string;
   role: Role;
   position: StaffPosition | null;
+  // Quản lý PR/KTV: edits the PR/KTV list and takes their roll call.
+  managesPr: boolean;
   branchId: number | null;
   branch: BranchRef | null;
 }
@@ -418,6 +420,8 @@ export interface StockMovement {
   createdAt: string;
   product: { id: number; name: string; unit: string };
   document: { id: number; code: string; type: StockDocType } | null;
+  // The bill of a sale or its reversal.
+  order: { id: number; billNumber: string | null } | null;
   createdBy: StaffRef | null;
 }
 
@@ -460,6 +464,29 @@ export interface FundSummary {
 }
 
 // GET /users: an account as managers see it.
+// GET /pr/staff: PR/KTV of a branch (not accounts).
+export interface PrStaff {
+  id: number;
+  branchId: number;
+  code: string | null;
+  name: string;
+  phone: string | null;
+  note: string | null;
+  active: boolean;
+}
+
+// GET /pr/attendance: one roll call entry of a business day.
+export interface PrAttendance {
+  id: number;
+  prStaffId: number;
+  businessDate: string;
+  checkInAt: string;
+  checkOutAt: string | null;
+  note: string | null;
+  prStaff: Pick<PrStaff, "id" | "code" | "name">;
+  createdBy: StaffRef | null;
+}
+
 export interface ManagedUser extends User {
   phone: string | null;
   active: boolean;

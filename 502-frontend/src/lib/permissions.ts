@@ -33,7 +33,9 @@ export type Permission =
   | "users.view" // accounts list (read only)
   | "branches" // manage branches
   | "branches.view" // branches list (read only)
-  | "imports"; // Excel import (each kind also needs its own permission)
+  | "imports" // Excel import (each kind also needs its own permission)
+  | "pr" // PR/KTV list and roll call (also any account with managesPr)
+  | "pr.view"; // the same, read only
 
 const MANAGERS: Role[] = ["CHAIN_MANAGER", "BRANCH_MANAGER"];
 // HĐQT is read-only: it only appears in the "view" permissions below.
@@ -60,10 +62,16 @@ const MATRIX: Record<Permission, Role[]> = {
   branches: ["CHAIN_MANAGER"],
   "branches.view": ["CHAIN_MANAGER", "BOARD"],
   imports: MANAGERS,
+  pr: MANAGERS,
+  "pr.view": READERS,
 };
 
+// Given by the account's "Quản lý PR/KTV" flag, whatever its role.
+const PR_MANAGER_PERMISSIONS: Permission[] = ["pr", "pr.view"];
+
 export function can(user: User | null, permission: Permission): boolean {
-  return !!user && MATRIX[permission].includes(user.role);
+  if (!user) return false;
+  return MATRIX[permission].includes(user.role) || (user.managesPr && PR_MANAGER_PERMISSIONS.includes(permission));
 }
 
 // Page permissions by path after /[branch]; first match wins.
@@ -80,6 +88,7 @@ const ROUTE_PERMISSIONS: [string, Permission][] = [
   ["/funds", "funds.view"],
   ["/admin/branches", "branches.view"],
   ["/imports", "imports"],
+  ["/pr", "pr.view"],
   ["/admin/reports", "reports"],
   ["/admin/purge-logs", "purge.logs"],
   ["/admin", "users.view"],

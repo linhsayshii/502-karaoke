@@ -8,6 +8,7 @@ export interface AuthUser {
   fullName: string;
   role: Role;
   position: StaffPosition | null;
+  managesPr: boolean;
   branchId: number | null;
   branch: { id: number; code: string; name: string } | null;
 }
@@ -18,6 +19,7 @@ export const authUserSelect = {
   fullName: true,
   role: true,
   position: true,
+  managesPr: true,
   branchId: true,
   branch: { select: { id: true, code: true, name: true } },
 } as const;

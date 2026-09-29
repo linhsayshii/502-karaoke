@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import api from "@/lib/api";
+import api, { totalCountOf } from "@/lib/api";
 import { useNotify } from "@/hooks/use-notify";
 
 // GET `url` with `params`, refetching when they change or on reload().
@@ -14,6 +14,8 @@ export function useApiData<T>(
 ) {
   const notify = useNotify();
   const [data, setData] = useState<T>(initial);
+  // X-Total-Count of a capped list (null when the endpoint sends none).
+  const [total, setTotal] = useState<number | null>(null);
   const [version, setVersion] = useState(0);
   const paramsKey = JSON.stringify(params);
   // Identifies the in-flight request; `loading` is derived from comparing it
@@ -29,7 +31,9 @@ export function useApiData<T>(
     api
       .get<T>(url, { params: JSON.parse(paramsKey) })
       .then((res) => {
-        if (!cancelled) setData(res.data);
+        if (cancelled) return;
+        setData(res.data);
+        setTotal(totalCountOf(res));
       })
       .catch((error) => {
         if (!cancelled) notify.error(error, errorMessage);
@@ -43,5 +47,5 @@ export function useApiData<T>(
   }, [url, paramsKey, requestKey, notify, errorMessage]);
 
   const reload = useCallback(() => setVersion((v) => v + 1), []);
-  return { data, loading, reload };
+  return { data, total, loading, reload };
 }

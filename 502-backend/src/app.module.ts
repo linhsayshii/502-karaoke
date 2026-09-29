@@ -16,6 +16,7 @@ import { InventoryModule } from './inventory/inventory.module';
 import { ImportsModule } from './imports/imports.module';
 import { ReportsModule } from './reports/reports.module';
 import { DataPurgeModule } from './data-purge/data-purge.module';
+import { PrModule } from './pr/pr.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { DataPurgeModule } from './data-purge/data-purge.module';
     ImportsModule,
     ReportsModule,
     DataPurgeModule,
+    PrModule,
   ],
   controllers: [AppController],
   providers: [AppService],

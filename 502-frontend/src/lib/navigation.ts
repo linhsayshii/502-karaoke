@@ -3,7 +3,9 @@ import {
   Building2,
   ChartColumnBig,
   ChartLine,
+  ClipboardCheck,
   Clock,
+  Contact,
   DoorOpen,
   FileDown,
   FileSpreadsheet,
@@ -56,6 +58,19 @@ export const NAV_GROUPS: NavGroup[] = [
         permission: "sales.reports",
       },
       { title: "Cài đặt bán hàng", path: "/sales/settings", icon: Settings2, permission: "catalog.view" },
+    ],
+  },
+  {
+    label: "PR/KTV",
+    items: [
+      {
+        title: "Điểm danh PR/KTV",
+        sidebarTitle: "Điểm danh",
+        path: "/pr/attendance",
+        icon: ClipboardCheck,
+        permission: "pr.view",
+      },
+      { title: "Danh sách PR/KTV", path: "/pr/staff", icon: Contact, permission: "pr.view" },
     ],
   },
   {

@@ -23,7 +23,7 @@ import { useNotify } from "@/hooks/use-notify";
 import api, { totalCountOf } from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
 import { exportWorkbook, toSheet, type ExportColumn } from "@/lib/excel-export";
-import { businessDate, formatAmount, formatDateTime, formatMoney, formatNumber } from "@/lib/format";
+import { billLabel, businessDate, formatAmount, formatDateTime, formatMoney, formatNumber } from "@/lib/format";
 import { DOC_TYPE_LABELS, MOVEMENT_LABELS } from "@/lib/labels";
 import { SHOW_FROM } from "@/lib/responsive";
 import type { Product, StockMovement, StockMovementType } from "@/lib/types";
@@ -332,7 +332,7 @@ function MovementHistory({ branch, productId }: { branch: string; productId: num
   }, [branch, productId, notify]);
 
   const source = (m: StockMovement) =>
-    m.document ? `${DOC_TYPE_LABELS[m.document.type]} ${m.document.code}` : m.orderId ? `Hóa đơn #${m.orderId}` : "—";
+    m.document ? `${DOC_TYPE_LABELS[m.document.type]} ${m.document.code}` : m.order ? `Hóa đơn ${billLabel(m.order)}` : "—";
 
   return (
     <>

@@ -503,6 +503,13 @@ Sau khi cập nhật:
 - Cần Docker Engine 25 trở lên (mục 2.1). Máy chủ ít RAM có thể giảm các `*_MEM_LIMIT` trong `.env` (xem `.env.docker.example`).
 - Sau khi cập nhật, dọn một lần: `docker image prune -f && docker builder prune -f`.
 
+### 6.14. PR/KTV và điểm danh (migration `20260930000000_pr_staff`)
+
+- Migration thêm cột `User.managesPr` (mặc định "Không") và hai bảng mới `PrStaff`, `PrAttendance`. Không đụng dữ liệu cũ, chạy trong tích tắc.
+- Sau khi cập nhật, quản lý mở **Quản trị → Tài khoản**, sửa nhân viên cần quản lý PR/KTV và chọn **Quản lý PR/KTV: Có**. Quản lý hệ thống và quản lý cơ sở luôn có quyền này.
+- Menu mới **PR/KTV**: *Danh sách PR/KTV* (thêm, sửa, xóa; người đã điểm danh khi xóa được chuyển sang "đã nghỉ" để giữ lịch sử) và *Điểm danh* (giờ vào/giờ ra theo ngày kinh doanh). HĐQT chỉ xem.
+- "Xóa dữ liệu" của HĐQT giờ xóa cả danh sách và điểm danh PR/KTV của cơ sở.
+
 ## 7. Xử lý sự cố
 
 | Hiện tượng | Nguyên nhân / cách xử lý |

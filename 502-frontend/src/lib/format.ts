@@ -45,6 +45,13 @@ export function formatDuration(minutes: number) {
   return `${hours} giờ ${String(rest).padStart(2, "0")} phút`;
 }
 
+// Elapsed time on the room map: "45 phút" up to an hour, then "1h23p"
+// (hours, then the minutes left over).
+export function formatElapsed(minutes: number) {
+  if (minutes <= 60) return `${minutes} phút`;
+  return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}p`;
+}
+
 const hoursFormat = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 1 });
 
 // Room time in hours: 150 minutes → "2,5 giờ".

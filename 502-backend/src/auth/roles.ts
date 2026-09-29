@@ -8,5 +8,8 @@ export const ALL_ROLES: Role[] = [...SALES, Role.STAFF];
 // branch, but no route that changes data is open to it (except the purge).
 export const READERS: Role[] = [...MANAGERS, Role.BOARD];
 export const SALES_READERS: Role[] = [...SALES, Role.BOARD];
+// Every account; for routes whose right also depends on something besides the
+// role (the PR/KTV pages: User.managesPr), checked by the service.
+export const EVERY_ROLE: Role[] = [...ALL_ROLES, Role.BOARD];
 // Accounts that look at every branch (no branch of their own).
 export const ALL_BRANCH_ROLES: Role[] = [Role.CHAIN_MANAGER, Role.BOARD];

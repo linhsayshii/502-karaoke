@@ -71,7 +71,7 @@ export function PurgeDataDialog({ open, onOpenChange }: { open: boolean; onOpenC
         <AlertDialogHeader>
           <AlertDialogTitle>Xóa sạch dữ liệu</AlertDialogTitle>
           <AlertDialogDescription>
-            Xóa toàn bộ hóa đơn, phiếu kho, sổ quỹ, hàng hóa, danh mục và phòng. Tài khoản và danh sách cơ sở được giữ
+            Xóa toàn bộ hóa đơn, phiếu kho, sổ quỹ, hàng hóa, danh mục, phòng, danh sách và điểm danh PR/KTV. Tài khoản và danh sách cơ sở được giữ
             lại. Không thể khôi phục.
           </AlertDialogDescription>
         </AlertDialogHeader>

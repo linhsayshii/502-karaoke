@@ -77,11 +77,16 @@ export function revenueBranchesSheet(data: RevenueReport, name = "Theo cơ sở"
 // id null: the bills nobody was assigned to in this role.
 export const staffName = (row: StaffReportRow) => row.name ?? (row.id === null ? UNASSIGNED_STAFF : `#${row.id}`);
 
+// Tiền giờ + tiền hàng before their discounts (and before VAT), put right
+// before the revenue after discounts.
+const revenueAt = METRIC_COLUMNS.findIndex((c) => c.header === "Doanh thu (chưa VAT)");
 const staffColumns: ExportColumn<StaffReportRow>[] = [
   { header: "Nhân viên", value: staffName },
   { header: "Tài khoản", value: (r) => r.username },
   { header: "Cơ sở", value: (r) => r.branchCode?.toUpperCase() ?? null },
-  ...METRIC_COLUMNS,
+  ...METRIC_COLUMNS.slice(0, revenueAt),
+  { header: "Tổng doanh thu trước giảm giá", type: "money", value: (r) => r.roomFee + r.productSales },
+  ...METRIC_COLUMNS.slice(revenueAt),
   { header: "TB/hóa đơn", type: "money", value: (r) => r.avgRevenue },
 ];
 

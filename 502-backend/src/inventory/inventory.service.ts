@@ -437,6 +437,7 @@ export class InventoryService {
         include: {
           product: { select: { id: true, name: true, unit: true } },
           document: { select: { id: true, code: true, type: true } },
+          order: { select: { id: true, billNumber: true } },
           createdBy: userRef,
         },
         orderBy: { id: 'desc' },

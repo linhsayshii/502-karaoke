@@ -68,6 +68,7 @@ describe('ImportsService', () => {
     fullName: 'Quản lý',
     role: Role.BRANCH_MANAGER,
     position: null,
+    managesPr: false,
     branchId: 1,
     branch: cs1,
   };

@@ -435,5 +435,39 @@ describe('PR/KTV (e2e)', () => {
       const dao = sessionsOf(body).find((s) => s.prStaffId === daoId)!;
       expect(dao.endAt).toBe(body.endTime);
     });
+
+    it('sums the hours of each PR over a range', async () => {
+      const res = await as('ql1_cs1')
+        .get(`/pr/stats?from=${today}&to=${today}`)
+        .expect(200);
+      const stats = res.body as {
+        totals: { minutes: number; sessions: number; rooms: number };
+        rows: {
+          prStaffId: number;
+          minutes: number;
+          sessions: number;
+          rooms: number;
+        }[];
+      };
+      const cuc = stats.rows.find((r) => r.prStaffId === cucId)!;
+      expect(cuc.sessions).toBe(2); // the deleted one does not count
+      expect(cuc.rooms).toBe(1);
+      expect(cuc.minutes).toBeGreaterThanOrEqual(60);
+      expect(cuc.minutes).toBeLessThan(63);
+      const sum = (key: 'minutes' | 'sessions') =>
+        stats.rows.reduce((s, r) => s + r[key], 0);
+      expect(stats.totals.minutes).toBe(sum('minutes'));
+      expect(stats.totals.sessions).toBe(sum('sessions'));
+      // tn1_cs2 has no managesPr flag: canViewPr stops it, not the branch scope.
+      await as('tn1_cs2')
+        .get(`/pr/stats?branch=cs1&from=${today}&to=${today}`)
+        .expect(403);
+      await as('hdqt_pr')
+        .get(`/pr/stats?branch=cs1&from=${today}&to=${today}`)
+        .expect(200);
+      await as('ql1_cs1')
+        .get('/pr/stats?from=2024-01-01&to=2026-01-01')
+        .expect(400);
+    });
   });
 });

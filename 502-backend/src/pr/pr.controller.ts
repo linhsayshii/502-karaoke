@@ -11,6 +11,7 @@ import {
   Post,
   Query,
   Res,
+  UseInterceptors,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
@@ -18,6 +19,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/auth-user';
 import { EVERY_ROLE } from '../auth/roles';
+import { SharedRequestInterceptor } from '../common/shared-request.interceptor';
 import { withTotalCount } from '../common/total-count';
 import { PrService } from './pr.service';
 import { PrSessionsService } from './pr-sessions.service';
@@ -34,6 +36,7 @@ import {
 import {
   AddPrSessionDto,
   PrBranchQuery,
+  PrStatsQuery,
   UpdatePrSessionDto,
 } from './dto/pr-session.dto';
 
@@ -133,6 +136,13 @@ export class PrController {
     @Res({ passthrough: true }) res: Response,
   ) {
     return withTotalCount(res, this.sessions.available(user, query.branch));
+  }
+
+  // Read-only sums on the report pool: identical requests in flight share one.
+  @Get('stats')
+  @UseInterceptors(SharedRequestInterceptor)
+  stats(@CurrentUser() user: AuthUser, @Query() query: PrStatsQuery) {
+    return this.sessions.stats(user, query);
   }
 
   @Post('sessions')

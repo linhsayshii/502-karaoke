@@ -7,14 +7,23 @@ import {
 } from '@nestjs/common';
 import { OrderStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ReportPrismaService } from '../prisma/report-prisma.service';
 import { AuthUser } from '../auth/auth-user';
 import { BranchScopeService } from '../common/branch-scope.service';
-import { businessDateOf } from '../common/dates';
+import {
+  businessDateOf,
+  businessDatesBetween,
+  businessDayRange,
+} from '../common/dates';
 import { orderDetailInclude } from '../orders/order-include';
 import { lockOrderRow } from '../orders/order-lock';
-import { canAssignPr } from './pr.service';
+import { canAssignPr, canViewPr } from './pr.service';
 import { checkSessionTimes } from './pr-session-rules';
-import { AddPrSessionDto, UpdatePrSessionDto } from './dto/pr-session.dto';
+import {
+  AddPrSessionDto,
+  PrStatsQuery,
+  UpdatePrSessionDto,
+} from './dto/pr-session.dto';
 
 type Db = Prisma.TransactionClient;
 
@@ -33,6 +42,7 @@ export interface AvailablePr {
 export class PrSessionsService {
   constructor(
     private prisma: PrismaService,
+    private reportDb: ReportPrismaService,
     private branchScope: BranchScopeService,
   ) {}
 
@@ -180,6 +190,50 @@ export class PrSessionsService {
   }
 
   // ---- rules ---------------------------------------------------------------
+
+  // Hours each PR/KTV spent in rooms over business days [from, to]; a visit
+  // belongs to the day it started, and an open one counts up to now. Summed in
+  // SQL on the report pool (PrSession(branchId, startAt) index); minutes are
+  // clamped at 0 per visit like sessionMinutes().
+  async stats(user: AuthUser, query: PrStatsQuery) {
+    if (!canViewPr(user)) {
+      throw new ForbiddenException('Bạn không có quyền xem PR/KTV');
+    }
+    const branchId = await this.branchScope.resolveBranchId(user, query.branch);
+    businessDatesBetween(query.from, query.to); // 400 when too long
+    const { gte, lt } = businessDayRange(query.from, query.to);
+    const minutesSql = Prisma.sql`GREATEST(CEIL(EXTRACT(EPOCH FROM (COALESCE("endAt", now()) - "startAt")) / 60), 0)`;
+    const where = Prisma.sql`"branchId" = ${branchId} AND "startAt" >= ${gte} AND "startAt" < ${lt}`;
+    // At most one row per PR of the branch, so no LIMIT.
+    const [rows, totals] = await Promise.all([
+      this.reportDb.$queryRaw<
+        {
+          prStaffId: number;
+          minutes: number;
+          sessions: number;
+          rooms: number;
+        }[]
+      >`
+        SELECT "prStaffId",
+               COALESCE(SUM(${minutesSql}), 0)::int AS minutes,
+               COUNT(*)::int AS sessions,
+               COUNT(DISTINCT "orderId")::int AS rooms
+        FROM "PrSession" WHERE ${where}
+        GROUP BY "prStaffId"`,
+      this.reportDb.$queryRaw<
+        { minutes: number; sessions: number; rooms: number }[]
+      >`
+        SELECT COALESCE(SUM(${minutesSql}), 0)::int AS minutes,
+               COUNT(*)::int AS sessions,
+               COUNT(DISTINCT "orderId")::int AS rooms
+        FROM "PrSession" WHERE ${where}`,
+    ]);
+    return {
+      range: { from: query.from, to: query.to },
+      totals: totals[0],
+      rows,
+    };
+  }
 
   private assertAssign(user: AuthUser) {
     if (!canAssignPr(user)) {

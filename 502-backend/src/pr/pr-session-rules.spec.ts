@@ -43,7 +43,11 @@ describe('sessionMinutes', () => {
   it('counts started minutes of a closed visit', () => {
     expect(sessionMinutes(at('20:00'), at('21:00'), at('23:00'))).toBe(60);
     expect(
-      sessionMinutes(at('20:00'), new Date(at('20:00').getTime() + 61_000), at('23:00')),
+      sessionMinutes(
+        at('20:00'),
+        new Date(at('20:00').getTime() + 61_000),
+        at('23:00'),
+      ),
     ).toBe(2);
   });
 

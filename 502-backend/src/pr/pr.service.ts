@@ -8,7 +8,7 @@ import {
 import { Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth-user';
-import { MANAGERS } from '../auth/roles';
+import { MANAGERS, SALES } from '../auth/roles';
 import { BranchScopeService } from '../common/branch-scope.service';
 import { businessDateOf, getBusinessDayRange } from '../common/dates';
 import {
@@ -34,6 +34,12 @@ export function canManagePr(user: AuthUser): boolean {
 // HĐQT sees the lists, read only.
 export function canViewPr(user: AuthUser): boolean {
   return canManagePr(user) || user.role === Role.BOARD;
+}
+
+// Who may put PR/KTV into a room: anyone who sells (cashiers, managers) and
+// any account marked "Quản lý PR/KTV".
+export function canAssignPr(user: AuthUser): boolean {
+  return SALES.includes(user.role) || user.managesPr;
 }
 
 const staffSelect = {

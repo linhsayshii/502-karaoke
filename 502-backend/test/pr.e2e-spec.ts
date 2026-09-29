@@ -7,6 +7,7 @@ import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 import { businessDateOf } from '../src/common/dates';
+import { PrismaService } from '../src/prisma/prisma.service';
 
 // PR/KTV: a list per branch and its daily roll call, kept by the managers and
 // by any account marked "Quản lý PR/KTV" (User.managesPr). The `it`s build on
@@ -55,7 +56,14 @@ describe('PR/KTV (e2e)', () => {
       moduleRef.createNestApplication<NestExpressApplication>(),
     );
     await app.init();
-    for (const name of ['admin', 'ql1_cs1', 'tn1_cs1', 'ql1_cs2']) {
+    for (const name of [
+      'admin',
+      'ql1_cs1',
+      'tn1_cs1',
+      'ql1_cs2',
+      'tn1_cs2',
+      'pv1_cs1',
+    ]) {
       await login(name);
     }
     const users = (await as('ql1_cs1').get('/users').expect(200))
@@ -201,5 +209,193 @@ describe('PR/KTV (e2e)', () => {
     await board.get('/pr/attendance?branch=cs1').expect(200);
     await board.post('/pr/staff?branch=cs1', { name: 'X' }).expect(403);
     await board.post('/pr/attendance', { prStaffId: maiId }).expect(403);
+  });
+
+  describe('PR/KTV in rooms', () => {
+    let hoaId: number;
+    let cucId: number;
+    let roomA: number;
+    let roomB: number;
+    let orderA: number;
+    let orderB: number;
+    let staffUserId: number;
+    const minutesAgo = (m: number) =>
+      new Date(Date.now() - m * 60_000).toISOString();
+    const sessionsOf = (order: Json) => order.prSessions as Json[];
+    const idOf = (res: { body: unknown }) => (res.body as Json).id as number;
+
+    beforeAll(async () => {
+      const manager = as('ql1_cs1');
+      hoaId = idOf(
+        await manager.post('/pr/staff', { name: 'Hoa' }).expect(201),
+      );
+      cucId = idOf(
+        await manager
+          .post('/pr/staff', { name: 'Cúc', code: 'C1' })
+          .expect(201),
+      );
+      const rooms = (await as('tn1_cs1').get('/rooms').expect(200))
+        .body as Json[];
+      roomA = rooms.find((r) => r.name === 'P101')!.id as number;
+      roomB = rooms.find((r) => r.name === 'P102')!.id as number;
+      orderA = idOf(
+        await as('tn1_cs1').post('/orders', { roomId: roomA }).expect(201),
+      );
+      orderB = idOf(
+        await as('tn1_cs1').post('/orders', { roomId: roomB }).expect(201),
+      );
+      // Rooms opened two hours ago, so visits can start in the past.
+      const prisma = app.get(PrismaService);
+      await prisma.order.updateMany({
+        where: { id: { in: [orderA, orderB] } },
+        data: { startTime: new Date(Date.now() - 2 * 3600_000) },
+      });
+      const users = (await manager.get('/users').expect(200)).body as Json[];
+      staffUserId = users.find((u) => u.username === 'pv1_cs1')!.id as number;
+    });
+
+    it('adds a PR to a room, once at a time', async () => {
+      const res = await as('tn1_cs1')
+        .post('/pr/sessions', { orderId: orderA, prStaffId: hoaId })
+        .expect(201);
+      expect(sessionsOf(res.body as Json)).toMatchObject([
+        { prStaffId: hoaId, endAt: null, prStaff: { name: 'Hoa' } },
+      ]);
+      const busy = await as('tn1_cs1')
+        .post('/pr/sessions', { orderId: orderB, prStaffId: hoaId })
+        .expect(409);
+      expect((busy.body as Json).message).toBe('Hoa đang ở phòng P101');
+      // The order carries its visits for the room page.
+      const order = (await as('tn1_cs1').get(`/orders/${orderA}`).expect(200))
+        .body as Json;
+      expect(sessionsOf(order)).toHaveLength(1);
+    });
+
+    it('ends a visit, then the PR can go to another room', async () => {
+      const order = (await as('tn1_cs1').get(`/orders/${orderA}`).expect(200))
+        .body as Json;
+      const sessionId = sessionsOf(order)[0].id as number;
+      const ended = await as('tn1_cs1')
+        .post(`/pr/sessions/${sessionId}/end`)
+        .expect(200);
+      expect(sessionsOf(ended.body as Json)[0].endAt).not.toBeNull();
+      await as('tn1_cs1').post(`/pr/sessions/${sessionId}/end`).expect(409);
+      await as('tn1_cs1')
+        .post('/pr/sessions', { orderId: orderB, prStaffId: hoaId })
+        .expect(201);
+    });
+
+    it('checks the times', async () => {
+      const cashier = as('tn1_cs1');
+      await cashier
+        .post('/pr/sessions', {
+          orderId: orderA,
+          prStaffId: cucId,
+          startAt: minutesAgo(180),
+        })
+        .expect(400);
+      await cashier
+        .post('/pr/sessions', {
+          orderId: orderA,
+          prStaffId: cucId,
+          startAt: minutesAgo(-5),
+        })
+        .expect(400);
+      const res = await cashier
+        .post('/pr/sessions', {
+          orderId: orderA,
+          prStaffId: cucId,
+          startAt: minutesAgo(90),
+        })
+        .expect(201);
+      const visit = sessionsOf(res.body as Json).find(
+        (s) => s.prStaffId === cucId,
+      )!;
+      await cashier
+        .patch(`/pr/sessions/${visit.id as number}`, { endAt: minutesAgo(100) })
+        .expect(400);
+      const fixed = await cashier
+        .patch(`/pr/sessions/${visit.id as number}`, { endAt: minutesAgo(30) })
+        .expect(200);
+      expect(
+        sessionsOf(fixed.body as Json).find((s) => s.id === visit.id)!.endAt,
+      ).not.toBeNull();
+    });
+
+    it('deletes a visit entered by mistake', async () => {
+      const res = await as('tn1_cs1')
+        .post('/pr/sessions', { orderId: orderA, prStaffId: cucId })
+        .expect(201);
+      const visit = sessionsOf(res.body as Json).find(
+        (s) => s.prStaffId === cucId && s.endAt === null,
+      )!;
+      const after = await as('tn1_cs1')
+        .delete(`/pr/sessions/${visit.id as number}`)
+        .expect(200);
+      expect(
+        sessionsOf(after.body as Json).some((s) => s.id === visit.id),
+      ).toBe(false);
+    });
+
+    it('lets sales roles and PR managers assign, nobody else', async () => {
+      await as('pv1_cs1')
+        .post('/pr/sessions', { orderId: orderA, prStaffId: cucId })
+        .expect(403);
+      await as('tn1_cs2')
+        .post('/pr/sessions', { orderId: orderA, prStaffId: cucId })
+        .expect(403);
+      await as('ql1_cs1')
+        .patch(`/users/${staffUserId}`, { managesPr: true })
+        .expect(200);
+      const res = await as('pv1_cs1')
+        .post('/pr/sessions', { orderId: orderA, prStaffId: cucId })
+        .expect(201);
+      const visit = sessionsOf(res.body as Json).find(
+        (s) => s.prStaffId === cucId && s.endAt === null,
+      )!;
+      await as('pv1_cs1')
+        .post(`/pr/sessions/${visit.id as number}/end`)
+        .expect(200);
+    });
+
+    it('closes open visits at checkout and freezes them', async () => {
+      const paid = await as('tn1_cs1')
+        .post(`/orders/${orderB}/checkout`, { paymentMethod: 'CASH' })
+        .expect(200);
+      const body = paid.body as Json;
+      const hoa = sessionsOf(body).find((s) => s.prStaffId === hoaId)!;
+      expect(hoa.endAt).toBe(body.endTime);
+      await as('tn1_cs1')
+        .post('/pr/sessions', { orderId: orderB, prStaffId: cucId })
+        .expect(409);
+      await as('tn1_cs1')
+        .delete(`/pr/sessions/${hoa.id as number}`)
+        .expect(409);
+    });
+
+    it('closes open visits when a manager cancels the session', async () => {
+      const daoId = idOf(
+        await as('ql1_cs1').post('/pr/staff', { name: 'Đào' }).expect(201),
+      );
+      const rooms = (await as('tn1_cs1').get('/rooms').expect(200))
+        .body as Json[];
+      const roomC = rooms.find((r) => r.name === 'P103')!.id as number;
+      const orderC = idOf(
+        await as('tn1_cs1').post('/orders', { roomId: roomC }).expect(201),
+      );
+      await app.get(PrismaService).order.update({
+        where: { id: orderC },
+        data: { startTime: new Date(Date.now() - 2 * 3600_000) },
+      });
+      await as('tn1_cs1')
+        .post('/pr/sessions', { orderId: orderC, prStaffId: daoId })
+        .expect(201);
+      const cancelled = await as('ql1_cs1')
+        .post(`/orders/${orderC}/cancel`)
+        .expect(200);
+      const body = cancelled.body as Json;
+      const dao = sessionsOf(body).find((s) => s.prStaffId === daoId)!;
+      expect(dao.endAt).toBe(body.endTime);
+    });
   });
 });

@@ -20,6 +20,7 @@ import type { AuthUser } from '../auth/auth-user';
 import { EVERY_ROLE } from '../auth/roles';
 import { withTotalCount } from '../common/total-count';
 import { PrService } from './pr.service';
+import { PrSessionsService } from './pr-sessions.service';
 import {
   CreatePrStaffDto,
   ListPrStaffQuery,
@@ -30,16 +31,21 @@ import {
   ListAttendanceQuery,
   UpdateAttendanceDto,
 } from './dto/pr-attendance.dto';
+import { AddPrSessionDto, UpdatePrSessionDto } from './dto/pr-session.dto';
 
-// PR/KTV list and roll call. Open to every role here because the right comes
-// from the account's "Quản lý PR/KTV" flag as well as its role; PrService
-// checks it (canManagePr / canViewPr).
+// PR/KTV list, roll call and visits in rooms. Open to every role here because
+// the right comes from the account's "Quản lý PR/KTV" flag as well as its role;
+// PrService and PrSessionsService check it (canManagePr / canViewPr, and
+// canAssignPr for putting PR/KTV into a room).
 @ApiTags('pr')
 @ApiBearerAuth()
 @Roles(...EVERY_ROLE)
 @Controller('pr')
 export class PrController {
-  constructor(private readonly prService: PrService) {}
+  constructor(
+    private readonly prService: PrService,
+    private readonly sessions: PrSessionsService,
+  ) {}
 
   @Get('staff')
   listStaff(
@@ -114,5 +120,36 @@ export class PrController {
     @Param('id', ParseIntPipe) id: number,
   ) {
     return this.prService.removeAttendance(user, id);
+  }
+
+  @Post('sessions')
+  addSession(@CurrentUser() user: AuthUser, @Body() dto: AddPrSessionDto) {
+    return this.sessions.add(user, dto);
+  }
+
+  @Post('sessions/:id/end')
+  @HttpCode(HttpStatus.OK)
+  endSession(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.sessions.end(user, id);
+  }
+
+  @Patch('sessions/:id')
+  updateSession(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdatePrSessionDto,
+  ) {
+    return this.sessions.update(user, id, dto);
+  }
+
+  @Delete('sessions/:id')
+  removeSession(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.sessions.remove(user, id);
   }
 }

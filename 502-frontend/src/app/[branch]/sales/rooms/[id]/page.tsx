@@ -5,12 +5,10 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeftIcon,
-  ChevronDownIcon,
   DoorClosedIcon,
   LockIcon,
   LockOpenIcon,
   MinusIcon,
-  PercentIcon,
   PlusIcon,
   ReceiptTextIcon,
   SearchIcon,
@@ -30,14 +28,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
   InputGroupInput,
-  InputGroupText,
 } from "@/components/ui/input-group";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -58,6 +54,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { EmptyState } from "@/components/data-states";
 import { PageHeader } from "@/components/layout/page-header";
 import { usePageTitle } from "@/components/layout/page-title";
+import { BillAdjustments } from "@/components/sales/bill-adjustments";
 import { BillSummary } from "@/components/sales/bill-summary";
 import { CheckoutDialog } from "@/components/sales/checkout-dialog";
 import { PrPicker } from "@/components/sales/pr-picker";
@@ -71,13 +68,10 @@ import { useBranchCode } from "@/lib/branch";
 import { formatDuration, formatMoney, formatNumber, formatTime } from "@/lib/format";
 import { can, isServerOf } from "@/lib/permissions";
 import { adjustmentsOf } from "@/lib/discount-rules";
-import type { Adjustments, FloorStaff, Order, Product, Room } from "@/lib/types";
+import type { Adjustments, DiscountRequestRow, FloorStaff, Order, Product, Room } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type Line = { productId: number; quantity: number };
-
-type PercentKey = "discountPercent" | "hourlyDiscountPercent";
-type AmountKey = "discountAmount" | "hourlyDiscountAmount";
 
 // A bill line as shown: saved, or tapped and not saved yet.
 type ShownLine = Line & { price: number; name: string; unit: string };
@@ -93,11 +87,6 @@ const linesOf = (order: Order): Line[] => order.items.map(({ productId, quantity
 const NONE = "none";
 const ALL = "ALL";
 const OTHER = "OTHER";
-// Label, percent and amount on one line; the label goes on top when the card is narrow.
-const ADJUSTMENT_ROW =
-  "grid grid-cols-[6rem_minmax(0,1fr)] items-center gap-2 @sm/field-group:grid-cols-[minmax(0,1fr)_6rem_8rem]";
-const ADJUSTMENT_LABEL = "col-span-2 font-normal @sm/field-group:col-span-1";
-const clampPercent = (value: string) => Math.min(100, Math.max(0, Number(value) || 0));
 const nonNegative = (value: string) => Math.max(0, Math.floor(Number(value) || 0));
 // Side by side, both cards are as tall as the menu card showing 10 dishes
 // (header, tabs, search and one line of categories above them), never taller
@@ -124,7 +113,6 @@ export default function RoomDetailPage() {
   // Quantities other open sessions have ordered (stock is deducted at checkout).
   const [otherPending, setOtherPending] = useState<Map<number, number>>(new Map());
   const [staff, setStaff] = useState<FloorStaff[]>([]);
-  const [adjust, setAdjust] = useState<Adjustments | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState(ALL);
@@ -185,7 +173,6 @@ export default function RoomDetailPage() {
         const mine = quantitiesOf(orderRes.data.items);
         setOtherPending(new Map(productsRes.data.map((p) => [p.id, (p.pendingQuantity ?? 0) - (mine.get(p.id) ?? 0)])));
         applyOrder(orderRes.data);
-        setAdjust(adjustmentsOf(orderRes.data));
         setProducts(productsRes.data);
         setStaff(staffRes.data);
       } catch (error) {
@@ -196,6 +183,24 @@ export default function RoomDetailPage() {
     };
     load();
   }, [roomId, branch, canOperate, user, applyOrder, notify]);
+
+  // null: nothing waiting; the id of the request this screen last saw pending.
+  const pendingIdRef = useRef<number | null>(null);
+
+  // Tells the cashier what became of their request when it leaves the order.
+  useEffect(() => {
+    const current = order?.discountRequests?.[0]?.id ?? null;
+    const previous = pendingIdRef.current;
+    pendingIdRef.current = current;
+    if (previous === null || current !== null) return;
+    api
+      .get<DiscountRequestRow>(`/discount-requests/${previous}`)
+      .then(({ data }) => {
+        if (data.status === "APPROVED") notify.success(`Quản lý ${data.decidedBy?.fullName ?? ""} đã duyệt giảm giá`);
+        else if (data.status === "REJECTED") notify.warning(`Giảm giá bị từ chối: ${data.decisionNote ?? ""}`);
+      })
+      .catch(() => {});
+  }, [order?.discountRequests, notify]);
 
   // Pick up changes made on another device (and notice a closed session).
   const activeOrderId = order?.id;
@@ -210,10 +215,7 @@ export default function RoomDetailPage() {
           router.push(roomsPath);
           return;
         }
-        if (res.data.updatedAt !== orderRef.current?.updatedAt) {
-          applyOrder(res.data);
-          setAdjust(adjustmentsOf(res.data));
-        }
+        if (res.data.updatedAt !== orderRef.current?.updatedAt) applyOrder(res.data);
       } catch {
         // Next tick retries; errors of user actions are reported where they happen.
       }
@@ -312,11 +314,35 @@ export default function RoomDetailPage() {
   const stepQuantity = (productId: number, step: number) =>
     changeItems((lines) => lines.map((l) => (l.productId === productId ? { ...l, quantity: l.quantity + step } : l)));
 
-  const saveAdjustments = async (fields: (keyof Adjustments)[]) => {
-    if (!adjust) return;
-    const patch = Object.fromEntries(fields.map((f) => [f, adjust[f]]));
-    await saveOrder(() => patch);
-    if (orderRef.current) setAdjust(adjustmentsOf(orderRef.current));
+  const submitAdjustments = (adjustments: Adjustments, note?: string) =>
+    runOrderAction(
+      () =>
+        api
+          .post<Order & { branchManagers?: number }>(`/orders/${orderRef.current!.id}/adjustments`, { ...adjustments, note })
+          .then((res) => {
+            const sent = res.data.discountRequests?.length;
+            if (sent && res.data.branchManagers === 0) {
+              notify.warning("Cơ sở chưa có quản lý cơ sở, yêu cầu chỉ tới quản lý hệ thống");
+            } else if (sent) {
+              notify.success("Đã gửi yêu cầu, chờ quản lý duyệt");
+            } else {
+              notify.success("Đã áp dụng");
+            }
+            return res.data;
+          }),
+      "Không thể lưu giảm giá",
+    );
+
+  const cancelRequest = async (requestId: number) => {
+    try {
+      await api.post(`/discount-requests/${requestId}/cancel`);
+      const res = await api.get<Order>(`/orders/${orderRef.current!.id}`);
+      applyOrder(res.data);
+      return true;
+    } catch (error) {
+      notify.error(error, "Không thể hủy yêu cầu");
+      return false;
+    }
   };
 
   const setStaffMember = (field: "cskhId" | "serverId", value: string) =>
@@ -394,7 +420,7 @@ export default function RoomDetailPage() {
     );
   }
 
-  if (!order || !adjust) {
+  if (!order) {
     return (
       <EmptyState
         icon={DoorClosedIcon}
@@ -418,7 +444,7 @@ export default function RoomDetailPage() {
     endTime: order.timeLockedAt ? new Date(order.timeLockedAt) : now,
     pricePerHour: Number(order.pricePerHour),
     items: shownItems.map(({ price, quantity }) => ({ price, quantity })),
-    ...adjust,
+    ...adjustmentsOf(order),
   });
 
   const keyword = search.trim().toLowerCase();
@@ -431,52 +457,6 @@ export default function RoomDetailPage() {
   const cskhStaff = staff.filter((s) => s.position === "CSKH");
   const serverStaff = staff.filter((s) => s.position === "SERVER");
   const itemCount = shownItems.reduce((sum, i) => sum + i.quantity, 0);
-  const activeAdjustments = [
-    adjust.discountPercent || adjust.discountAmount,
-    adjust.hourlyDiscountPercent || adjust.hourlyDiscountAmount,
-    adjust.taxPercent,
-  ].filter(Boolean).length;
-
-  // Percent follows the live bill (the server applies it at checkout);
-  // typing an amount makes it a fixed sum.
-  const adjustmentRow = (id: string, label: string, percentKey: PercentKey, amountKey: AmountKey) => (
-    <Field className={ADJUSTMENT_ROW}>
-      <FieldLabel htmlFor={`${id}-percent`} className={ADJUSTMENT_LABEL}>
-        {label}
-      </FieldLabel>
-      <InputGroup>
-        <InputGroupInput
-          id={`${id}-percent`}
-          type="number"
-          inputMode="decimal"
-          min={0}
-          max={100}
-          className="text-right tabular-nums"
-          value={adjust[percentKey]}
-          onChange={(e) => setAdjust({ ...adjust, [percentKey]: clampPercent(e.target.value) })}
-          onBlur={() => saveAdjustments([percentKey, amountKey])}
-        />
-        <InputGroupAddon align="inline-end">
-          <InputGroupText>%</InputGroupText>
-        </InputGroupAddon>
-      </InputGroup>
-      <InputGroup>
-        <InputGroupInput
-          type="number"
-          inputMode="numeric"
-          min={0}
-          aria-label={`${label} (số tiền)`}
-          className="text-right tabular-nums"
-          value={adjust[percentKey] > 0 ? bill[amountKey] : adjust[amountKey]}
-          onChange={(e) => setAdjust({ ...adjust, [percentKey]: 0, [amountKey]: nonNegative(e.target.value) })}
-          onBlur={() => saveAdjustments([percentKey, amountKey])}
-        />
-        <InputGroupAddon align="inline-end">
-          <InputGroupText>đ</InputGroupText>
-        </InputGroupAddon>
-      </InputGroup>
-    </Field>
-  );
 
   const staffSelect = (field: "cskhId" | "serverId", label: string, people: FloorStaff[]) => (
     <Field>
@@ -786,52 +766,28 @@ export default function RoomDetailPage() {
             )}
 
             {canOperate && (
-              <Collapsible defaultOpen={activeAdjustments > 0}>
-                <CollapsibleTrigger asChild>
-                  <Button variant="ghost" size="sm" className="group w-full justify-between">
-                    <span className="flex items-center gap-2">
-                      <PercentIcon />
-                      Giảm giá & thuế
-                      {activeAdjustments > 0 && <Badge variant="secondary">{activeAdjustments}</Badge>}
-                    </span>
-                    <ChevronDownIcon className="transition-transform group-data-[state=open]:rotate-180" />
-                  </Button>
-                </CollapsibleTrigger>
-                <CollapsibleContent className="pt-3">
-                  <FieldGroup className="gap-3">
-                    {adjustmentRow("discount", "Giảm giá món", "discountPercent", "discountAmount")}
-                    {adjustmentRow("hourly-discount", "Giảm giá giờ", "hourlyDiscountPercent", "hourlyDiscountAmount")}
-                    <Field className={ADJUSTMENT_ROW}>
-                      <FieldLabel htmlFor="tax-percent" className={ADJUSTMENT_LABEL}>
-                        Thuế VAT
-                      </FieldLabel>
-                      <InputGroup>
-                        <InputGroupInput
-                          id="tax-percent"
-                          type="number"
-                          inputMode="decimal"
-                          min={0}
-                          max={100}
-                          className="text-right tabular-nums"
-                          value={adjust.taxPercent}
-                          onChange={(e) => setAdjust({ ...adjust, taxPercent: clampPercent(e.target.value) })}
-                          onBlur={() => saveAdjustments(["taxPercent"])}
-                        />
-                        <InputGroupAddon align="inline-end">
-                          <InputGroupText>%</InputGroupText>
-                        </InputGroupAddon>
-                      </InputGroup>
-                      <span className="pr-3 text-right text-sm tabular-nums">{formatNumber(bill.taxAmount)} đ</span>
-                    </Field>
-                  </FieldGroup>
-                </CollapsibleContent>
-              </Collapsible>
+              <BillAdjustments
+                key={`${JSON.stringify(adjustmentsOf(order))}:${order.discountRequests?.[0]?.id ?? ""}`}
+                order={order}
+                billFor={(adjustments) =>
+                  computeBill({
+                    startTime: new Date(order.startTime),
+                    endTime: order.timeLockedAt ? new Date(order.timeLockedAt) : now,
+                    pricePerHour: Number(order.pricePerHour),
+                    items: shownItems.map(({ price, quantity }) => ({ price, quantity })),
+                    ...adjustments,
+                  })
+                }
+                canApply={can(user, "discounts.approve")}
+                onSubmit={submitAdjustments}
+                onCancelRequest={cancelRequest}
+              />
             )}
 
             <Separator />
             <BillSummary
               bill={bill}
-              percents={adjust}
+              percents={adjustmentsOf(order)}
               pricePerHour={Number(order.pricePerHour)}
               totalLabel="Tạm tính"
             />
@@ -841,6 +797,7 @@ export default function RoomDetailPage() {
               <Button
                 size="lg"
                 className="w-full"
+                disabled={!!order.discountRequests?.length}
                 onClick={async () => {
                   // Let pending edits land before the server computes the bill.
                   await queueRef.current;
@@ -848,7 +805,7 @@ export default function RoomDetailPage() {
                 }}
               >
                 <ReceiptTextIcon data-icon="inline-start" />
-                Thanh toán · {formatMoney(bill.finalAmount)}
+                {order.discountRequests?.length ? "Chờ duyệt giảm giá…" : `Thanh toán · ${formatMoney(bill.finalAmount)}`}
               </Button>
             </CardFooter>
           )}

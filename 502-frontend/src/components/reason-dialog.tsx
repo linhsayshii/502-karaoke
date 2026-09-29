@@ -21,13 +21,27 @@ interface ReasonDialogProps {
   title: string;
   description?: React.ReactNode;
   confirmLabel: string;
+  // Defaults suit cancelling; other callers (e.g. a discount request) say what the note is.
+  reasonLabel?: string;
+  placeholder?: string;
+  requiredMessage?: string;
   // Return false to keep the dialog open (e.g. the call failed).
   onConfirm: (reason: string) => Promise<boolean | void>;
 }
 
 // Cancelling something that already moved money or stock: the reason is
 // required and kept with the cancelled record.
-export function ReasonDialog({ open, onOpenChange, title, description, confirmLabel, onConfirm }: ReasonDialogProps) {
+export function ReasonDialog({
+  open,
+  onOpenChange,
+  title,
+  description,
+  confirmLabel,
+  reasonLabel = "Lý do hủy",
+  placeholder = "Ví dụ: nhập nhầm số lượng",
+  requiredMessage = "Vui lòng nhập lý do hủy",
+  onConfirm,
+}: ReasonDialogProps) {
   const [reason, setReason] = useState("");
   const [touched, setTouched] = useState(false);
   const [pending, setPending] = useState(false);
@@ -61,17 +75,17 @@ export function ReasonDialog({ open, onOpenChange, title, description, confirmLa
           {description && <AlertDialogDescription>{description}</AlertDialogDescription>}
         </AlertDialogHeader>
         <Field data-invalid={invalid || undefined}>
-          <FieldLabel htmlFor="cancel-reason">Lý do hủy</FieldLabel>
+          <FieldLabel htmlFor="cancel-reason">{reasonLabel}</FieldLabel>
           <Textarea
             id="cancel-reason"
-            placeholder="Ví dụ: nhập nhầm số lượng"
+            placeholder={placeholder}
             value={reason}
             aria-invalid={invalid || undefined}
             onChange={(e) => setReason(e.target.value)}
             onBlur={() => setTouched(true)}
             maxLength={500}
           />
-          {invalid && <FieldError>Vui lòng nhập lý do hủy</FieldError>}
+          {invalid && <FieldError>{requiredMessage}</FieldError>}
         </Field>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>Đóng</AlertDialogCancel>

@@ -10,7 +10,7 @@ import { DateRangePicker, type DateRangeValue } from "@/components/date-range-pi
 import { AdjustmentDiff } from "@/components/discounts/adjustment-diff";
 import { useApiData } from "@/hooks/use-api-data";
 import { useBranchCode } from "@/lib/branch";
-import { billLabel, businessDate, formatDateTime } from "@/lib/format";
+import { billLabel, businessDate, formatDateTime, formatTime } from "@/lib/format";
 import { ONLY_NARROW, SHOW_FROM } from "@/lib/responsive";
 import type { DiscountRequestRow, DiscountRequestStatus, DiscountSource } from "@/lib/types";
 
@@ -69,7 +69,7 @@ export function DiscountLog() {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Lúc</TableHead>
+            <TableHead className={SHOW_FROM.sm}>Lúc</TableHead>
             <TableHead>Hóa đơn</TableHead>
             <TableHead>Thay đổi</TableHead>
             <TableHead className={SHOW_FROM.md}>Người gửi / duyệt</TableHead>
@@ -79,16 +79,20 @@ export function DiscountLog() {
         </TableHeader>
         <TableBody>
           {loading ? (
-            <TableSkeleton columns={["", "", "", SHOW_FROM.md, SHOW_FROM.sm, ""]} />
+            <TableSkeleton columns={[SHOW_FROM.sm, "", "", SHOW_FROM.md, SHOW_FROM.sm, ""]} />
           ) : data.length === 0 ? (
             <TableEmpty colSpan={6} icon={BadgePercentIcon} title="Không có thay đổi giảm giá trong khoảng này" />
           ) : (
             data.map((r) => (
               <TableRow key={r.id}>
-                <TableCell className="tabular-nums">{formatDateTime(r.createdAt)}</TableCell>
-                <TableCell>
+                <TableCell className={`${SHOW_FROM.sm} tabular-nums`}>{formatDateTime(r.createdAt)}</TableCell>
+                <TableCell className="whitespace-normal">
                   {billLabel(r.order)} · {r.order.room?.name ?? "—"}
-                  <div className="text-xs text-muted-foreground">{SOURCE[r.source]}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {/* Stand-in for the Lúc column, hidden on narrow pages. */}
+                    <span className={`tabular-nums ${ONLY_NARROW}`}>{formatTime(r.createdAt)} · </span>
+                    {SOURCE[r.source]}
+                  </div>
                 </TableCell>
                 <TableCell className="whitespace-normal">
                   <AdjustmentDiff request={r} />

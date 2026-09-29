@@ -69,7 +69,11 @@ function roomSummary(room: Room) {
     STATUS[room.status].label,
   ];
   if (room.status === "ACTIVE" && room.startTime) parts.push(`từ ${formatTime(room.startTime)}`);
-  if (room.activeOrder?.timeLockedAt) parts.push(`đã chốt giờ ${formatTime(room.activeOrder.timeLockedAt)}`);
+  const lockedAt = room.activeOrder?.timeLockedAt;
+  if (lockedAt) {
+    const hours = room.startTime ? ` (${formatElapsed(minutesBetween(room.startTime, new Date(lockedAt)))})` : "";
+    parts.push(`chờ thanh toán, đã chốt giờ ${formatTime(lockedAt)}${hours}`);
+  }
   const staff = [room.activeOrder?.server?.fullName, room.activeOrder?.cskh?.fullName].filter(Boolean);
   if (staff.length > 0) parts.push(`Phục vụ: ${staff.join(", ")}`);
   return parts.join(" · ");
@@ -263,14 +267,20 @@ export default function RoomsPage() {
                       className={cn(
                         "text-xs tabular-nums",
                         "max-w-full truncate",
-                        lockedAt ? "font-medium text-warning" : active ? "font-medium text-destructive" : "text-muted-foreground",
+                        // Tighter so "Chờ thanh toán" fits the narrowest tile (360 px screens).
+                        lockedAt
+                          ? "font-medium tracking-tighter text-warning"
+                          : active
+                            ? "font-medium text-destructive"
+                            : "text-muted-foreground",
                       )}
                     >
-                      {active && room.startTime
-                        ? lockedAt
-                          ? `Chờ TT · ${formatElapsed(minutesBetween(room.startTime, new Date(lockedAt)))}`
-                          : formatElapsed(minutesBetween(room.startTime, now))
-                        : status.label}
+                      {/* Locked: the time and hours are in the tile's title (roomSummary). */}
+                      {active && lockedAt
+                        ? "Chờ thanh toán"
+                        : active && room.startTime
+                          ? formatElapsed(minutesBetween(room.startTime, now))
+                          : status.label}
                     </span>
                   </button>
                 );

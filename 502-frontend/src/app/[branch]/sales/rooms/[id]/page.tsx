@@ -187,12 +187,13 @@ export default function RoomDetailPage() {
   // null: nothing waiting; the id of the request this screen last saw pending.
   const pendingIdRef = useRef<number | null>(null);
 
-  // Tells the cashier what became of their request when it leaves the order.
+  // Tells the cashier what became of their request when it leaves the order
+  // (only those who sell: floor staff may not read requests, 403).
   useEffect(() => {
     const current = order?.discountRequests?.[0]?.id ?? null;
     const previous = pendingIdRef.current;
     pendingIdRef.current = current;
-    if (previous === null || current !== null) return;
+    if (!canOperate || previous === null || current !== null) return;
     api
       .get<DiscountRequestRow>(`/discount-requests/${previous}`)
       .then(({ data }) => {
@@ -201,7 +202,7 @@ export default function RoomDetailPage() {
         else if (data.status === "EXPIRED") notify.warning("Yêu cầu giảm giá đã hết hạn, hãy gửi lại");
       })
       .catch(() => notify.warning("Yêu cầu giảm giá đã được xử lý"));
-  }, [order?.discountRequests, notify]);
+  }, [order?.discountRequests, canOperate, notify]);
 
   // Pick up changes made on another device (and notice a closed session).
   const activeOrderId = order?.id;

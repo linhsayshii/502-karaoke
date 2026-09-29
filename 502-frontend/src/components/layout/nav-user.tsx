@@ -33,7 +33,7 @@ import { ChangePasswordDialog } from "@/components/change-password-dialog";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { initials } from "@/lib/format";
 import { PurgeDataDialog } from "@/components/purge-data-dialog";
-import { ROLE_LABELS, can } from "@/lib/permissions";
+import { can } from "@/lib/permissions";
 
 
 export function NavUser() {
@@ -52,7 +52,7 @@ export function NavUser() {
       </Avatar>
       <div className="grid flex-1 text-left text-sm leading-tight">
         <span className="truncate font-medium">{user.fullName}</span>
-        <span className="truncate text-xs text-muted-foreground">{ROLE_LABELS[user.role]}</span>
+        <span className="truncate text-xs text-muted-foreground">{user.username}</span>
       </div>
     </>
   );
@@ -79,10 +79,6 @@ export function NavUser() {
             >
               <DropdownMenuLabel className="p-0 font-normal">
                 <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">{identity}</div>
-                <p className="px-1 pb-1.5 text-xs text-muted-foreground">
-                  {user.username}
-                  {user.branch && ` · ${user.branch.name}`}
-                </p>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>

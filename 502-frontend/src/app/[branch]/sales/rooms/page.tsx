@@ -69,6 +69,7 @@ function roomSummary(room: Room) {
     STATUS[room.status].label,
   ];
   if (room.status === "ACTIVE" && room.startTime) parts.push(`từ ${formatTime(room.startTime)}`);
+  if (room.activeOrder?.timeLockedAt) parts.push(`đã chốt giờ ${formatTime(room.activeOrder.timeLockedAt)}`);
   const staff = [room.activeOrder?.server?.fullName, room.activeOrder?.cskh?.fullName].filter(Boolean);
   if (staff.length > 0) parts.push(`Phục vụ: ${staff.join(", ")}`);
   return parts.join(" · ");
@@ -225,6 +226,8 @@ export default function RoomsPage() {
               {floorRooms.map((room) => {
                 const status = STATUS[room.status];
                 const active = room.status === "ACTIVE";
+                // Time locked: the room waits for payment.
+                const lockedAt = room.activeOrder?.timeLockedAt ?? null;
                 // Active: ordering and checkout are on the room page; available: open it here.
                 const onClick = active
                   ? () => router.push(detailPath(room))
@@ -259,10 +262,15 @@ export default function RoomsPage() {
                     <span
                       className={cn(
                         "text-xs tabular-nums",
-                        active ? "font-medium text-destructive" : "text-muted-foreground",
+                        "max-w-full truncate",
+                        lockedAt ? "font-medium text-warning" : active ? "font-medium text-destructive" : "text-muted-foreground",
                       )}
                     >
-                      {active && room.startTime ? formatElapsed(minutesBetween(room.startTime, now)) : status.label}
+                      {active && room.startTime
+                        ? lockedAt
+                          ? `Chờ TT · ${formatElapsed(minutesBetween(room.startTime, new Date(lockedAt)))}`
+                          : formatElapsed(minutesBetween(room.startTime, now))
+                        : status.label}
                     </span>
                   </button>
                 );

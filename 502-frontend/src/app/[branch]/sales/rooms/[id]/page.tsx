@@ -7,6 +7,8 @@ import {
   ArrowLeftIcon,
   ChevronDownIcon,
   DoorClosedIcon,
+  LockIcon,
+  LockOpenIcon,
   MinusIcon,
   PercentIcon,
   PlusIcon,
@@ -67,7 +69,7 @@ import api from "@/lib/api";
 import { computeBill } from "@/lib/billing";
 import { useBranchCode } from "@/lib/branch";
 import { formatDuration, formatMoney, formatNumber, formatTime } from "@/lib/format";
-import { can } from "@/lib/permissions";
+import { can, isServerOf } from "@/lib/permissions";
 import { adjustmentsOf } from "@/lib/discount-rules";
 import type { Adjustments, FloorStaff, Order, Product, Room } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -113,8 +115,6 @@ export default function RoomDetailPage() {
   const canOperate = can(user, "sales.operate");
   const canCancel = can(user, "sales.cancel");
   const canAssignPr = can(user, "pr.assign");
-  // The left card: the menu for who sells, the PR/KTV tiles for who assigns them.
-  const showLeft = canOperate || canAssignPr;
   const staffView = user?.role === "STAFF";
   const roomsPath = `/${branch}/sales/rooms`;
 
@@ -130,6 +130,16 @@ export default function RoomDetailPage() {
   const [category, setCategory] = useState(ALL);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [lockOpen, setLockOpen] = useState(false);
+
+  // The server assigned to this session orders, brings PR/KTV in and locks
+  // the time for it; the CSKH only looks (the backend checks it again).
+  const isServer = !!order && isServerOf(user, order);
+  const canEditItems = canOperate || isServer;
+  const canAssignPrHere = canAssignPr || isServer;
+  const locked = !!order?.timeLockedAt;
+  // The left card: the menu for who orders, the PR/KTV tiles for who assigns them.
+  const showLeft = canEditItems || canAssignPrHere;
 
   usePageTitle(room ? `Phòng ${room.name}` : null);
 
@@ -161,9 +171,11 @@ export default function RoomDetailPage() {
         setRoom(roomRes.data);
         if (!roomRes.data.activeOrderId) return;
 
-        const [orderRes, productsRes, staffRes] = await Promise.all([
-          api.get<Order>(`/orders/${roomRes.data.activeOrderId}`),
-          canOperate
+        const orderRes = await api.get<Order>(`/orders/${roomRes.data.activeOrderId}`);
+        // The menu for whoever orders here: sales roles and this room's server.
+        const menu = canOperate || isServerOf(user, orderRes.data);
+        const [productsRes, staffRes] = await Promise.all([
+          menu
             ? api.get<Product[]>("/products", { params: { branch } })
             : Promise.resolve({ data: [] as Product[] }),
           canOperate
@@ -183,7 +195,7 @@ export default function RoomDetailPage() {
       }
     };
     load();
-  }, [roomId, branch, canOperate, applyOrder, notify]);
+  }, [roomId, branch, canOperate, user, applyOrder, notify]);
 
   // Pick up changes made on another device (and notice a closed session).
   const activeOrderId = order?.id;
@@ -322,6 +334,18 @@ export default function RoomDetailPage() {
   const removePr = (id: number) =>
     runOrderAction(() => api.delete<Order>(`/pr/sessions/${id}`).then((r) => r.data), "Không thể xóa lượt PR");
 
+  // Both go through the order queue, after the edits already sent.
+  const lockTime = () =>
+    runOrderAction(
+      () => api.post<Order>(`/orders/${orderRef.current!.id}/lock-time`).then((r) => r.data),
+      "Không thể chốt giờ",
+    );
+  const unlockTime = () =>
+    runOrderAction(
+      () => api.post<Order>(`/orders/${orderRef.current!.id}/unlock-time`).then((r) => r.data),
+      "Không thể mở khóa giờ",
+    );
+
   const cancelSession = async () => {
     if (!order) return;
     try {
@@ -390,7 +414,8 @@ export default function RoomDetailPage() {
   // Room price fixed when the session opened (Order.pricePerHour).
   const bill = computeBill({
     startTime: new Date(order.startTime),
-    endTime: now,
+    // The room fee stops at the lock.
+    endTime: order.timeLockedAt ? new Date(order.timeLockedAt) : now,
     pricePerHour: Number(order.pricePerHour),
     items: shownItems.map(({ price, quantity }) => ({ price, quantity })),
     ...adjust,
@@ -492,6 +517,18 @@ export default function RoomDetailPage() {
                 {staffView ? "Phòng đang phục vụ" : "Sơ đồ phòng"}
               </Link>
             </Button>
+            {!locked && canEditItems && (
+              <Button variant="outline" onClick={() => setLockOpen(true)}>
+                <LockIcon data-icon="inline-start" />
+                Chốt giờ
+              </Button>
+            )}
+            {locked && canOperate && (
+              <Button variant="outline" onClick={() => setLockOpen(true)}>
+                <LockOpenIcon data-icon="inline-start" />
+                Mở khóa giờ
+              </Button>
+            )}
             {canCancel && (
               <Button variant="outline" onClick={() => setCancelOpen(true)}>
                 <XCircleIcon data-icon="inline-start" />
@@ -510,18 +547,18 @@ export default function RoomDetailPage() {
       >
         {showLeft && (
           <Card className={cn("@container/menu min-w-0", PANEL_HEIGHT)}>
-            <Tabs defaultValue={canOperate ? "menu" : "pr"} className="min-h-0 flex-1 gap-4">
+            <Tabs defaultValue={canEditItems ? "menu" : "pr"} className="min-h-0 flex-1 gap-4">
               <CardHeader>
-                <CardTitle>{canOperate ? "Thực đơn & PR/KTV" : "PR/KTV"}</CardTitle>
+                <CardTitle>{canEditItems ? "Thực đơn & PR/KTV" : "PR/KTV"}</CardTitle>
                 <CardDescription>
-                  {canOperate && canAssignPr
+                  {canEditItems && canAssignPrHere
                     ? "Chạm vào món hoặc PR/KTV để thêm vào phòng."
-                    : canOperate
+                    : canEditItems
                       ? "Chạm vào món để thêm 1 phần vào hóa đơn."
                       : "Chạm vào PR/KTV để đưa vào phòng."}
                 </CardDescription>
               </CardHeader>
-              {canOperate && canAssignPr && (
+              {canEditItems && canAssignPrHere && (
                 <div className="px-6">
                   <TabsList className="w-full">
                     <TabsTrigger value="menu">Thực đơn</TabsTrigger>
@@ -529,7 +566,7 @@ export default function RoomDetailPage() {
                   </TabsList>
                 </div>
               )}
-              {canOperate && (
+              {canEditItems && (
                 <TabsContent value="menu" className="flex min-h-0 flex-col">
                   <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
                     <InputGroup>
@@ -609,10 +646,18 @@ export default function RoomDetailPage() {
                   </CardContent>
                 </TabsContent>
               )}
-              {canAssignPr && (
+              {canAssignPrHere && (
                 <TabsContent value="pr" className="flex min-h-0 flex-col">
                   <CardContent className="flex min-h-0 flex-1 flex-col">
-                    <PrPicker branch={branch} orderId={order.id} sessions={order.prSessions ?? []} onAdd={addPr} />
+                    {locked ? (
+                      <EmptyState
+                        icon={LockIcon}
+                        title="Phòng đã chốt giờ"
+                        description="Không thêm PR/KTV sau khi chốt giờ."
+                      />
+                    ) : (
+                      <PrPicker branch={branch} orderId={order.id} sessions={order.prSessions ?? []} onAdd={addPr} />
+                    )}
                   </CardContent>
                 </TabsContent>
               )}
@@ -632,7 +677,11 @@ export default function RoomDetailPage() {
               {itemCount} món · mở bởi {order.createdBy?.fullName ?? "—"}
             </CardDescription>
             <CardAction>
-              <Badge variant="destructive">Đang hát</Badge>
+              {locked ? (
+                <Badge variant="warning">Đã chốt {formatTime(order.timeLockedAt!)}</Badge>
+              ) : (
+                <Badge variant="destructive">Đang hát</Badge>
+              )}
             </CardAction>
           </CardHeader>
           {/* Scrolls when the bill is longer than the card; header and Thanh toán stay. */}
@@ -652,7 +701,7 @@ export default function RoomDetailPage() {
               <h3 className="text-sm font-medium">PR/KTV</h3>
               <RoomPrList
                 sessions={order.prSessions ?? []}
-                canEdit={canAssignPr}
+                canEdit={canAssignPrHere}
                 onEnd={endPr}
                 onSave={savePr}
                 onRemove={removePr}
@@ -664,7 +713,7 @@ export default function RoomDetailPage() {
                 className="border p-6 md:p-8"
                 icon={ShoppingBasketIcon}
                 title="Chưa gọi món nào"
-                description={canOperate ? "Chọn món ở thực đơn để thêm vào hóa đơn." : undefined}
+                description={canEditItems ? "Chọn món ở thực đơn để thêm vào hóa đơn." : undefined}
               />
             ) : (
               <ItemGroup className="rounded-lg border">
@@ -679,7 +728,7 @@ export default function RoomDetailPage() {
                         </ItemDescription>
                       </ItemContent>
                       <ItemActions className="ml-auto">
-                        {canOperate ? (
+                        {canEditItems ? (
                           <InputGroup className="h-8 w-26">
                             <InputGroupAddon>
                               <InputGroupButton
@@ -719,7 +768,7 @@ export default function RoomDetailPage() {
                         <span className="w-20 text-right font-medium tabular-nums">
                           {formatNumber(item.price * item.quantity)}
                         </span>
-                        {canOperate && (
+                        {canEditItems && (
                           <Button
                             variant="ghost"
                             size="icon-sm"
@@ -812,6 +861,21 @@ export default function RoomDetailPage() {
         open={checkoutOpen}
         onOpenChange={setCheckoutOpen}
         onCheckedOut={() => router.push(roomsPath)}
+      />
+      <ConfirmDialog
+        open={lockOpen}
+        onOpenChange={setLockOpen}
+        title={locked ? `Mở khóa giờ phòng ${room?.name ?? ""}?` : `Chốt giờ phòng ${room?.name ?? ""}?`}
+        description={
+          locked
+            ? "Tiền giờ tính tiếp từ giờ vào, kể cả khoảng đã khóa. Việc mở khóa được ghi lại."
+            : "Tiền giờ dừng tại bây giờ, PR/KTV đang trong phòng được cho ra. Vẫn gọi thêm món được."
+        }
+        confirmLabel={locked ? "Mở khóa giờ" : "Chốt giờ"}
+        onConfirm={async () => {
+          const ok = await (locked ? unlockTime() : lockTime());
+          if (!ok) return false;
+        }}
       />
       <ConfirmDialog
         open={cancelOpen}

@@ -42,6 +42,29 @@ services:
     # ports:
     #   - "127.0.0.1:4000:4000"
 
+  # Sao lưu database mỗi ngày lúc 09:00 (giờ Việt Nam) vào ./backups và lên WebDAV
+  # (WEBDAV_URL/USERNAME/PASSWORD trong .env). Xem DEPLOYMENT.md mục 5.
+  backup:
+    build: ./backup
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-karaoke_user}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-karaoke_db}
+      WEBDAV_URL: ${WEBDAV_URL:-}
+      WEBDAV_USERNAME: ${WEBDAV_USERNAME:-}
+      WEBDAV_PASSWORD: ${WEBDAV_PASSWORD:-}
+      WEBDAV_KEEP_DAYS: ${WEBDAV_KEEP_DAYS:-30}
+      KEEP_DAYS: ${KEEP_DAYS:-30}
+      BACKUP_CRON: "${BACKUP_CRON:-0 9 * * *}"
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - ./backups:/backups
+
   frontend:
     build:
       context: ./502-frontend

@@ -7,7 +7,8 @@ Hệ thống quản lý chuỗi quán karaoke nhiều cơ sở (`cs1`–`cs5`):
 - **Quỹ**: phiếu thu/chi, tồn đầu kỳ/cuối kỳ; thanh toán tự ghi phiếu thu, nhập hàng đã trả tự ghi phiếu chi.
 - **Báo cáo**: doanh thu theo ngày/tuần/tháng/quý/năm kinh doanh (06:00 → 06:00 hôm sau, giờ mở cửa 11:30 → 06:00), so với kỳ trước, xem toàn chuỗi hoặc từng cơ sở, xuất Excel; doanh thu tính chưa gồm VAT, VAT tách riêng, khớp với phiếu thu bán hàng trong Sổ quỹ. Báo cáo theo nhân viên (CSKH/phục vụ/thu ngân), phòng (công suất), hàng hóa, khung giờ và so sánh cơ sở. Giá vốn bình quân gia quyền chụp trên từng hóa đơn; báo cáo lãi lỗ theo kỳ (doanh thu − giá vốn − chi phí theo khoản mục − hao hụt + thu khác) và nhập – xuất – tồn theo món.
 - **Nhập từ Excel**: nhập mặt hàng, danh mục, phòng, nhân viên và phiếu nhập kho từ file Excel/CSV; người dùng chọn cột nào trong file ứng với trường dữ liệu nào (hệ thống tự đoán theo tiêu đề và nhớ lần trước), xem trước từng dòng rồi mới nhập.
-- **Phân quyền**: Quản lý hệ thống, Quản lý cơ sở, Thu ngân, Nhân viên. Mỗi tài khoản (trừ quản lý hệ thống) chỉ thao tác trong cơ sở của mình.
+- **Phân quyền**: Quản lý hệ thống, Quản lý cơ sở, Thu ngân, Nhân viên, Hội đồng quản trị. Mỗi tài khoản (trừ quản lý hệ thống và HĐQT) chỉ thao tác trong cơ sở của mình. HĐQT xem được mọi trang của mọi cơ sở nhưng không sửa được gì, và là tài khoản duy nhất xóa sạch được dữ liệu một cơ sở hoặc cả hệ thống (nhập lại mật khẩu, có nhật ký).
+- **Sao lưu**: mỗi ngày lúc 09:00 tự sao lưu database vào máy chủ và lên WebDAV (Nextcloud...).
 - **Giao diện**: shadcn/ui, chế độ sáng/tối, dùng được trên máy tính, máy tính bảng và điện thoại.
 
 ## Cấu trúc
@@ -15,9 +16,10 @@ Hệ thống quản lý chuỗi quán karaoke nhiều cơ sở (`cs1`–`cs5`):
 ```
 502-backend/          API: NestJS 11 + Prisma 5 + PostgreSQL
 502-frontend/         Giao diện web: Next.js 16 + React 19 + Tailwind 4 + shadcn/ui
-docker-compose.yml    Chạy cả hệ thống (db + backend + frontend)
+docker-compose.yml    Chạy cả hệ thống (db + backend + frontend + backup)
 .env.docker.example   Mẫu cấu hình cho docker compose
-scripts/backup.sh     Sao lưu database
+backup/               Service sao lưu tự động hằng ngày (máy chủ + WebDAV)
+scripts/backup.sh     Sao lưu database bằng tay
 data/                 Dữ liệu PostgreSQL khi chạy bằng Docker (không commit)
 ```
 

@@ -261,7 +261,7 @@ export interface ProductSales {
   net: number;
   cost: number; // giá vốn: Σ quantity × unit cost at checkout (may carry cents)
   grossProfit: number; // net − cost
-  margin: number | null; // grossProfit / net; null when net is 0
+  margin: number | null; // tỉ suất LN = grossProfit / net; null when net is 0
 }
 
 export interface ProductReportRow extends ProductSales {
@@ -270,7 +270,6 @@ export interface ProductReportRow extends ProductSales {
   unit: string | null;
   categoryName: string | null;
   branchCode: string | null;
-  share: number | null;
 }
 
 export interface ProductReport {

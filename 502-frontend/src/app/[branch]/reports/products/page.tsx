@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils";
 
 const NUM = "text-right tabular-nums";
 
-function SalesCells({ m, share }: { m: ProductSales; share: number | null }) {
+function SalesCells({ m }: { m: ProductSales }) {
   return (
     <>
       <TableCell className={cn(NUM, SHOW_FROM.xs)}>{formatNumber(m.quantity)}</TableCell>
@@ -36,7 +36,6 @@ function SalesCells({ m, share }: { m: ProductSales; share: number | null }) {
       <TableCell className={cn(NUM, SHOW_FROM.md)}>{formatAmount(m.cost)}</TableCell>
       <TableCell className={cn(NUM, SHOW_FROM.sm)}>{formatAmount(m.grossProfit)}</TableCell>
       <TableCell className={cn(NUM, SHOW_FROM.md)}>{formatPercent(m.margin)}</TableCell>
-      <TableCell className={cn(NUM, SHOW_FROM.lg)}>{formatPercent(share)}</TableCell>
     </>
   );
 }
@@ -105,7 +104,7 @@ function ProductsView() {
             <StatTile
               label="Lãi gộp"
               value={formatMoney(t.grossProfit)}
-              footer={`Giá vốn ${formatMoney(t.cost)} · biên ${formatPercent(t.margin)}`}
+              footer={`Giá vốn ${formatMoney(t.cost)} · tỉ suất LN ${formatPercent(t.margin)}`}
             />
             <StatTile label="Thành tiền" value={formatMoney(t.gross)} footer="Số lượng × đơn giá" />
             <StatTile label="Giảm giá" value={formatMoney(t.discount)} footer="Giảm tiền hàng của các hóa đơn" />
@@ -138,7 +137,7 @@ function ProductsView() {
               <Card>
                 <CardHeader>
                   <CardTitle>{PRODUCT_GROUP_LABELS[data.by]}</CardTitle>
-                  <CardDescription>{formatDateRange(data.range)} · Tỷ trọng trên doanh thu thuần.</CardDescription>
+                  <CardDescription>{formatDateRange(data.range)} · Tỉ suất LN = lãi gộp / doanh thu thuần.</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <Table>
@@ -151,8 +150,7 @@ function ProductsView() {
                         <TableHead className="text-right">Doanh thu</TableHead>
                         <TableHead className={cn("text-right", SHOW_FROM.md)}>Giá vốn</TableHead>
                         <TableHead className={cn("text-right", SHOW_FROM.sm)}>Lãi gộp</TableHead>
-                        <TableHead className={cn("text-right", SHOW_FROM.md)}>% biên</TableHead>
-                        <TableHead className={cn("text-right", SHOW_FROM.lg)}>Tỷ trọng</TableHead>
+                        <TableHead className={cn("text-right", SHOW_FROM.md)}>Tỉ suất LN</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -170,7 +168,7 @@ function ProductsView() {
                                 .join(" · ")}
                             </div>
                           </TableCell>
-                          <SalesCells m={row} share={row.share} />
+                          <SalesCells m={row} />
                         </TableRow>
                       ))}
                     </TableBody>
@@ -178,7 +176,7 @@ function ProductsView() {
                       <TableFooter>
                         <TableRow>
                           <TableCell>Tổng</TableCell>
-                          <SalesCells m={t} share={t.net ? 1 : null} />
+                          <SalesCells m={t} />
                         </TableRow>
                       </TableFooter>
                     )}

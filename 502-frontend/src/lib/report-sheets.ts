@@ -160,8 +160,7 @@ function productColumns(by: ProductGroup): ExportColumn<ProductReportRow>[] {
     { header: "Doanh thu thuần (chưa VAT)", type: "money", value: (r) => r.net },
     { header: "Giá vốn", type: "money", value: (r) => r.cost },
     { header: "Lãi gộp", type: "money", value: (r) => r.grossProfit },
-    { header: "% biên", type: "percent", value: (r) => r.margin },
-    { header: "Tỷ trọng", type: "percent", value: (r) => r.share },
+    { header: "Tỉ suất LN", type: "percent", value: (r) => r.margin },
   ];
 }
 
@@ -173,7 +172,6 @@ export function productsSheet(data: ProductReport, name = PRODUCT_GROUP_LABELS[d
     unit: null,
     categoryName: null,
     branchCode: null,
-    share: data.totals.net ? 1 : null,
     ...data.totals,
   });
 }

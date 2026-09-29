@@ -100,7 +100,6 @@ export interface ProductRow extends ProductSales {
   unit: string | null; // by=product only
   categoryName: string | null; // by=product only
   branchCode: string | null;
-  share: number | null; // of the net total; null when it is 0
 }
 
 export interface ProductReport {
@@ -308,7 +307,7 @@ export class BreakdownReportsService {
     // Discounts not rounded yet: the exact shares.
     const groups = new Map<
       number | null,
-      Omit<ProductRow, 'net' | 'share' | 'grossProfit' | 'margin'>
+      Omit<ProductRow, 'net' | 'grossProfit' | 'margin'>
     >();
     for (const line of lines) {
       // productId is a foreign key and products are only soft-deleted, so
@@ -369,7 +368,6 @@ export class BreakdownReportsService {
         cost: rowCost,
         grossProfit,
         margin: rowNet ? grossProfit / rowNet : null,
-        share: net ? rowNet / net : null,
       };
     });
     const grossProfit = roundCost(net - cost);

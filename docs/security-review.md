@@ -32,9 +32,9 @@ Kiểm tra: 113 unit test và 49 e2e test backend đều qua (5 test mới cho p
 
 1. Triển khai bản này (`DEPLOYMENT.md` §4, §6.11). Mọi người sẽ phải đăng nhập lại một lần.
 2. **Đổi mật khẩu tất cả tài khoản mặc định** (`admin`, `ql1_cs1`, `tn1_cs1`, `pv1_cs1`…) sang mật khẩu dài (≥ 10 ký tự); khoá tài khoản không dùng.
-3. Dùng HTTPS và đặt `COOKIE_SECURE=true`. Thêm giới hạn đăng nhập và HSTS cho Nginx (`DEPLOYMENT.md` §3.1).
+3. Dùng HTTPS và đặt `COOKIE_SECURE=true`. Thêm giới hạn đăng nhập theo IP và HSTS: ở Nginx (`DEPLOYMENT.md` §3.1) hoặc ở Cloudflare khi dùng Cloudflare Tunnel (§3.2).
 4. `JWT_SECRET`, `JWT_REFRESH_SECRET`, `POSTGRES_PASSWORD` là chuỗi ngẫu nhiên (`openssl rand -hex 32`), không dùng giá trị mẫu. Không commit file `.env`.
-5. Máy chủ: chỉ mở cổng 80/443 (và SSH), SSH đăng nhập bằng khoá (tắt mật khẩu), bật `unattended-upgrades`, cân nhắc `fail2ban`. Để `APP_PORT=127.0.0.1:3000` khi có Nginx (Docker bỏ qua `ufw`).
+5. Máy chủ: chỉ mở cổng 80/443 (và SSH), SSH đăng nhập bằng khoá (tắt mật khẩu), bật `unattended-upgrades`, cân nhắc `fail2ban`. Để `APP_PORT=127.0.0.1:3000` khi có Nginx hoặc Cloudflare Tunnel (Docker bỏ qua `ufw`); với Cloudflare Tunnel thì không cần mở cổng 80/443.
 6. Nếu máy chủ đặt tại quán: tách mạng Wi-Fi khách khỏi mạng có máy chủ/máy thu ngân. Dùng HTTP trong mạng nội bộ thì mật khẩu đi qua mạng ở dạng rõ.
 7. Bản sao lưu (`backups/`) chứa toàn bộ dữ liệu và mã băm mật khẩu: giữ một bản ở nơi khác, có mã hoá, và thử khôi phục định kỳ.
 8. Chạy `npm audit` định kỳ (hoặc bật Dependabot trên GitHub) và cập nhật Next.js/NestJS khi có bản vá bảo mật.
@@ -42,7 +42,7 @@ Kiểm tra: 113 unit test và 49 e2e test backend đều qua (5 test mới cho p
 ## 4. Rủi ro còn lại, đề xuất làm tiếp
 
 - **Đăng xuất chỉ xoá cookie trên máy đó.** Nếu refresh token bị đánh cắp, kẻ gian vẫn dùng được tới hết 24 giờ, trừ khi đổi mật khẩu hoặc khoá tài khoản. Muốn thu hồi từng phiên (và xem danh sách thiết bị đang đăng nhập) cần bảng `Session` trong database, tức phải thêm migration.
-- **Khoá theo tên đăng nhập có thể bị lợi dụng** để khoá tạm một tài khoản quản lý 15 phút. Giới hạn theo IP của Nginx giảm bớt rủi ro này. Với tài khoản quản lý hệ thống, cân nhắc xác thực 2 lớp (TOTP).
+- **Khoá theo tên đăng nhập có thể bị lợi dụng** để khoá tạm một tài khoản quản lý 15 phút. Giới hạn đăng nhập theo IP (Nginx, hoặc rule Rate limiting của Cloudflare) giảm bớt rủi ro này. Với tài khoản quản lý hệ thống, cân nhắc xác thực 2 lớp (TOTP).
 - Bộ đếm sai mật khẩu nằm trong bộ nhớ, nên khởi động lại backend là mất. Nếu sau này chạy nhiều backend song song thì cần Redis.
 - Mật khẩu tối thiểu vẫn là 6 ký tự: nên nâng lên 8–10 ký tự và chặn các mật khẩu phổ biến (`12345678`…).
 - Chưa có nhật ký bảo mật (đăng nhập thất bại, đổi quyền, đặt lại mật khẩu, khoá tài khoản). Nên ghi lại để điều tra khi có sự cố.

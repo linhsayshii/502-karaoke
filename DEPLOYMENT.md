@@ -13,7 +13,7 @@ Hướng dẫn đưa toàn bộ hệ thống lên máy chủ (VPS Ubuntu hoặc 
 ## 1. Kiến trúc
 
 ```
-Trình duyệt ──► Nginx (80/443, trên máy chủ)
+Trình duyệt ──► Cloudflare Tunnel (cloudflared) hoặc Nginx (80/443), trên máy chủ
                   └─► frontend  (Next.js, cổng APP_PORT → 3000)
                         └─ /api/* ─► backend  (NestJS, cổng 4000, chỉ trong mạng Docker)
                                        └─► db  (PostgreSQL 17, dữ liệu ở ./data/postgres)
@@ -82,7 +82,7 @@ nano .env
 | `COOKIE_SECURE` | `true` khi truy cập qua HTTPS, `false` khi dùng HTTP (mạng nội bộ). Sai giá trị này là bị đăng xuất mỗi khi tải lại trang. |
 | `CORS_ORIGINS` | Không cần đặt (để trống): trình duyệt gọi `/api` trên cùng tên miền. Chỉ đặt khi một trang ở tên miền khác phải gọi API, dạng `https://a.example.com,https://b.example.com`. |
 | `SWAGGER_ENABLED` | `false` (mặc định): tắt trang tài liệu API `/api/docs` để không lộ danh sách API ra Internet. `true` khi cần xem tạm. |
-| `APP_PORT` | Cổng web. Có Nginx phía trước thì đặt `127.0.0.1:3000` để cổng 3000 không lộ ra Internet (Docker bỏ qua `ufw`). Không dùng Nginx thì để `3000` hoặc `80`. |
+| `APP_PORT` | Cổng web. Có Cloudflare Tunnel hoặc Nginx phía trước thì đặt `127.0.0.1:3000` để cổng 3000 không lộ ra Internet (Docker bỏ qua `ufw`). Chỉ dùng trong mạng nội bộ thì để `3000` hoặc `80`. |
 
 Tạo chuỗi ngẫu nhiên:
 
@@ -118,7 +118,7 @@ Mở `http://<địa chỉ máy chủ>:3000`, đăng nhập `admin` / `12345678`
 
 ## 3. Tên miền, Nginx và HTTPS
 
-Bỏ qua phần này nếu chỉ dùng trong mạng nội bộ của quán.
+Bỏ qua phần này nếu chỉ dùng trong mạng nội bộ của quán. **Dùng Cloudflare Tunnel thay cho Nginx thì làm theo [mục 3.2](#32-cloudflare-tunnel-không-dùng-nginx)**, bỏ qua phần Nginx bên dưới.
 
 Trong `.env`: `APP_PORT=127.0.0.1:3000`, rồi `docker compose up -d`.
 
@@ -192,6 +192,24 @@ Rồi trong khối `server` của `/etc/nginx/sites-available/karaoke502` (khố
 ```
 
 `sudo nginx -t && sudo systemctl reload nginx`. Các bước giữ an toàn khác (mật khẩu, sao lưu, cập nhật) xem `docs/security-review.md`.
+
+### 3.2. Cloudflare Tunnel (không dùng Nginx)
+
+`cloudflared` trên máy chủ mở kết nối ra Cloudflare, nên máy chủ không cần mở cổng nào ra Internet. HTTPS do Cloudflare lo.
+
+1. **Không để cổng web lộ ra ngoài.** Trong `.env` đặt `APP_PORT=127.0.0.1:3000`, rồi `docker compose up -d`. Nếu để `3000`, ai biết IP máy chủ cũng vào thẳng được app, bỏ qua Cloudflare, vì Docker mở cổng không qua `ufw`. Kiểm tra từ một máy khác: `curl -m 5 http://<IP máy chủ>:3000` phải **không** kết nối được.
+2. **Trỏ tunnel vào frontend.** Trong Cloudflare Zero Trust → Networks → Tunnels → Public Hostname: Service `HTTP`, URL `localhost:3000`. Chỉ trỏ vào frontend, không trỏ vào backend (cổng 4000 chỉ nằm trong mạng Docker). Nếu `cloudflared` chạy bằng Docker thì cho nó dùng `--network host` để `localhost:3000` là máy chủ.
+3. **Đặt `COOKIE_SECURE=true`** trong `.env`: người dùng vào bằng `https://`, dù tunnel gọi vào bằng `http://`. Bật SSL/TLS → Edge Certificates → **Always Use HTTPS** (và HSTS khi đã chạy ổn).
+4. **Giới hạn đăng nhập theo IP (nên làm).** Không có Nginx thì chỉ còn backend khóa từng tên đăng nhập sau 5 lần sai. Thêm một rule ở Security → WAF → Rate limiting rules (gói Free được 1 rule):
+   - Điều kiện: URI Path bằng `/api/auth/login` **và** Method bằng `POST`.
+   - Đếm theo IP, **20 request mỗi 10 giây**, hành động Block trong 10 giây.
+   - Nhân viên cùng quán dùng chung một IP Wi-Fi và đăng nhập đầu ca, nên đừng đặt thấp hơn.
+5. **Những thứ không bật cho trang này:**
+   - Rocket Loader (hay làm hỏng ứng dụng React/Next.js).
+   - Bot Fight Mode, Under Attack Mode hay rule Challenge áp vào `/api/*`: app gọi API ngầm nên không vượt được thử thách, người dùng sẽ thấy lỗi tải dữ liệu.
+   - Cache Rule "Cache Everything" cho `/api/*` (số liệu phải luôn mới). File tĩnh `/_next/static/*` Cloudflare tự cache, vậy là tốt.
+   - Cloudflare Web Analytics tự chèn script: CSP của app chặn nó (chỉ báo lỗi trong console, không hỏng gì); muốn dùng thì phải thêm vào CSP trong `next.config.ts`.
+6. **Giới hạn của Cloudflare:** request quá 100 giây bị cắt (lỗi 524); báo cáo chậm nhất đo được ~40 giây. Upload tối đa 100 MB (gói Free); nhập Excel tối đa 5 MB.
 
 ## 4. Vận hành hằng ngày
 
@@ -481,7 +499,7 @@ Sau khi cập nhật:
 - Backend dùng 10 kết nối cho bán hàng và 3 kết nối riêng cho báo cáo, nên nhiều người tải báo cáo cùng lúc không làm thu ngân phải chờ. Nhiều người tải cùng một báo cáo cùng lúc thì chỉ tính một lần. Không còn tiến trình query-engine riêng. Khi mọi kết nối đều bận quá lâu, người dùng thấy "Hệ thống đang bận, vui lòng thử lại sau giây lát" thay vì lỗi hệ thống.
 - Migration `20260929180000_stock_movement_order_index` thêm chỉ mục giúp thanh toán, hủy và sửa hóa đơn không phải quét toàn bộ sổ kho. Tạo chỉ mục mất vài giây (2 triệu dòng: dưới 2 giây, 26 MB). Trong lúc đó backend chưa nhận yêu cầu.
 - Đo với dữ liệu 2 năm, 10 thu ngân và 10 người tải báo cáo cùng lúc: thanh toán p95 từ 15,9 s còn 0,18 s, một lượt tải cả bộ báo cáo năm từ 72 s còn 14–36 s. Thêm 600 điện thoại nhân viên vẫn nhẹ (chi tiết `docs/resource-rules.md` §6).
-- **Sửa tay trên máy chủ:** nới giới hạn đăng nhập của Nginx theo mục 3.1 (`rate=30r/m`, `burst=60`), rồi `sudo nginx -t && sudo systemctl reload nginx`. Giới hạn cũ chặn nhân viên cùng quán đăng nhập đầu ca.
+- **Giới hạn đăng nhập theo IP.** Dùng Nginx: nới theo mục 3.1 (`rate=30r/m`, `burst=60`), rồi `sudo nginx -t && sudo systemctl reload nginx` (giới hạn cũ chặn nhân viên cùng quán đăng nhập đầu ca). Dùng Cloudflare Tunnel: không có gì để nới; nên thêm rule giới hạn đăng nhập và kiểm tra `APP_PORT=127.0.0.1:3000` theo mục 3.2.
 - Cần Docker Engine 25 trở lên (mục 2.1). Máy chủ ít RAM có thể giảm các `*_MEM_LIMIT` trong `.env` (xem `.env.docker.example`).
 - Sau khi cập nhật, dọn một lần: `docker image prune -f && docker builder prune -f`.
 
@@ -495,6 +513,9 @@ Sau khi cập nhật:
 | Đăng nhập được nhưng tải lại trang là bị đăng xuất | `COOKIE_SECURE=true` trong khi đang truy cập bằng `http://`. |
 | "Đăng nhập sai quá nhiều lần. Vui lòng thử lại sau … phút." | Tên đăng nhập bị khoá tạm vì sai mật khẩu 5 lần. Chờ hết thời gian, hoặc `docker compose restart backend` để mở khoá ngay. |
 | Nginx báo `502 Bad Gateway` | Container `frontend` chưa chạy, hoặc `proxy_pass` khác cổng `APP_PORT`. |
+| Cloudflare báo lỗi `1033` | Tunnel không kết nối: `cloudflared` chưa chạy trên máy chủ (`sudo systemctl status cloudflared`). |
+| Cloudflare báo `502 Bad Gateway` | `cloudflared` chạy nhưng không gọi được `localhost:3000`: container `frontend` chưa chạy, hoặc URL của Public Hostname sai cổng `APP_PORT`, hoặc `cloudflared` chạy trong Docker mà không dùng `--network host`. |
+| Cloudflare báo `524` | Request chạy quá 100 giây, thường là tải báo cáo nhiều năm lúc máy chủ quá tải. Chọn khoảng ngắn hơn hoặc thử lại sau. |
 | `port is already allocated` | Cổng `APP_PORT` đang bị chương trình khác dùng (ví dụ frontend cũ chạy bằng PM2). |
 | Doanh thu rơi sai ngày | Ngày kinh doanh (06:00 → 06:00 hôm sau, giờ mở cửa 11:30 → 06:00) tính theo giờ container, đã cố định `Asia/Ho_Chi_Minh` trong `docker-compose.yml`. Đừng xoá biến `TZ`. |
 | Doanh thu và phiếu thu bán hàng trong Sổ quỹ lệch nhau | Chỉ xảy ra với hóa đơn thanh toán trước bản cập nhật 6.6 (chưa có phiếu thu tự động), hoặc khi cơ sở vẫn tự lập phiếu thu doanh thu bằng tay. |

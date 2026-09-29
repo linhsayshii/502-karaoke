@@ -36,6 +36,8 @@ model Branch {
   prStaff          PrStaff[]
   prAttendances    PrAttendance[]
   prSessions       PrSession[]
+  orderEvents      OrderEvent[]
+  discountRequests DiscountRequest[]
 }
 
 enum Role {
@@ -84,6 +86,10 @@ model User {
   dataPurgeLogs             DataPurgeLog[]
   prAttendancesRecorded     PrAttendance[]    @relation("PrAttendanceRecordedBy")
   prSessionsCreated         PrSession[]       @relation("PrSessionCreatedBy")
+  ordersTimeLocked          Order[]           @relation("OrderTimeLockedBy")
+  orderEventsCreated        OrderEvent[]      @relation("OrderEventCreatedBy")
+  discountRequestsSent      DiscountRequest[] @relation("DiscountRequestedBy")
+  discountRequestsDecided   DiscountRequest[] @relation("DiscountDecidedBy")
 
   @@index([branchId])
 }
@@ -285,6 +291,12 @@ model Order {
   editedBy   User?     @relation("OrderEditedBy", fields: [editedById], references: [id])
   editReason String?
 
+  // Chốt giờ (phục vụ / thu ngân): the room fee is billed up to this moment
+  // and checkout takes it as endTime. Null while the clock runs.
+  timeLockedAt   DateTime?
+  timeLockedById Int?
+  timeLockedBy   User?     @relation("OrderTimeLockedBy", fields: [timeLockedById], references: [id])
+
   // Số hóa đơn (see orders/bill-number.ts), given when the bill is closed —
   // paid or cancelled — and kept when it is voided or corrected: DDMM of the business
   // day + 4-digit room code + the day's sequence in the branch.
@@ -298,6 +310,9 @@ model Order {
   prSessions      PrSession[]
   stockMovements  StockMovement[]
   fundTransaction FundTransaction?
+
+  events           OrderEvent[]
+  discountRequests DiscountRequest[]
 
   @@unique([branchId, businessDate, billSeq])
   @@index([branchId, status])
@@ -466,4 +481,74 @@ model DataPurgeLog {
   createdAt  DateTime   @default(now())
 
   @@index([createdAt])
+}
+
+// Rare events of a session kept for tracing (for now only unlocking the
+// time). Locking lives on Order, so this grows only when someone unlocks:
+// a few rows per branch per day. Kept like the books, wiped by the data purge.
+model OrderEvent {
+  id          Int            @id @default(autoincrement())
+  branchId    Int
+  branch      Branch         @relation(fields: [branchId], references: [id])
+  orderId     Int
+  order       Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  type        OrderEventType
+  // TIME_UNLOCK: when the time had been locked.
+  lockedAt    DateTime?
+  createdById Int?
+  createdBy   User?          @relation("OrderEventCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime       @default(now())
+
+  @@index([orderId])
+}
+
+enum OrderEventType {
+  TIME_UNLOCK
+}
+
+// Every change of a bill's discounts / VAT: a cashier's request waiting for
+// a manager, a change applied at once (a manager, or a change that needs no
+// approval) and a correction of a paid bill. Both the approval queue and the
+// audit trail. ~30 rows per branch per day (~55k/year for 5 branches); kept
+// like the books, wiped by the data purge.
+model DiscountRequest {
+  id            Int                   @id @default(autoincrement())
+  branchId      Int
+  branch        Branch                @relation(fields: [branchId], references: [id])
+  orderId       Int
+  order         Order                 @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  status        DiscountRequestStatus
+  source        DiscountSource
+  // {discountPercent, discountAmount, hourlyDiscountPercent, hourlyDiscountAmount, taxPercent}
+  before        Json
+  after         Json
+  // The bill total (VAT included) when it was sent, before and after.
+  amountBefore  Decimal
+  amountAfter   Decimal
+  note          String?
+  requestedById Int?
+  requestedBy   User?                 @relation("DiscountRequestedBy", fields: [requestedById], references: [id])
+  createdAt     DateTime              @default(now())
+  decidedById   Int?
+  decidedBy     User?                 @relation("DiscountDecidedBy", fields: [decidedById], references: [id])
+  decidedAt     DateTime?
+  decisionNote  String?
+
+  @@index([branchId, status])
+  @@index([branchId, createdAt])
+  @@index([orderId])
+}
+
+enum DiscountRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+  EXPIRED
+}
+
+enum DiscountSource {
+  REQUEST
+  DIRECT
+  PAID_EDIT
 }

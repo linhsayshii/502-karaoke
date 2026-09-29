@@ -135,15 +135,60 @@ describe('Board role (e2e)', () => {
   });
 
   it('wipes one branch and leaves the others', async () => {
+    // A paid import and a paid bill in cs1: stock, fund and bill rows that
+    // reference each other, so the wipe must delete children first.
+    const manager = as('ql1_cs1');
+    const products = (await manager.get('/products').expect(200))
+      .body as Json[];
+    const beer = products.find((p) => p.name === 'Bia Tiger')!;
+    await manager
+      .post('/inventory/documents', {
+        type: 'IMPORT',
+        lines: [{ productId: beer.id, quantity: 10, unitCost: 15000 }],
+        paymentMethod: 'CASH',
+      })
+      .expect(201);
+    const room = ((await manager.get('/rooms').expect(200)).body as Json[])[0];
+    const order = (
+      await manager.post('/orders', { roomId: room.id }).expect(201)
+    ).body as Json;
+    await api()
+      .patch(`/api/orders/${order.id as number}`)
+      .set('Authorization', `Bearer ${tokens.ql1_cs1}`)
+      .send({ items: [{ productId: beer.id, quantity: 2 }] })
+      .expect(200);
+    await manager
+      .post(`/orders/${order.id as number}/checkout`, { paymentMethod: 'CASH' })
+      .expect(200);
+
     const cs2 = await roomCount('cs2');
     expect(cs2).toBeGreaterThan(0);
-    await as('hdqt1')
+    const cs2Products = (
+      (await as('admin').get('/products?branch=cs2').expect(200)).body as Json[]
+    ).length;
+    const res = await as('hdqt1')
       .post('/admin/purge', {
         scope: 'branch',
         branch: 'cs1',
         password: '12345678',
       })
       .expect(200);
+    const deleted = (res.body as Json).deleted as Record<string, number>;
+    expect(deleted.orders).toBe(1);
+    expect(deleted.orderItems).toBe(1);
+    expect(deleted.stockDocuments).toBe(1);
+    expect(deleted.fundTransactions).toBe(2);
+    expect(deleted.stockMovements).toBe(2);
+    expect(
+      (
+        (await as('admin').get('/products?branch=cs2').expect(200))
+          .body as Json[]
+      ).length,
+    ).toBe(cs2Products);
+    expect(
+      ((await as('admin').get('/funds?branch=cs1').expect(200)).body as Json[])
+        .length,
+    ).toBe(0);
     expect(await roomCount('cs1')).toBe(0);
     expect(await roomCount('cs2')).toBe(cs2);
     // Accounts stay.
@@ -158,5 +203,26 @@ describe('Board role (e2e)', () => {
       expect(await roomCount(branch)).toBe(0);
     }
     await login('admin');
+  });
+
+  it('keeps a log of every purge and refused attempt', async () => {
+    await as('ql1_cs1').get('/admin/purge/logs').expect(403);
+    const logs = (await as('admin').get('/admin/purge/logs').expect(200))
+      .body as Json[];
+    // Newest first: whole system, cs1, wrong password.
+    expect(
+      logs.map((l) => [l.scope, l.branchCode, l.success, l.username]),
+    ).toEqual([
+      ['ALL', null, true, 'hdqt1'],
+      ['BRANCH', 'cs1', true, 'hdqt1'],
+      ['ALL', null, false, 'hdqt1'],
+    ]);
+    expect(logs[1].branchName).toBe('Cơ sở 1');
+    expect((logs[1].deleted as Json).orders).toBe(1);
+    expect(logs[2].deleted).toBeNull();
+    expect(
+      ((await as('hdqt1').get('/admin/purge/logs').expect(200)).body as Json[])
+        .length,
+    ).toBe(3);
   });
 });

@@ -51,7 +51,7 @@ import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
 import { initials } from "@/lib/format";
-import { POSITION_LABELS, ROLE_LABELS } from "@/lib/permissions";
+import { POSITION_LABELS, ROLE_LABELS, can } from "@/lib/permissions";
 import { ONLY_NARROW, SHOW_FROM } from "@/lib/responsive";
 import type { ManagedUser, Role, StaffPosition } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -114,6 +114,9 @@ export default function UsersPage() {
   const { user: me, branches } = useAuth();
   const notify = useNotify();
   const isChainManager = me?.role === "CHAIN_MANAGER";
+  // HĐQT sees the accounts of every branch, read only.
+  const allBranches = can(me, "branch.switch");
+  const canEdit = can(me, "users");
   const noBranchRole = (role: Role) => role === "CHAIN_MANAGER" || role === "BOARD";
   const assignableRoles: Role[] = isChainManager
     ? ["CHAIN_MANAGER", "BRANCH_MANAGER", "CASHIER", "STAFF", "BOARD"]
@@ -129,7 +132,7 @@ export default function UsersPage() {
   } = useApiData<ManagedUser[]>(
     "/users",
     {
-      branch: isChainManager && branchFilter !== ALL ? branchFilter : undefined,
+      branch: allBranches && branchFilter !== ALL ? branchFilter : undefined,
       includeInactive: showInactive,
     },
     [],
@@ -152,7 +155,7 @@ export default function UsersPage() {
   );
 
   const canManage = (u: ManagedUser) =>
-    isChainManager || (u.branchId === me?.branchId && BRANCH_MANAGEABLE.includes(u.role));
+    canEdit && (isChainManager || (u.branchId === me?.branchId && BRANCH_MANAGEABLE.includes(u.role)));
 
   const openForm = (target: ManagedUser | "new") => {
     setEditing(target);
@@ -264,13 +267,15 @@ export default function UsersPage() {
         title="Tài khoản"
         info="Mỗi nhân viên là một tài khoản; vai trò quyết định quyền. Nhân viên CSKH/phục vụ không cần mật khẩu nếu không đăng nhập."
         actions={
-          <>
-            <ExcelImportButton type="users" />
-            <Button onClick={() => openForm("new")}>
-              <UserPlusIcon data-icon="inline-start" />
-              Thêm tài khoản
-            </Button>
-          </>
+          canEdit && (
+            <>
+              <ExcelImportButton type="users" />
+              <Button onClick={() => openForm("new")}>
+                <UserPlusIcon data-icon="inline-start" />
+                Thêm tài khoản
+              </Button>
+            </>
+          )
         }
       />
 
@@ -278,9 +283,11 @@ export default function UsersPage() {
         <CardHeader>
           <CardTitle>Danh sách tài khoản</CardTitle>
           <CardDescription>
-            {isChainManager
-              ? "Quản lý hệ thống quản lý mọi tài khoản của chuỗi."
-              : "Quản lý cơ sở quản lý tài khoản thu ngân và nhân viên của cơ sở mình."}
+            {!canEdit
+              ? "Tài khoản của toàn chuỗi (chỉ xem)."
+              : isChainManager
+                ? "Quản lý hệ thống quản lý mọi tài khoản của chuỗi."
+                : "Quản lý cơ sở quản lý tài khoản thu ngân và nhân viên của cơ sở mình."}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
@@ -296,7 +303,7 @@ export default function UsersPage() {
                 aria-label="Tìm tài khoản"
               />
             </InputGroup>
-            {isChainManager && (
+            {allBranches && (
               <Select value={branchFilter} onValueChange={setBranchFilter}>
                 <SelectTrigger className="md:w-48" aria-label="Cơ sở">
                   <SelectValue />

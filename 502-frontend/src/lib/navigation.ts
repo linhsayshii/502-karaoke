@@ -8,6 +8,7 @@ import {
   FileDown,
   FileSpreadsheet,
   FileText,
+  History,
   LayoutGrid,
   Package,
   PackageMinus,
@@ -54,7 +55,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: ReceiptText,
         permission: "sales.reports",
       },
-      { title: "Cài đặt bán hàng", path: "/sales/settings", icon: Settings2, permission: "sales.settings" },
+      { title: "Cài đặt bán hàng", path: "/sales/settings", icon: Settings2, permission: "catalog.view" },
     ],
   },
   {
@@ -77,7 +78,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: "Nhập hàng", path: "/inventory/import", icon: PackagePlus, permission: "inventory" },
       { title: "Xuất hàng", path: "/inventory/export", icon: PackageMinus, permission: "inventory" },
       { title: "Phiếu kho", path: "/inventory/documents", icon: FileText, permission: "inventory.view" },
-      { title: "Danh mục hàng", path: "/inventory/settings", icon: Tags, permission: "inventory" },
+      { title: "Danh mục hàng", path: "/inventory/settings", icon: Tags, permission: "catalog.view" },
     ],
   },
   {
@@ -87,10 +88,11 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Quản trị",
     items: [
-      { title: "Tài khoản", path: "/admin/users", icon: Users, permission: "users" },
-      { title: "Cơ sở", path: "/admin/branches", icon: Building2, permission: "branches" },
+      { title: "Tài khoản", path: "/admin/users", icon: Users, permission: "users.view" },
+      { title: "Cơ sở", path: "/admin/branches", icon: Building2, permission: "branches.view" },
       { title: "Nhập từ Excel", path: "/imports", icon: FileSpreadsheet, permission: "imports" },
       { title: "Tải báo cáo", path: "/admin/reports", icon: FileDown, permission: "reports" },
+      { title: "Nhật ký xóa dữ liệu", path: "/admin/purge-logs", icon: History, permission: "purge.logs" },
     ],
   },
 ];

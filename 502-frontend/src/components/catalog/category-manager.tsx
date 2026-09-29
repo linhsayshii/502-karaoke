@@ -31,13 +31,17 @@ import { TableEmpty, TableSkeleton } from "@/components/data-states";
 import { useApiData } from "@/hooks/use-api-data";
 import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
+import { useAuth } from "@/components/auth-provider";
 import { useBranchCode } from "@/lib/branch";
+import { can } from "@/lib/permissions";
 import type { Category } from "@/lib/types";
 
 // Product categories of the current branch (used by Bán hàng and Kho).
 export function CategoryManager() {
   const branch = useBranchCode();
   const notify = useNotify();
+  const { user } = useAuth();
+  const canEdit = can(user, "sales.settings");
   const {
     data: categories,
     loading,
@@ -106,22 +110,24 @@ export function CategoryManager() {
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <form onSubmit={add}>
-          <InputGroup className="max-w-md">
-            <InputGroupInput
-              placeholder="Tên danh mục mới"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              aria-label="Tên danh mục mới"
-            />
-            <InputGroupAddon align="inline-end">
-              <InputGroupButton type="submit" variant="default" size="sm" disabled={adding || !newName.trim()}>
-                {adding ? <Spinner /> : <PlusIcon />}
-                Thêm
-              </InputGroupButton>
-            </InputGroupAddon>
-          </InputGroup>
-        </form>
+        {canEdit && (
+          <form onSubmit={add}>
+            <InputGroup className="max-w-md">
+              <InputGroupInput
+                placeholder="Tên danh mục mới"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                aria-label="Tên danh mục mới"
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupButton type="submit" variant="default" size="sm" disabled={adding || !newName.trim()}>
+                  {adding ? <Spinner /> : <PlusIcon />}
+                  Thêm
+                </InputGroupButton>
+              </InputGroupAddon>
+            </InputGroup>
+          </form>
+        )}
 
         <Table>
           <TableHeader>
@@ -151,30 +157,32 @@ export function CategoryManager() {
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon-sm" aria-label={`Thao tác ${category.name}`}>
-                          <MoreHorizontalIcon />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuGroup>
-                          <DropdownMenuItem
-                            onSelect={() => {
-                              setRenaming(category);
-                              setRenameValue(category.name);
-                            }}
-                          >
-                            <PencilIcon />
-                            Đổi tên
-                          </DropdownMenuItem>
-                          <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(category)}>
-                            <Trash2Icon />
-                            Xóa
-                          </DropdownMenuItem>
-                        </DropdownMenuGroup>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    {canEdit && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon-sm" aria-label={`Thao tác ${category.name}`}>
+                            <MoreHorizontalIcon />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuGroup>
+                            <DropdownMenuItem
+                              onSelect={() => {
+                                setRenaming(category);
+                                setRenameValue(category.name);
+                              }}
+                            >
+                              <PencilIcon />
+                              Đổi tên
+                            </DropdownMenuItem>
+                            <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(category)}>
+                              <Trash2Icon />
+                              Xóa
+                            </DropdownMenuItem>
+                          </DropdownMenuGroup>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </TableCell>
                 </TableRow>
               ))

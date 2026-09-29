@@ -74,6 +74,7 @@ model User {
   stockMovements            StockMovement[]
   fundTransactions          FundTransaction[] @relation("FundTransactionCreatedBy")
   fundTransactionsCancelled FundTransaction[] @relation("FundTransactionCancelledBy")
+  dataPurgeLogs             DataPurgeLog[]
 
   @@index([branchId])
 }
@@ -361,4 +362,32 @@ model FundTransaction {
   cancelReason    String?
 
   @@index([branchId, occurredAt])
+}
+
+enum PurgeScope {
+  BRANCH // one branch
+  ALL // the whole system
+}
+
+// Nhật ký xóa dữ liệu (HĐQT): every purge, and every attempt refused for a
+// wrong password. Never deleted by a purge. The account, branch and counts
+// are copied so the entry reads the same whatever changes later.
+model DataPurgeLog {
+  id         Int        @id @default(autoincrement())
+  userId     Int
+  user       User       @relation(fields: [userId], references: [id])
+  username   String
+  fullName   String
+  scope      PurgeScope
+  // Snapshot of the branch wiped (scope BRANCH).
+  branchCode String?
+  branchName String?
+  // false: refused (wrong password), nothing was deleted.
+  success    Boolean
+  // Rows deleted per table (success only).
+  deleted    Json?
+  userAgent  String?
+  createdAt  DateTime   @default(now())
+
+  @@index([createdAt])
 }

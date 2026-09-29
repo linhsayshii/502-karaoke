@@ -30,6 +30,7 @@ import { TableEmpty } from "@/components/data-states";
 import { PageHeader } from "@/components/layout/page-header";
 import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
+import { can } from "@/lib/permissions";
 import { ONLY_NARROW, SHOW_FROM } from "@/lib/responsive";
 import type { Branch } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -42,9 +43,10 @@ interface BranchForm {
   address: string;
 }
 
-// Chain manager only (route guard + backend @Roles).
+// Chain manager manages branches; HĐQT sees them read only (route guard + backend @Roles).
 export default function BranchesPage() {
-  const { branches, reloadBranches } = useAuth();
+  const { user, branches, reloadBranches } = useAuth();
+  const canEdit = can(user, "branches");
   const notify = useNotify();
   const [editing, setEditing] = useState<Branch | "new" | null>(null);
   const [form, setForm] = useState<BranchForm>({ code: "", name: "", address: "" });
@@ -109,10 +111,12 @@ export default function BranchesPage() {
         title="Cơ sở"
         info="Các cơ sở trong chuỗi. Mã cơ sở dùng trên đường dẫn (vd /cs1/...) và không đổi được."
         actions={
-          <Button onClick={() => openForm("new")}>
-            <PlusIcon data-icon="inline-start" />
-            Thêm cơ sở
-          </Button>
+          canEdit && (
+            <Button onClick={() => openForm("new")}>
+              <PlusIcon data-icon="inline-start" />
+              Thêm cơ sở
+            </Button>
+          )
         }
       />
 
@@ -152,32 +156,34 @@ export default function BranchesPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon-sm" aria-label={`Thao tác ${b.name}`}>
-                            <MoreHorizontalIcon />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuGroup>
-                            <DropdownMenuItem onSelect={() => openForm(b)}>
-                              <PencilIcon />
-                              Sửa
-                            </DropdownMenuItem>
-                            {b.active ? (
-                              <DropdownMenuItem variant="destructive" onSelect={() => setDeactivating(b)}>
-                                <PowerOffIcon />
-                                Ngừng hoạt động
+                      {canEdit && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon-sm" aria-label={`Thao tác ${b.name}`}>
+                              <MoreHorizontalIcon />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuGroup>
+                              <DropdownMenuItem onSelect={() => openForm(b)}>
+                                <PencilIcon />
+                                Sửa
                               </DropdownMenuItem>
-                            ) : (
-                              <DropdownMenuItem onSelect={() => setActive(b, true)}>
-                                <PowerIcon />
-                                Hoạt động lại
-                              </DropdownMenuItem>
-                            )}
-                          </DropdownMenuGroup>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                              {b.active ? (
+                                <DropdownMenuItem variant="destructive" onSelect={() => setDeactivating(b)}>
+                                  <PowerOffIcon />
+                                  Ngừng hoạt động
+                                </DropdownMenuItem>
+                              ) : (
+                                <DropdownMenuItem onSelect={() => setActive(b, true)}>
+                                  <PowerIcon />
+                                  Hoạt động lại
+                                </DropdownMenuItem>
+                              )}
+                            </DropdownMenuGroup>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))

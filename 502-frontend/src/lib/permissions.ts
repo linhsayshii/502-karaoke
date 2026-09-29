@@ -21,14 +21,18 @@ export type Permission =
   | "sales.reports" // bill list (view)
   | "reports" // Báo cáo (managers)
   | "reports.chain" // whole-chain reports and branch comparison
-  | "sales.settings" // rooms, categories, products
-  | "inventory" // change stock, catalog
+  | "sales.settings" // change rooms, categories, products
+  | "catalog.view" // rooms, categories, products (read only)
+  | "inventory" // phiếu nhập / xuất, cancelling them
   | "inventory.view" // stock and documents (read only)
   | "funds" // write fund entries
   | "funds.view" // sổ quỹ (read only)
   | "purge" // wipe data (HĐQT only)
-  | "users"
-  | "branches"
+  | "purge.logs" // who wiped what, and refused attempts
+  | "users" // manage accounts
+  | "users.view" // accounts list (read only)
+  | "branches" // manage branches
+  | "branches.view" // branches list (read only)
   | "imports"; // Excel import (each kind also needs its own permission)
 
 const MANAGERS: Role[] = ["CHAIN_MANAGER", "BRANCH_MANAGER"];
@@ -44,13 +48,17 @@ const MATRIX: Record<Permission, Role[]> = {
   reports: READERS,
   "reports.chain": ["CHAIN_MANAGER", "BOARD"],
   "sales.settings": MANAGERS,
+  "catalog.view": READERS,
   inventory: MANAGERS,
   "inventory.view": READERS,
   funds: MANAGERS,
   "funds.view": READERS,
   purge: ["BOARD"],
+  "purge.logs": ["CHAIN_MANAGER", "BOARD"],
   users: MANAGERS,
+  "users.view": READERS,
   branches: ["CHAIN_MANAGER"],
+  "branches.view": ["CHAIN_MANAGER", "BOARD"],
   imports: MANAGERS,
 };
 
@@ -64,15 +72,17 @@ const ROUTE_PERMISSIONS: [string, Permission][] = [
   ["/reports", "reports"],
   ["/sales/statistics", "sales.reports"],
   ["/sales/overview", "sales.reports"],
-  ["/sales/settings", "sales.settings"],
+  ["/sales/settings", "catalog.view"],
   ["/inventory/stock", "inventory.view"],
   ["/inventory/documents", "inventory.view"],
+  ["/inventory/settings", "catalog.view"],
   ["/inventory", "inventory"],
   ["/funds", "funds.view"],
-  ["/admin/branches", "branches"],
+  ["/admin/branches", "branches.view"],
   ["/imports", "imports"],
   ["/admin/reports", "reports"],
-  ["/admin", "users"],
+  ["/admin/purge-logs", "purge.logs"],
+  ["/admin", "users.view"],
 ];
 
 export function canVisit(user: User | null, subPath: string): boolean {

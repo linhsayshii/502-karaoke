@@ -258,6 +258,18 @@ export class OrdersService {
         OrderStatus.PENDING,
         'Hóa đơn đã đóng, không thể sửa',
       );
+      if (user.role === Role.STAFF) {
+        if (!isServerOf(user, order)) {
+          throw new ForbiddenException(SERVE_FORBIDDEN);
+        }
+        // The server only orders: staff, discounts and VAT are not theirs.
+        const onlyItems = Object.entries(dto).every(
+          ([key, value]) => key === 'items' || value === undefined,
+        );
+        if (!onlyItems) {
+          throw new ForbiddenException('Phục vụ chỉ được gọi món');
+        }
+      }
       await this.assertFloorStaff(tx, order.branchId, [
         dto.cskhId,
         dto.serverId,

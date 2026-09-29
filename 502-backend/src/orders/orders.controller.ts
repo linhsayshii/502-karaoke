@@ -71,8 +71,9 @@ export class OrdersController {
     return this.ordersService.findOne(user, id);
   }
 
+  // Sales roles; the server of the room may only change its items (checked in the service).
   @Patch(':id')
-  @Roles(...SALES)
+  @Roles(...SALES, Role.STAFF)
   update(
     @CurrentUser() user: AuthUser,
     @Param('id', ParseIntPipe) id: number,

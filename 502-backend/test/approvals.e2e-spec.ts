@@ -190,4 +190,68 @@ describe('Sales approvals (e2e)', () => {
       expect(paid.endTime).toBe(locked.timeLockedAt);
     });
   });
+
+  describe('server and CSKH', () => {
+    let mine: number;
+    let other: number;
+
+    it('the server orders for their own room only', async () => {
+      mine = (
+        await openRoom(roomIds[3], {
+          serverId: userIds.pv1_cs1,
+          cskhId: userIds.cskh1_cs1,
+        })
+      ).id as number;
+      other = (await openRoom(roomIds[4])).id as number;
+      const items = [{ productId: productIds[0], quantity: 2 }];
+
+      await as('pv1_cs1').get('/products').expect(200);
+      const saved = (
+        await as('pv1_cs1').patch(`/orders/${mine}`, { items }).expect(200)
+      ).body as Json;
+      expect((saved.items as Json[])[0].quantity).toBe(2);
+      await as('pv1_cs1').patch(`/orders/${other}`, { items }).expect(403);
+      await as('pv1_cs1')
+        .patch(`/orders/${mine}`, { cskhId: null })
+        .expect(403);
+      await as('pv1_cs1')
+        .patch(`/orders/${mine}`, { discountPercent: 50 })
+        .expect(403);
+      await as('pv1_cs1').get(`/orders/${mine}/preview`).expect(200);
+      await as('pv1_cs1')
+        .post(`/orders/${mine}/checkout`, { paymentMethod: 'CASH' })
+        .expect(403);
+    });
+
+    it('the server brings PR/KTV into their own room only', async () => {
+      const lan = (
+        (await as('ql1_cs1').post('/pr/staff', { name: 'Mai' }).expect(201))
+          .body as Json
+      ).id as number;
+      await as('pv1_cs1').get('/pr/available').expect(200);
+      await as('pv1_cs1')
+        .post('/pr/sessions', { orderId: other, prStaffId: lan })
+        .expect(403);
+      const res = (
+        await as('pv1_cs1')
+          .post('/pr/sessions', { orderId: mine, prStaffId: lan })
+          .expect(201)
+      ).body as Json;
+      const visit = (res.prSessions as Json[])[0];
+      await as('pv1_cs1')
+        .post(`/pr/sessions/${visit.id as number}/end`)
+        .expect(200);
+    });
+
+    it('the CSKH only looks', async () => {
+      await as('cskh1_cs1').get(`/orders/${mine}`).expect(200);
+      await as('cskh1_cs1').get(`/orders/${mine}/preview`).expect(200);
+      await as('cskh1_cs1')
+        .patch(`/orders/${mine}`, {
+          items: [{ productId: productIds[0], quantity: 1 }],
+        })
+        .expect(403);
+      await as('cskh1_cs1').get(`/orders/${other}`).expect(403);
+    });
+  });
 });

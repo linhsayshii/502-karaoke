@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { OrderStatus, Prisma } from '@prisma/client';
+import { OrderStatus, Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReportPrismaService } from '../prisma/report-prisma.service';
 import { AuthUser } from '../auth/auth-user';
@@ -13,6 +13,7 @@ import { BranchScopeService } from '../common/branch-scope.service';
 import { businessDateOf, businessDatesBetween } from '../common/dates';
 import { periodWhere, utcTimestamp } from '../reports/report-sql';
 import { orderDetailInclude } from '../orders/order-include';
+import { isServerOf, SERVE_FORBIDDEN } from '../orders/order-access';
 import { lockOrderRow } from '../orders/order-lock';
 import { canAssignPr, canViewPr } from './pr.service';
 import { checkSessionTimes } from './pr-session-rules';
@@ -53,7 +54,10 @@ export class PrSessionsService {
     user: AuthUser,
     branch?: string,
   ): Promise<[AvailablePr[], number]> {
-    this.assertAssign(user);
+    // Floor staff pick from it for the room they serve (checked when they add).
+    if (!canAssignPr(user) && user.role !== Role.STAFF) {
+      throw new ForbiddenException('Bạn không có quyền gán PR/KTV vào phòng');
+    }
     const branchId = await this.branchScope.resolveBranchId(user, branch);
     const today = new Date(`${businessDateOf(new Date())}T00:00:00Z`);
     const where: Prisma.PrStaffWhereInput = { branchId, active: true };
@@ -104,9 +108,9 @@ export class PrSessionsService {
 
   // Puts a PR/KTV into an open room from `startAt` (default now).
   add(user: AuthUser, dto: AddPrSessionDto) {
-    this.assertAssign(user);
     return this.prisma.$transaction(async (tx) => {
       const order = await this.lockOpenOrder(tx, user, dto.orderId);
+      this.assertAssignFor(user, order);
       if (order.timeLockedAt) {
         throw new ConflictException('Phòng đã chốt giờ, không thêm PR được');
       }
@@ -137,10 +141,10 @@ export class PrSessionsService {
 
   // "Ra": the visit ends now.
   end(user: AuthUser, id: number) {
-    this.assertAssign(user);
     return this.prisma.$transaction(async (tx) => {
       const visit = await this.getVisit(tx, user, id);
       const order = await this.lockOpenOrder(tx, user, visit.orderId);
+      this.assertAssignFor(user, order);
       // Re-read under the order lock: another device may have ended it.
       const current = await tx.prSession.findUniqueOrThrow({
         where: { id },
@@ -158,10 +162,10 @@ export class PrSessionsService {
 
   // Corrects the times of a visit; endAt null puts the PR back in the room.
   update(user: AuthUser, id: number, dto: UpdatePrSessionDto) {
-    this.assertAssign(user);
     return this.prisma.$transaction(async (tx) => {
       const visit = await this.getVisit(tx, user, id);
       const order = await this.lockOpenOrder(tx, user, visit.orderId);
+      this.assertAssignFor(user, order);
       const current = await tx.prSession.findUniqueOrThrow({
         where: { id },
         select: { startAt: true, endAt: true, prStaffId: true },
@@ -197,10 +201,10 @@ export class PrSessionsService {
 
   // Removes a visit entered by mistake (only while the room is open).
   remove(user: AuthUser, id: number) {
-    this.assertAssign(user);
     return this.prisma.$transaction(async (tx) => {
       const visit = await this.getVisit(tx, user, id);
       const order = await this.lockOpenOrder(tx, user, visit.orderId);
+      this.assertAssignFor(user, order);
       await tx.prSession.delete({ where: { id } });
       return this.detail(tx, order.id);
     });
@@ -261,10 +265,15 @@ export class PrSessionsService {
     };
   }
 
-  private assertAssign(user: AuthUser) {
-    if (!canAssignPr(user)) {
-      throw new ForbiddenException('Bạn không có quyền gán PR/KTV vào phòng');
-    }
+  // Who sells or keeps the PR list, or the server of this very room.
+  private assertAssignFor(user: AuthUser, order: { serverId: number | null }) {
+    if (canAssignPr(user)) return;
+    if (isServerOf(user, order)) return;
+    throw new ForbiddenException(
+      user.role === Role.STAFF
+        ? SERVE_FORBIDDEN
+        : 'Bạn không có quyền gán PR/KTV vào phòng',
+    );
   }
 
   // Order first, then the PR row (the same order everywhere, and checkout

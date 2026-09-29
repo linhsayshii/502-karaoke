@@ -277,8 +277,8 @@ describe('Foundation (e2e)', () => {
       await as('tn1_cs1').get('/products').expect(200);
     });
 
-    it('keeps staff away from the catalog', async () => {
-      await as('pv1_cs1').get('/products').expect(403);
+    it('lets staff read the menu but not open rooms', async () => {
+      await as('pv1_cs1').get('/products').expect(200);
       await as('pv1_cs1').post('/orders', { roomId: 1 }).expect(403);
     });
 
@@ -363,7 +363,8 @@ describe('Foundation (e2e)', () => {
 
       await as('pv1_cs1').get(`/orders/${orderId}`).expect(200);
       await as('cskh1_cs1').get(`/orders/${orderId}`).expect(403);
-      await as('pv1_cs1')
+      // Only the server of the room may order (approvals.e2e-spec.ts).
+      await as('cskh1_cs1')
         .patch(`/orders/${orderId}`, { items: [] })
         .expect(403);
     });

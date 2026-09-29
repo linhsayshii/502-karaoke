@@ -11,6 +11,7 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
@@ -19,6 +20,7 @@ import {
 import { useAuth } from "@/components/auth-provider";
 import { BranchSwitcher } from "@/components/layout/branch-switcher";
 import { NavUser } from "@/components/layout/nav-user";
+import { usePendingDiscounts } from "@/hooks/use-pending-discounts";
 import { useBranchCode } from "@/lib/branch";
 import { findNav, visibleNav } from "@/lib/navigation";
 
@@ -29,6 +31,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
   const branch = useBranchCode();
   const pathname = usePathname();
   const { setOpenMobile } = useSidebar();
+  const pendingDiscounts = usePendingDiscounts();
   const subPath = pathname.replace(/^\/[^/]+/, "");
   const active = findNav(subPath, user);
 
@@ -55,6 +58,9 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
                       <span>{item.title}</span>
                     </Link>
                   </SidebarMenuButton>
+                  {item.path === "/sales/discounts" && !!pendingDiscounts && (
+                    <SidebarMenuBadge>{pendingDiscounts}</SidebarMenuBadge>
+                  )}
                 </SidebarMenuItem>
               ))}
             </SidebarMenu>

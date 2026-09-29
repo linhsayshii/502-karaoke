@@ -1,0 +1,48 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+import { useAuth } from "@/components/auth-provider";
+import { usePolling } from "@/hooks/use-polling";
+import api from "@/lib/api";
+import { can } from "@/lib/permissions";
+
+// Fired by the Duyệt giảm giá page after a decision, so the badge updates at once.
+export const DISCOUNTS_CHANGED = "discounts-changed";
+
+// Requests waiting for this manager (own branch; the chain manager: every
+// branch). Polled every 15 s on managers' screens only; null for others.
+export function usePendingDiscounts(): number | null {
+  const { user } = useAuth();
+  const enabled = can(user, "discounts.approve");
+  const [count, setCount] = useState<number | null>(null);
+  // Last count seen: the toast fires only when it grows, never on first load.
+  const last = useRef<number | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const { data } = await api.get<{ count: number }>("/discount-requests/pending-count");
+      if (last.current !== null && data.count > last.current) {
+        toast.info("Có yêu cầu giảm giá mới chờ duyệt");
+      }
+      last.current = data.count;
+      setCount(data.count);
+    } catch {
+      // The next tick retries.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!enabled) return;
+    // Deferred one tick so the effect body itself sets no state.
+    const first = setTimeout(load, 0);
+    window.addEventListener(DISCOUNTS_CHANGED, load);
+    return () => {
+      clearTimeout(first);
+      window.removeEventListener(DISCOUNTS_CHANGED, load);
+    };
+  }, [enabled, load]);
+  usePolling(load, 15_000, enabled);
+
+  return enabled ? count : null;
+}

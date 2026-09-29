@@ -1,17 +1,9 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import {
-  IsArray,
-  IsInt,
-  IsNumber,
-  IsOptional,
-  Max,
-  Min,
-  ValidateNested,
-} from 'class-validator';
+import { IsArray, IsInt, IsOptional, ValidateNested } from 'class-validator';
 import { OrderItemDto } from './order-item.dto';
 
-// What the cashier may change on an open session.
+// What may change on an open session besides discounts/VAT (see OrderAdjustmentsDto).
 export class UpdateOrderDto {
   @ApiProperty({
     type: [OrderItemDto],
@@ -33,37 +25,4 @@ export class UpdateOrderDto {
   @IsOptional()
   @IsInt()
   serverId?: number | null;
-
-  @ApiProperty({ required: false })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Max(100)
-  discountPercent?: number;
-
-  @ApiProperty({ required: false })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  discountAmount?: number;
-
-  @ApiProperty({ required: false })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Max(100)
-  hourlyDiscountPercent?: number;
-
-  @ApiProperty({ required: false })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  hourlyDiscountAmount?: number;
-
-  @ApiProperty({ required: false })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Max(100)
-  taxPercent?: number;
 }

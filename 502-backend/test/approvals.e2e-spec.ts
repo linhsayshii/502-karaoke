@@ -214,8 +214,16 @@ describe('Sales approvals (e2e)', () => {
       await as('pv1_cs1')
         .patch(`/orders/${mine}`, { cskhId: null })
         .expect(403);
+      // Discounts no longer go through PATCH (dropped by the whitelist); the
+      // server may not send them to /adjustments either (see 'discounts').
+      const ignored = (
+        await as('pv1_cs1')
+          .patch(`/orders/${mine}`, { discountPercent: 50 })
+          .expect(200)
+      ).body as Json;
+      expect(ignored.discountPercent).toBe(0);
       await as('pv1_cs1')
-        .patch(`/orders/${mine}`, { discountPercent: 50 })
+        .post(`/orders/${mine}/adjustments`, { discountPercent: 50 })
         .expect(403);
       await as('pv1_cs1').get(`/orders/${mine}/preview`).expect(200);
       await as('pv1_cs1')
@@ -252,6 +260,75 @@ describe('Sales approvals (e2e)', () => {
         })
         .expect(403);
       await as('cskh1_cs1').get(`/orders/${other}`).expect(403);
+    });
+  });
+
+  describe('discounts', () => {
+    let orderId: number;
+
+    it('a cashier discount waits for a manager and blocks checkout', async () => {
+      orderId = (await openRoom(roomIds[5])).id as number;
+      const url = `/orders/${orderId}/adjustments`;
+      await as('tn1_cs1').post(url, { discountPercent: 10 }).expect(400); // no reason
+      await as('tn1_cs1').post(url, {}).expect(400); // nothing changes
+      const res = (
+        await as('tn1_cs1')
+          .post(url, { discountPercent: 10, note: 'Khách quen' })
+          .expect(201)
+      ).body as Json;
+      expect(res.discountPercent).toBe(0);
+      expect(res.branchManagers).toBe(1);
+      const pending = (res.discountRequests as Json[])[0];
+      expect(pending.note).toBe('Khách quen');
+      await as('tn1_cs1').post(url, { taxPercent: 12 }).expect(409);
+      await as('tn1_cs1')
+        .post(`/orders/${orderId}/checkout`, { paymentMethod: 'CASH' })
+        .expect(409);
+    });
+
+    it('the discount fields no longer go through PATCH /orders/:id', async () => {
+      const res = (
+        await as('tn1_cs1')
+          .patch(`/orders/${orderId}`, { discountPercent: 50 })
+          .expect(200)
+      ).body as Json;
+      expect(res.discountPercent).toBe(0);
+    });
+  });
+
+  describe('discounts applied at once', () => {
+    it('managers apply at once; cashiers do when nothing gets cheaper', async () => {
+      const order = await openRoom(roomIds[6]);
+      const url = `/orders/${order.id as number}/adjustments`;
+      const byManager = (
+        await as('ql1_cs1').post(url, { discountAmount: 20000 }).expect(201)
+      ).body as Json;
+      expect(Number(byManager.discountAmount)).toBe(20000);
+      expect(byManager.discountRequests).toEqual([]);
+      const byCashier = (
+        await as('tn1_cs1')
+          .post(url, { discountAmount: 0, taxPercent: 12 })
+          .expect(201)
+      ).body as Json;
+      expect(Number(byCashier.discountAmount)).toBe(0);
+      expect(byCashier.taxPercent).toBe(12);
+      await as('pv1_cs1').post(url, { taxPercent: 20 }).expect(403);
+      // A request still waiting when the session is cancelled expires.
+      await as('tn1_cs1')
+        .post(url, { discountPercent: 5, note: 'Thử' })
+        .expect(201);
+      await as('tn1_cs1')
+        .post(`/orders/${order.id as number}/cancel`)
+        .expect(403);
+      await as('ql1_cs1')
+        .post(`/orders/${order.id as number}/cancel`)
+        .expect(200);
+      const cancelled = (
+        await as('ql1_cs1')
+          .get(`/orders/${order.id as number}`)
+          .expect(200)
+      ).body as Json;
+      expect(cancelled.discountRequests).toEqual([]);
     });
   });
 });

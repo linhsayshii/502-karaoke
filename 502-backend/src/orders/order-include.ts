@@ -32,9 +32,27 @@ export const prSessionSelect = {
   prStaff: { select: { id: true, code: true, name: true } },
 } satisfies Prisma.PrSessionSelect;
 
+// The request of an open session still waiting for a manager (at most one).
+export const pendingRequestSelect = {
+  id: true,
+  after: true,
+  note: true,
+  amountBefore: true,
+  amountAfter: true,
+  createdAt: true,
+  requestedBy: staffRef,
+} satisfies Prisma.DiscountRequestSelect;
+
 // One order as the room page and the bill sheet show it: the list fields
-// plus the PR/KTV visits (kept out of the 1000-bill list).
+// plus the PR/KTV visits and the pending discount request (kept out of the
+// 1000-bill list).
 export const orderDetailInclude = {
   ...orderInclude,
   prSessions: { select: prSessionSelect, orderBy: { id: 'asc' } },
+  // DiscountRequest(orderId) index.
+  discountRequests: {
+    where: { status: 'PENDING' },
+    select: pendingRequestSelect,
+    take: 1,
+  },
 } satisfies Prisma.OrderInclude;

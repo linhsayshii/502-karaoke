@@ -37,6 +37,10 @@ import { orderDetailInclude, orderInclude } from './order-include';
 import { closeOpenPrSessions, lockOrderRow } from './order-lock';
 import { adjustmentsOf, billedEndOf, billOf } from './bill-of';
 import { isServerOf, SERVE_FORBIDDEN } from './order-access';
+import {
+  assertNoPendingRequest,
+  expirePendingRequests,
+} from './discount-ledger';
 
 type Db = Prisma.TransactionClient;
 
@@ -262,7 +266,8 @@ export class OrdersService {
         if (!isServerOf(user, order)) {
           throw new ForbiddenException(SERVE_FORBIDDEN);
         }
-        // The server only orders: staff, discounts and VAT are not theirs.
+        // The server only orders: the CSKH / server of the room are not
+        // theirs (discounts and VAT go through /adjustments, closed to them).
         const onlyItems = Object.entries(dto).every(
           ([key, value]) => key === 'items' || value === undefined,
         );
@@ -376,6 +381,7 @@ export class OrdersService {
           OrderStatus.PENDING,
           'Hóa đơn đã được thanh toán hoặc đã hủy',
         );
+        await assertNoPendingRequest(tx, id);
 
         // A locked session ends when it was locked: the bill's duration, its
         // business day, number and fund receipt all use that moment.
@@ -466,6 +472,7 @@ export class OrdersService {
         'Chỉ hủy được hóa đơn đang mở',
       );
       const now = new Date();
+      await expirePendingRequests(tx, id, now);
       const number = await nextBillNumber(
         tx,
         order.branchId,

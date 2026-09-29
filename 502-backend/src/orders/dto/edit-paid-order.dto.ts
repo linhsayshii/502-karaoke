@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, IntersectionType } from '@nestjs/swagger';
 import { PaymentMethod } from '@prisma/client';
 import {
   IsDateString,
@@ -11,11 +11,15 @@ import {
   Min,
 } from 'class-validator';
 import { UpdateOrderDto } from './update-order.dto';
+import { OrderAdjustmentsDto } from './order-adjustments.dto';
 
 // What a manager may correct on a paid bill. The bill is recomputed and the
 // stock and fund receipt follow it. Without new times or price the room fee
 // that was charged is kept.
-export class EditPaidOrderDto extends UpdateOrderDto {
+export class EditPaidOrderDto extends IntersectionType(
+  UpdateOrderDto,
+  OrderAdjustmentsDto,
+) {
   @ApiProperty({ required: false, description: 'Giờ vào (ISO)' })
   @IsOptional()
   @IsDateString()

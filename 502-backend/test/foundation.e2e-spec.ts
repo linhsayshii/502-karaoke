@@ -376,7 +376,6 @@ describe('Foundation (e2e)', () => {
             { productId: beerId, quantity: 2, price: 1 },
             { productId: serviceId, quantity: 1 },
           ],
-          taxPercent: 10,
         })
         .expect(200);
       const items = (res.body as Json).items as Json[];
@@ -699,9 +698,10 @@ describe('Foundation (e2e)', () => {
       await as('ql1_cs2')
         .patch(`/rooms/${roomId}`, { pricePerHour: 999000 })
         .expect(200);
-      await as('tn1_cs2')
-        .patch(`/orders/${paidOrderId}`, { discountPercent: 10 })
-        .expect(200);
+      // Discounts go through /adjustments; a manager's apply at once.
+      await as('ql1_cs2')
+        .post(`/orders/${paidOrderId}/adjustments`, { discountPercent: 10 })
+        .expect(201);
 
       let bill = (
         await as('tn1_cs2').get(`/orders/${paidOrderId}/preview`).expect(200)

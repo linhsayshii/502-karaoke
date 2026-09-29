@@ -149,9 +149,15 @@ describe('Reports (e2e)', () => {
           productId: products.find((p) => p.name === name)!.id,
           quantity,
         })),
-        ...adjustments,
       })
       .expect(200);
+    // Discounts / VAT go through /adjustments; the branch's manager
+    // (ql1_csN for tn1_csN) applies them at once.
+    if (Object.keys(adjustments).length > 0) {
+      await as(cashier.replace(/^tn/, 'ql'))
+        .post(`/orders/${opened.id as number}/adjustments`, adjustments)
+        .expect(201);
+    }
     return (
       await as(cashier)
         .post(`/orders/${opened.id as number}/checkout`, { paymentMethod })

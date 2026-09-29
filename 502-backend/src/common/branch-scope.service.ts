@@ -4,9 +4,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth-user';
+import { ALL_BRANCH_ROLES } from '../auth/roles';
 
 export const FORBIDDEN_BRANCH = 'Bạn không có quyền truy cập cơ sở này';
 
@@ -30,7 +30,7 @@ export class BranchScopeService {
     user: AuthUser,
     code?: string,
   ): Promise<number | undefined> {
-    if (user.role !== Role.CHAIN_MANAGER) {
+    if (!ALL_BRANCH_ROLES.includes(user.role)) {
       if (!user.branchId || !user.branch) {
         throw new ForbiddenException('Tài khoản chưa được gán cơ sở');
       }
@@ -48,7 +48,7 @@ export class BranchScopeService {
 
   // For records fetched by id: the record's branch must be the user's branch.
   assertBranchAccess(user: AuthUser, branchId: number) {
-    if (user.role === Role.CHAIN_MANAGER) return;
+    if (ALL_BRANCH_ROLES.includes(user.role)) return;
     if (user.branchId !== branchId) {
       throw new ForbiddenException(FORBIDDEN_BRANCH);
     }

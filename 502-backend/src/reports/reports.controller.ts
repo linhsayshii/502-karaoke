@@ -1,10 +1,9 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Role } from '@prisma/client';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/auth-user';
-import { MANAGERS } from '../auth/roles';
+import { READERS, ALL_BRANCH_ROLES } from '../auth/roles';
 import { ReportsService } from './reports.service';
 import { BreakdownReportsService } from './breakdown-reports.service';
 import { AccountingReportsService } from './accounting-reports.service';
@@ -18,7 +17,7 @@ import {
 
 @ApiTags('reports')
 @ApiBearerAuth()
-@Roles(...MANAGERS)
+@Roles(...READERS)
 @Controller('reports')
 export class ReportsController {
   constructor(
@@ -36,7 +35,7 @@ export class ReportsController {
 
   // Branch comparison: every branch side by side (chain manager only).
   @Get('branches')
-  @Roles(Role.CHAIN_MANAGER)
+  @Roles(...ALL_BRANCH_ROLES)
   branches(@Query() query: ReportQuery) {
     return this.reportsService.branches(query);
   }

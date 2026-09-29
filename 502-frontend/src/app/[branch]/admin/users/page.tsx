@@ -113,9 +113,13 @@ export default function UsersPage() {
   const branch = useBranchCode();
   const { user: me, branches } = useAuth();
   const notify = useNotify();
-  const isChainManager = can(me, "branch.switch");
+  const isChainManager = me?.role === "CHAIN_MANAGER";
+  // HĐQT sees the accounts of every branch, read only.
+  const allBranches = can(me, "branch.switch");
+  const canEdit = can(me, "users");
+  const noBranchRole = (role: Role) => role === "CHAIN_MANAGER" || role === "BOARD";
   const assignableRoles: Role[] = isChainManager
-    ? ["CHAIN_MANAGER", "BRANCH_MANAGER", "CASHIER", "STAFF"]
+    ? ["CHAIN_MANAGER", "BRANCH_MANAGER", "CASHIER", "STAFF", "BOARD"]
     : BRANCH_MANAGEABLE;
 
   const [branchFilter, setBranchFilter] = useState(branch);
@@ -128,7 +132,7 @@ export default function UsersPage() {
   } = useApiData<ManagedUser[]>(
     "/users",
     {
-      branch: isChainManager && branchFilter !== ALL ? branchFilter : undefined,
+      branch: allBranches && branchFilter !== ALL ? branchFilter : undefined,
       includeInactive: showInactive,
     },
     [],
@@ -151,7 +155,7 @@ export default function UsersPage() {
   );
 
   const canManage = (u: ManagedUser) =>
-    isChainManager || (u.branchId === me?.branchId && BRANCH_MANAGEABLE.includes(u.role));
+    canEdit && (isChainManager || (u.branchId === me?.branchId && BRANCH_MANAGEABLE.includes(u.role)));
 
   const openForm = (target: ManagedUser | "new") => {
     setEditing(target);
@@ -184,7 +188,7 @@ export default function UsersPage() {
     fullName: submitted && !form.fullName.trim(),
     username: submitted && isNew && !USERNAME_RE.test(form.username.trim().toLowerCase()),
     password: submitted && isNew && form.password !== "" && form.password.length < 6,
-    branch: submitted && isChainManager && form.role !== "CHAIN_MANAGER" && !form.branchId,
+    branch: submitted && isChainManager && !noBranchRole(form.role) && !form.branchId,
   };
 
   const save = async (e: React.FormEvent) => {
@@ -195,7 +199,7 @@ export default function UsersPage() {
       !form.fullName.trim() ||
       (isNew && !USERNAME_RE.test(form.username.trim().toLowerCase())) ||
       (isNew && form.password !== "" && form.password.length < 6) ||
-      (isChainManager && form.role !== "CHAIN_MANAGER" && !form.branchId);
+      (isChainManager && !noBranchRole(form.role) && !form.branchId);
     if (bad) return;
     const assignment = {
       fullName: form.fullName.trim(),
@@ -203,7 +207,7 @@ export default function UsersPage() {
       role: form.role,
       position: form.position === NONE ? null : form.position,
       // Branch managers can only place accounts in their own branch (server enforces it).
-      branchId: form.role === "CHAIN_MANAGER" ? null : isChainManager ? Number(form.branchId) || null : me?.branchId,
+      branchId: noBranchRole(form.role) ? null : isChainManager ? Number(form.branchId) || null : me?.branchId,
     };
     setSaving(true);
     try {
@@ -263,13 +267,15 @@ export default function UsersPage() {
         title="Tài khoản"
         info="Mỗi nhân viên là một tài khoản; vai trò quyết định quyền. Nhân viên CSKH/phục vụ không cần mật khẩu nếu không đăng nhập."
         actions={
-          <>
-            <ExcelImportButton type="users" />
-            <Button onClick={() => openForm("new")}>
-              <UserPlusIcon data-icon="inline-start" />
-              Thêm tài khoản
-            </Button>
-          </>
+          canEdit && (
+            <>
+              <ExcelImportButton type="users" />
+              <Button onClick={() => openForm("new")}>
+                <UserPlusIcon data-icon="inline-start" />
+                Thêm tài khoản
+              </Button>
+            </>
+          )
         }
       />
 
@@ -277,9 +283,11 @@ export default function UsersPage() {
         <CardHeader>
           <CardTitle>Danh sách tài khoản</CardTitle>
           <CardDescription>
-            {isChainManager
-              ? "Quản lý hệ thống quản lý mọi tài khoản của chuỗi."
-              : "Quản lý cơ sở quản lý tài khoản thu ngân và nhân viên của cơ sở mình."}
+            {!canEdit
+              ? "Tài khoản của toàn chuỗi (chỉ xem)."
+              : isChainManager
+                ? "Quản lý hệ thống quản lý mọi tài khoản của chuỗi."
+                : "Quản lý cơ sở quản lý tài khoản thu ngân và nhân viên của cơ sở mình."}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
@@ -295,7 +303,7 @@ export default function UsersPage() {
                 aria-label="Tìm tài khoản"
               />
             </InputGroup>
-            {isChainManager && (
+            {allBranches && (
               <Select value={branchFilter} onValueChange={setBranchFilter}>
                 <SelectTrigger className="md:w-48" aria-label="Cơ sở">
                   <SelectValue />
@@ -536,7 +544,7 @@ export default function UsersPage() {
                     </Select>
                   </Field>
                 </div>
-                {isChainManager && form.role !== "CHAIN_MANAGER" && (
+                {isChainManager && !noBranchRole(form.role) && (
                   <Field data-invalid={invalid.branch || undefined}>
                     <FieldLabel htmlFor="user-branch">Cơ sở</FieldLabel>
                     <Select value={form.branchId} onValueChange={(branchId) => setForm({ ...form, branchId })}>

@@ -270,7 +270,7 @@ describe('Foundation (e2e)', () => {
         .post('/branches', { code: 'cs9', name: 'CS9' })
         .expect(403);
       await as('admin')
-        .post('/branches', { code: 'cs5', name: 'Cơ sở 5' })
+        .post('/branches', { code: 'cs6', name: 'Cơ sở 6' })
         .expect(201);
     });
 

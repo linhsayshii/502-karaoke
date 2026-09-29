@@ -42,7 +42,9 @@ import { TableEmpty, TableSkeleton } from "@/components/data-states";
 import { useApiData } from "@/hooks/use-api-data";
 import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
+import { useAuth } from "@/components/auth-provider";
 import { useBranchCode } from "@/lib/branch";
+import { can } from "@/lib/permissions";
 import { formatAmount, formatNumber } from "@/lib/format";
 import { ONLY_NARROW, SHOW_FROM } from "@/lib/responsive";
 import type { Category, Product } from "@/lib/types";
@@ -66,6 +68,8 @@ const EMPTY_FORM: ProductForm = { name: "", categoryId: NO_CATEGORY, price: "", 
 export function ProductManager() {
   const branch = useBranchCode();
   const notify = useNotify();
+  const { user } = useAuth();
+  const canEdit = can(user, "sales.settings");
   const {
     data: products,
     loading,
@@ -169,10 +173,12 @@ export function ProductManager() {
         </CardDescription>
         <CardAction className="flex flex-wrap justify-end gap-2">
           <ExcelImportButton type="products" size="sm" />
-          <Button size="sm" onClick={() => openForm("new")}>
-            <PlusIcon data-icon="inline-start" />
-            Thêm mặt hàng
-          </Button>
+          {canEdit && (
+            <Button size="sm" onClick={() => openForm("new")}>
+              <PlusIcon data-icon="inline-start" />
+              Thêm mặt hàng
+            </Button>
+          )}
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
@@ -268,32 +274,34 @@ export function ProductManager() {
                     )}
                   </TableCell>
                   <TableCell>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon-sm" aria-label={`Thao tác ${product.name}`}>
-                          <MoreHorizontalIcon />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuGroup>
-                          <DropdownMenuItem onSelect={() => openForm(product)}>
-                            <PencilIcon />
-                            Sửa
-                          </DropdownMenuItem>
-                          {product.active ? (
-                            <DropdownMenuItem variant="destructive" onSelect={() => setDeactivating(product)}>
-                              <BanIcon />
-                              Ngừng bán
+                    {canEdit && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon-sm" aria-label={`Thao tác ${product.name}`}>
+                            <MoreHorizontalIcon />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuGroup>
+                            <DropdownMenuItem onSelect={() => openForm(product)}>
+                              <PencilIcon />
+                              Sửa
                             </DropdownMenuItem>
-                          ) : (
-                            <DropdownMenuItem onSelect={() => setActive(product, true)}>
-                              <RotateCcwIcon />
-                              Bán lại
-                            </DropdownMenuItem>
-                          )}
-                        </DropdownMenuGroup>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                            {product.active ? (
+                              <DropdownMenuItem variant="destructive" onSelect={() => setDeactivating(product)}>
+                                <BanIcon />
+                                Ngừng bán
+                              </DropdownMenuItem>
+                            ) : (
+                              <DropdownMenuItem onSelect={() => setActive(product, true)}>
+                                <RotateCcwIcon />
+                                Bán lại
+                              </DropdownMenuItem>
+                            )}
+                          </DropdownMenuGroup>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </TableCell>
                 </TableRow>
               ))

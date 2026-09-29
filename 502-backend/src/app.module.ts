@@ -15,6 +15,7 @@ import { BranchesModule } from './branches/branches.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { ImportsModule } from './imports/imports.module';
 import { ReportsModule } from './reports/reports.module';
+import { DataPurgeModule } from './data-purge/data-purge.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { ReportsModule } from './reports/reports.module';
     FundsModule,
     ImportsModule,
     ReportsModule,
+    DataPurgeModule,
   ],
   controllers: [AppController],
   providers: [AppService],

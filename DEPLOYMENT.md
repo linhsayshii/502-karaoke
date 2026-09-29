@@ -17,12 +17,15 @@ Trình duyệt ──► Nginx (80/443, trên máy chủ)
                   └─► frontend  (Next.js, cổng APP_PORT → 3000)
                         └─ /api/* ─► backend  (NestJS, cổng 4000, chỉ trong mạng Docker)
                                        └─► db  (PostgreSQL 17, dữ liệu ở ./data/postgres)
+                                             ▲
+                        backup (09:00 hằng ngày) ┘ ──► ./backups và WebDAV
 ```
 
 | Service    | Build từ         | Ghi chú |
 |------------|------------------|---------|
 | `db`       | `postgres:17-alpine` | Dữ liệu bind mount tại `./data/postgres`, không mất khi xoá/tạo lại container. |
 | `backend`  | `502-backend/Dockerfile` | Mỗi lần khởi động tự chạy `prisma migrate deploy` rồi mới start. Không mở cổng ra ngoài. |
+| `backup`   | `backup/Dockerfile` (`postgres:17-alpine` + curl) | Sao lưu database mỗi ngày lúc 09:00 giờ Việt Nam vào `./backups` và lên WebDAV. Xem mục 5.1. |
 | `frontend` | `502-frontend/Dockerfile` | Cổng duy nhất mở ra ngoài. Trình duyệt gọi `/api` trên cùng domain, Next.js chuyển tiếp sang `http://backend:4000`, nên không cần cấu hình CORS hay domain cho cookie. |
 
 Các file liên quan ở thư mục gốc:
@@ -32,7 +35,8 @@ docker-compose.yml
 .env.docker.example   → sao chép thành .env
 data/postgres/        → dữ liệu PostgreSQL (tự tạo, không commit)
 backups/              → file sao lưu (tự tạo, không commit)
-scripts/backup.sh     → sao lưu database
+scripts/backup.sh     → sao lưu database bằng tay
+backup/               → service sao lưu tự động (09:00 hằng ngày, WebDAV)
 ```
 
 ## 2. Cài đặt lần đầu
@@ -222,22 +226,43 @@ docker compose exec db sh -c 'psql -U "$POSTGRES_USER" "$POSTGRES_DB"'
 
 ### 5.1. Sao lưu
 
+**Tự động mỗi ngày lúc 09:00 giờ Việt Nam** (sau khi ngày kinh doanh kết thúc lúc 06:00): service `backup` chạy `pg_dump`, nén gzip vào `backups/karaoke_YYYYMMDD_HHMMSS.sql.gz`, rồi tải file đó lên WebDAV. Máy chủ hỏng thì bản trên WebDAV vẫn còn.
+
+Cấu hình trong `.env` (xem `.env.docker.example`):
+
+| Biến | Ý nghĩa |
+|------|---------|
+| `WEBDAV_URL` | Thư mục WebDAV chứa bản sao lưu. Thư mục cha phải có sẵn; thư mục cuối được tự tạo. Nextcloud: `https://<máy chủ>/remote.php/dav/files/<tài khoản>/karaoke502`. Để trống: chỉ sao lưu vào `backups/`. |
+| `WEBDAV_USERNAME`, `WEBDAV_PASSWORD` | Tài khoản WebDAV (xác thực Basic, nên luôn dùng `https://`). Với Nextcloud nên tạo *mật khẩu ứng dụng* riêng. Mật khẩu có `$`, `#`, dấu cách… thì đặt trong dấu nháy đơn: `WEBDAV_PASSWORD='a$b #c'`. |
+| `WEBDAV_KEEP_DAYS` | Xoá trên WebDAV các bản cũ hơn số ngày này, theo ngày trong tên file (mặc định 30; `0` = giữ mãi). Chỉ xoá file đúng mẫu `karaoke_YYYYMMDD_HHMMSS.sql.gz`, không đụng file khác. |
+| `KEEP_DAYS` | Như trên, cho thư mục `backups/` trên máy chủ (mặc định 30). |
+| `BACKUP_CRON` | Giờ sao lưu, cú pháp cron theo giờ Việt Nam (mặc định `0 9 * * *`). |
+
+Đổi `.env` xong chạy `docker compose up -d backup`. Khi khởi động, service tự kiểm tra kết nối database và WebDAV rồi ghi kết quả ra log:
+
 ```bash
-./scripts/backup.sh
-# → backups/karaoke_YYYYMMDD_HHMMSS.sql.gz
+docker compose logs backup
+# ... Database: kết nối được.
+# ... WebDAV: kết nối và ghi được vào https://.../karaoke502/
 ```
 
-Script chạy `pg_dump` trong container `db`, nén gzip, và xoá các bản cũ hơn 30 ngày (đổi bằng `KEEP_DAYS=60 ./scripts/backup.sh`). Nếu sao lưu lỗi, script báo lỗi và không để lại file hỏng.
+Mỗi lần sao lưu:
+- Ghi ra file tạm, kiểm tra file nén (`gzip -t`) rồi mới đổi tên, nên không bao giờ để lại file hỏng hay ghi đè bản đã có. Hai lần chạy chồng nhau thì lần sau dừng.
+- Sau khi tải lên, so kích thước file trên WebDAV với bản gốc; khác nhau thì xoá bản trên WebDAV và báo lỗi. Máy chủ WebDAV không cho biết kích thước thì chỉ ghi cảnh báo vào log.
+- Lỗi WebDAV (sai mật khẩu, mất mạng...) không làm mất bản trong `backups/`: lần chạy đó báo lỗi, container chuyển sang `unhealthy` đến lần sao lưu thành công sau.
 
-**Tự động mỗi ngày** lúc 07:00, sau khi ngày kinh doanh kết thúc (06:00). Chạy `crontab -e` rồi thêm dòng:
+**Theo dõi:** `docker compose ps` hiện `backup` là `(healthy)` khi lần sao lưu gần nhất thành công và chưa quá 26 giờ, `(unhealthy)` khi lần gần nhất lỗi hoặc đã hơn 26 giờ không sao lưu được. Chi tiết: `docker compose logs backup` hoặc `backups/backup.log`; trạng thái lần gần nhất ở `backups/.backup-status`.
 
-```cron
-0 7 * * * /opt/karaoke502/scripts/backup.sh >> /opt/karaoke502/backups/backup.log 2>&1
+**Sao lưu ngay** (ví dụ trước khi cập nhật), có tải lên WebDAV:
+
+```bash
+docker compose exec backup backup.sh           # sao lưu và tải lên
+docker compose exec backup backup.sh --check   # chỉ kiểm tra kết nối
 ```
 
-Kiểm tra định kỳ `backups/backup.log`.
+`./scripts/backup.sh` vẫn dùng được để sao lưu tay khi service `backup` không chạy (chỉ lưu vào `backups/`, không tải lên WebDAV; xoá bản cũ hơn `KEEP_DAYS=30` ngày). Máy chủ đã thêm dòng crontab 07:00 theo hướng dẫn cũ thì nên xoá dòng đó (`crontab -e`): service `backup` đã sao lưu hằng ngày. Để lại cũng không hại gì, chỉ thêm một bản mỗi ngày.
 
-Nên chép thư mục `backups/` sang nơi khác (Google Drive, máy khác, `rclone`, `scp`...). Máy chủ hỏng thì bản sao lưu nằm cùng máy cũng mất.
+Tạo thư mục `backups/` trước lần chạy đầu (`mkdir -p backups`), nếu không Docker tự tạo nó với chủ sở hữu root. File do service `backup` tạo mang chủ sở hữu của thư mục `backups/`.
 
 Cũng có thể sao lưu nguyên thư mục `data/` nhưng **phải dừng `db` trước** (`docker compose stop db`), nếu không bản sao có thể hỏng.
 
@@ -256,6 +281,10 @@ docker compose logs --tail=20 backend       # "No pending migrations to apply"
 ```
 
 Khôi phục xong, kiểm tra hệ thống rồi mới xoá `data/postgres.old`.
+
+Máy chủ hỏng hẳn: cài lại theo mục 2, tải bản sao lưu mới nhất từ WebDAV về thư mục `backups/` (qua giao diện web của dịch vụ WebDAV, hoặc `curl -u '<tài khoản>' -o backups/<tên file> '<WEBDAV_URL>/<tên file>'`), rồi khôi phục như trên.
+
+Bản sao lưu tạo bằng `pg_dump` của PostgreSQL 17, nên phải khôi phục vào PostgreSQL 17 trở lên (service `db` dùng `postgres:17-alpine`). Nếu nâng `db` lên bản mới hơn, đổi dòng `FROM` trong `backup/Dockerfile` theo cùng bản.
 
 ## 6. Chuyển từ bản cũ (PM2 + PostgreSQL cài trực tiếp)
 
@@ -424,6 +453,14 @@ Sau khi cập nhật:
 - Sau khi cập nhật, **mọi người phải đăng nhập lại một lần**: phiên cũ (7 ngày) không còn được nhận.
 - Trang `/api/docs` bị tắt (bật lại bằng `SWAGGER_ENABLED=true`). Backend chỉ nhận lời gọi từ chính tên miền của ứng dụng (xem `CORS_ORIGINS`). Bản cũ chạy PM2 với Nginx có `location /api` trên cùng tên miền vẫn hoạt động bình thường.
 
+### 6.12. Hội đồng quản trị, nhật ký xóa dữ liệu, sao lưu WebDAV (migration `20260929000000_board_role`, `20260929120000_purge_log`)
+
+- Vai trò mới **Hội đồng quản trị (HĐQT)**: xem được mọi trang của mọi cơ sở nhưng không sửa được gì. Quản lý hệ thống tạo tài khoản HĐQT trong Quản trị → Tài khoản.
+- HĐQT có mục **Xóa dữ liệu** trong menu tài khoản (cuối thanh bên): xoá toàn bộ hóa đơn, phiếu kho, sổ quỹ, mặt hàng, danh mục và phòng của cơ sở đang xem hoặc của cả hệ thống, sau khi nhập lại mật khẩu. Tài khoản và danh sách cơ sở được giữ. **Không hoàn tác được**, chỉ khôi phục được từ bản sao lưu (mục 5.2).
+- Mỗi lần xoá, và mỗi lần bị từ chối vì sai mật khẩu, được ghi vào **Quản trị → Nhật ký xóa dữ liệu** (quản lý hệ thống và HĐQT xem được). Nhật ký không bị xoá theo dữ liệu.
+- Hai migration chỉ thêm một giá trị enum và một bảng mới, chạy ngay.
+- Thêm service `backup` (mục 5.1). Sau khi cập nhật mã nguồn: `mkdir -p backups`, điền `WEBDAV_URL`, `WEBDAV_USERNAME`, `WEBDAV_PASSWORD` vào `.env`, rồi `docker compose up -d --build` và xem `docker compose logs backup`.
+
 ## 7. Xử lý sự cố
 
 | Hiện tượng | Nguyên nhân / cách xử lý |
@@ -437,4 +474,8 @@ Sau khi cập nhật:
 | `port is already allocated` | Cổng `APP_PORT` đang bị chương trình khác dùng (ví dụ frontend cũ chạy bằng PM2). |
 | Doanh thu rơi sai ngày | Ngày kinh doanh (06:00 → 06:00 hôm sau, giờ mở cửa 11:30 → 06:00) tính theo giờ container, đã cố định `Asia/Ho_Chi_Minh` trong `docker-compose.yml`. Đừng xoá biến `TZ`. |
 | Doanh thu và phiếu thu bán hàng trong Sổ quỹ lệch nhau | Chỉ xảy ra với hóa đơn thanh toán trước bản cập nhật 6.6 (chưa có phiếu thu tự động), hoặc khi cơ sở vẫn tự lập phiếu thu doanh thu bằng tay. |
+| `backup` là `(unhealthy)` | Lần sao lưu gần nhất lỗi: `docker compose logs backup` hoặc `cat backups/.backup-status`. Sửa `.env`, `docker compose up -d backup`, rồi `docker compose exec backup backup.sh`. |
+| Log `backup`: `sai WEBDAV_USERNAME hoặc WEBDAV_PASSWORD (HTTP 401)` | Sai tài khoản WebDAV, hoặc mật khẩu có `$`/`#` mà chưa đặt trong dấu nháy đơn trong `.env`. Nextcloud bật xác thực hai lớp thì phải dùng mật khẩu ứng dụng. |
+| Log `backup`: `thư mục cha của WEBDAV_URL chưa tồn tại (HTTP 409)` | Tạo thư mục cha trên dịch vụ WebDAV (service chỉ tự tạo thư mục cuối của `WEBDAV_URL`). |
+| Log `backup`: `không kết nối được tới WebDAV` | Sai địa chỉ `WEBDAV_URL`, máy chủ WebDAV tắt, hoặc lỗi chứng chỉ HTTPS. Bản trong `backups/` vẫn được tạo. |
 | Hết dung lượng đĩa | `docker system df`, dọn bằng `docker image prune -f` và xoá bớt `backups/` cũ. |

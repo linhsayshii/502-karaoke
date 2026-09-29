@@ -1,4 +1,4 @@
-export type Role = "CHAIN_MANAGER" | "BRANCH_MANAGER" | "CASHIER" | "STAFF";
+export type Role = "CHAIN_MANAGER" | "BRANCH_MANAGER" | "CASHIER" | "STAFF" | "BOARD";
 export type StaffPosition = "CSKH" | "SERVER";
 
 export interface BranchRef {
@@ -465,4 +465,20 @@ export interface ImportResult {
   summary: { create: number; update: number; skip: number; error: number };
   totalAmount?: number; // phiếu nhập kho
   document?: { id: number; code: string; totalAmount: string };
+}
+
+// Nhật ký xóa dữ liệu (GET /admin/purge/logs), newest first.
+export interface DataPurgeLog {
+  id: number;
+  createdAt: string;
+  userId: number;
+  username: string;
+  fullName: string;
+  scope: "BRANCH" | "ALL";
+  branchCode: string | null;
+  branchName: string | null;
+  // false: refused for a wrong password, nothing was deleted.
+  success: boolean;
+  deleted: Record<string, number> | null;
+  userAgent: string | null;
 }

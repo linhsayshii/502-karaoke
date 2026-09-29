@@ -41,7 +41,9 @@ import { TableEmpty, TableSkeleton } from "@/components/data-states";
 import { useApiData } from "@/hooks/use-api-data";
 import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
+import { useAuth } from "@/components/auth-provider";
 import { useBranchCode } from "@/lib/branch";
+import { can } from "@/lib/permissions";
 import { formatNumber } from "@/lib/format";
 import { ONLY_NARROW, SHOW_FROM } from "@/lib/responsive";
 import type { Room, RoomStatus } from "@/lib/types";
@@ -66,6 +68,8 @@ const EMPTY_FORM: RoomForm = { name: "", type: "VIP", pricePerHour: "" };
 export function RoomManager() {
   const branch = useBranchCode();
   const notify = useNotify();
+  const { user } = useAuth();
+  const canEdit = can(user, "sales.settings");
   const {
     data: rooms,
     loading,
@@ -146,10 +150,12 @@ export function RoomManager() {
         <CardDescription>Tên phòng nên bắt đầu bằng số tầng (P101, P203…) để sơ đồ nhóm theo tầng.</CardDescription>
         <CardAction className="flex flex-wrap justify-end gap-2">
           <ExcelImportButton type="rooms" size="sm" />
-          <Button size="sm" onClick={() => openForm("new")}>
-            <PlusIcon data-icon="inline-start" />
-            Thêm phòng
-          </Button>
+          {canEdit && (
+            <Button size="sm" onClick={() => openForm("new")}>
+              <PlusIcon data-icon="inline-start" />
+              Thêm phòng
+            </Button>
+          )}
         </CardAction>
       </CardHeader>
       <CardContent>
@@ -194,34 +200,36 @@ export function RoomManager() {
                     <Badge variant={STATUS[room.status].badge}>{STATUS[room.status].label}</Badge>
                   </TableCell>
                   <TableCell>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon-sm" aria-label={`Thao tác phòng ${room.name}`}>
-                          <MoreHorizontalIcon />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuGroup>
-                          <DropdownMenuItem onSelect={() => openForm(room)}>
-                            <PencilIcon />
-                            Sửa
-                          </DropdownMenuItem>
-                          {room.status !== "ACTIVE" && (
-                            <DropdownMenuItem onSelect={() => toggleMaintenance(room)}>
-                              {room.status === "MAINTENANCE" ? <CheckCircle2Icon /> : <WrenchIcon />}
-                              {room.status === "MAINTENANCE" ? "Mở lại phòng" : "Chuyển sang bảo trì"}
+                    {canEdit && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon-sm" aria-label={`Thao tác phòng ${room.name}`}>
+                            <MoreHorizontalIcon />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuGroup>
+                            <DropdownMenuItem onSelect={() => openForm(room)}>
+                              <PencilIcon />
+                              Sửa
                             </DropdownMenuItem>
-                          )}
-                        </DropdownMenuGroup>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuGroup>
-                          <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(room)}>
-                            <Trash2Icon />
-                            Xóa phòng
-                          </DropdownMenuItem>
-                        </DropdownMenuGroup>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                            {room.status !== "ACTIVE" && (
+                              <DropdownMenuItem onSelect={() => toggleMaintenance(room)}>
+                                {room.status === "MAINTENANCE" ? <CheckCircle2Icon /> : <WrenchIcon />}
+                                {room.status === "MAINTENANCE" ? "Mở lại phòng" : "Chuyển sang bảo trì"}
+                              </DropdownMenuItem>
+                            )}
+                          </DropdownMenuGroup>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuGroup>
+                            <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(room)}>
+                              <Trash2Icon />
+                              Xóa phòng
+                            </DropdownMenuItem>
+                          </DropdownMenuGroup>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </TableCell>
                 </TableRow>
               ))

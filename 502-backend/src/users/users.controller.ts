@@ -16,7 +16,7 @@ import { UsersService } from './users.service';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/auth-user';
-import { MANAGERS, SALES } from '../auth/roles';
+import { MANAGERS, SALES, READERS } from '../auth/roles';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
@@ -35,7 +35,7 @@ export class UsersController {
   }
 
   @Get()
-  @Roles(...MANAGERS)
+  @Roles(...READERS)
   list(@CurrentUser() user: AuthUser, @Query() query: ListUsersQuery) {
     return this.usersService.list(user, query);
   }

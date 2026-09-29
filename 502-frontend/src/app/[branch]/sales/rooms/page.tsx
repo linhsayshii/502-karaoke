@@ -90,6 +90,8 @@ export default function RoomsPage() {
   const notify = useNotify();
   const now = useNow();
   const canOperate = can(user, "sales.operate");
+  // Staff only see the rooms they serve; HĐQT sees every room, read only.
+  const staffView = user?.role === "STAFF";
 
   const [rooms, setRooms] = useState<Room[]>([]);
   const [staff, setStaff] = useState<FloorStaff[]>([]);
@@ -136,11 +138,13 @@ export default function RoomsPage() {
   return (
     <>
       <PageHeader
-        title={canOperate ? "Sơ đồ phòng" : "Phòng đang phục vụ"}
+        title={staffView ? "Phòng đang phục vụ" : "Sơ đồ phòng"}
         info={
           canOperate
             ? "Mở phòng, gọi món và thanh toán. Sơ đồ tự cập nhật mỗi 30 giây."
-            : "Các phòng bạn đang được phân công phục vụ (chỉ xem)."
+            : staffView
+              ? "Các phòng bạn đang được phân công phục vụ (chỉ xem)."
+              : "Sơ đồ phòng của cơ sở (chỉ xem). Tự cập nhật mỗi 30 giây."
         }
         actions={
           <Button variant="outline" onClick={fetchData} disabled={refreshing}>
@@ -180,11 +184,11 @@ export default function RoomsPage() {
       ) : rooms.length === 0 ? (
         <EmptyState
           icon={DoorOpenIcon}
-          title={canOperate ? "Cơ sở chưa có phòng nào" : "Bạn chưa được phân công phòng nào"}
+          title={staffView ? "Bạn chưa được phân công phòng nào" : "Cơ sở chưa có phòng nào"}
           description={
-            canOperate
-              ? "Thêm phòng trong Cài đặt bán hàng để bắt đầu nhận khách."
-              : "Khi thu ngân mở phòng và chọn bạn phục vụ, phòng sẽ hiện ở đây."
+            staffView
+              ? "Khi thu ngân mở phòng và chọn bạn phục vụ, phòng sẽ hiện ở đây."
+              : "Thêm phòng trong Cài đặt bán hàng để bắt đầu nhận khách."
           }
         >
           {can(user, "sales.settings") && (

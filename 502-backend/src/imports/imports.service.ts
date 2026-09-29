@@ -414,8 +414,8 @@ export class ImportsService {
     const roleError = async (role: Role) => {
       if (!roleErrors.has(role)) {
         let error: string | null = null;
-        if (role === Role.CHAIN_MANAGER) {
-          error = 'Không nhập tài khoản quản lý hệ thống từ Excel';
+        if (role === Role.CHAIN_MANAGER || role === Role.BOARD) {
+          error = 'Không nhập tài khoản quản lý hệ thống / HĐQT từ Excel';
         } else {
           try {
             await this.users.checkAssignment(actor, role, branchId);

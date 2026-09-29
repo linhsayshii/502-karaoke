@@ -23,7 +23,7 @@ import { CancelReasonDto } from '../common/dto/cancel-reason.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/auth-user';
-import { MANAGERS, SALES } from '../auth/roles';
+import { MANAGERS, SALES, READERS } from '../auth/roles';
 
 @ApiTags('orders')
 @ApiBearerAuth()
@@ -40,7 +40,7 @@ export class OrdersController {
 
   // Bill history is a report (managers); staff get their open sessions.
   @Get()
-  @Roles(...MANAGERS, Role.STAFF)
+  @Roles(...READERS, Role.STAFF)
   findAll(@CurrentUser() user: AuthUser, @Query() query: ListOrdersQuery) {
     return this.ordersService.findAll(user, query);
   }

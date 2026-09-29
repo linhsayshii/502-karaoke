@@ -8,6 +8,7 @@ import {
   FileDown,
   FileSpreadsheet,
   FileText,
+  History,
   LayoutGrid,
   Package,
   PackageMinus,
@@ -54,7 +55,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: ReceiptText,
         permission: "sales.reports",
       },
-      { title: "Cài đặt bán hàng", path: "/sales/settings", icon: Settings2, permission: "sales.settings" },
+      { title: "Cài đặt bán hàng", path: "/sales/settings", icon: Settings2, permission: "catalog.view" },
     ],
   },
   {
@@ -73,31 +74,32 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Kho",
     items: [
-      { title: "Tồn kho", path: "/inventory/stock", icon: Boxes, permission: "inventory" },
+      { title: "Tồn kho", path: "/inventory/stock", icon: Boxes, permission: "inventory.view" },
       { title: "Nhập hàng", path: "/inventory/import", icon: PackagePlus, permission: "inventory" },
       { title: "Xuất hàng", path: "/inventory/export", icon: PackageMinus, permission: "inventory" },
-      { title: "Phiếu kho", path: "/inventory/documents", icon: FileText, permission: "inventory" },
-      { title: "Danh mục hàng", path: "/inventory/settings", icon: Tags, permission: "inventory" },
+      { title: "Phiếu kho", path: "/inventory/documents", icon: FileText, permission: "inventory.view" },
+      { title: "Danh mục hàng", path: "/inventory/settings", icon: Tags, permission: "catalog.view" },
     ],
   },
   {
     label: "Kế toán",
-    items: [{ title: "Sổ quỹ", path: "/funds", icon: Wallet, permission: "funds" }],
+    items: [{ title: "Sổ quỹ", path: "/funds", icon: Wallet, permission: "funds.view" }],
   },
   {
     label: "Quản trị",
     items: [
-      { title: "Tài khoản", path: "/admin/users", icon: Users, permission: "users" },
-      { title: "Cơ sở", path: "/admin/branches", icon: Building2, permission: "branches" },
+      { title: "Tài khoản", path: "/admin/users", icon: Users, permission: "users.view" },
+      { title: "Cơ sở", path: "/admin/branches", icon: Building2, permission: "branches.view" },
       { title: "Nhập từ Excel", path: "/imports", icon: FileSpreadsheet, permission: "imports" },
       { title: "Tải báo cáo", path: "/admin/reports", icon: FileDown, permission: "reports" },
+      { title: "Nhật ký xóa dữ liệu", path: "/admin/purge-logs", icon: History, permission: "purge.logs" },
     ],
   },
 ];
 
 // Staff only see the rooms they serve.
 function titleFor(item: NavItem, user: User | null) {
-  return item.path === "/sales/rooms" && !can(user, "sales.operate") ? "Phòng đang phục vụ" : item.title;
+  return item.path === "/sales/rooms" && user?.role === "STAFF" ? "Phòng đang phục vụ" : item.title;
 }
 
 // Groups and items the account may use (empty groups dropped), titled as

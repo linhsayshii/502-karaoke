@@ -1,7 +1,7 @@
 import { ConflictException, Injectable } from '@nestjs/common';
-import { Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth-user';
+import { ALL_BRANCH_ROLES } from '../auth/roles';
 import { CreateBranchDto } from './dto/create-branch.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
 
@@ -12,10 +12,9 @@ export class BranchesService {
   // Chain manager sees every branch; everyone else only their own.
   findAll(user: AuthUser) {
     return this.prisma.branch.findMany({
-      where:
-        user.role === Role.CHAIN_MANAGER
-          ? undefined
-          : { id: user.branchId ?? -1 },
+      where: ALL_BRANCH_ROLES.includes(user.role)
+        ? undefined
+        : { id: user.branchId ?? -1 },
       orderBy: { code: 'asc' },
     });
   }

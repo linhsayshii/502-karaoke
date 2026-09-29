@@ -114,6 +114,7 @@ export default function RoomDetailPage() {
   const now = useNow();
   const canOperate = can(user, "sales.operate");
   const canCancel = can(user, "sales.cancel");
+  const staffView = user?.role === "STAFF";
   const roomsPath = `/${branch}/sales/rooms`;
 
   const [room, setRoom] = useState<Room | null>(null);
@@ -287,7 +288,7 @@ export default function RoomDetailPage() {
         <Button asChild variant="outline">
           <Link href={roomsPath}>
             <ArrowLeftIcon data-icon="inline-start" />
-            {canOperate ? "Về sơ đồ phòng" : "Về danh sách phòng"}
+            {staffView ? "Về danh sách phòng" : "Về sơ đồ phòng"}
           </Link>
         </Button>
       </EmptyState>
@@ -396,7 +397,7 @@ export default function RoomDetailPage() {
             <Button variant="outline" asChild>
               <Link href={roomsPath}>
                 <ArrowLeftIcon data-icon="inline-start" />
-                {canOperate ? "Sơ đồ phòng" : "Phòng đang phục vụ"}
+                {staffView ? "Phòng đang phục vụ" : "Sơ đồ phòng"}
               </Link>
             </Button>
             {canCancel && (

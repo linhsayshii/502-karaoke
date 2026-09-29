@@ -434,13 +434,25 @@ describe('Costing and accounting reports (e2e)', () => {
       value: number;
     }
     type Flows = Record<
-      'opening' | 'imports' | 'sales' | 'exports' | 'others' | 'closing',
+      | 'opening'
+      | 'imports'
+      | 'sales'
+      | 'exports'
+      | 'others'
+      | 'stockIn'
+      | 'stockOut'
+      | 'closing',
       Flow
     >;
     interface Ledger {
       branchId: number | null;
       totals: Flows;
-      rows: (Flows & { productId: number; name: string; branchCode: string })[];
+      rows: (Flows & {
+        productId: number;
+        name: string;
+        branchCode: string;
+        averageCost: number;
+      })[];
     }
 
     it("values each flow at its movements' cost", async () => {
@@ -468,6 +480,19 @@ describe('Costing and accounting reports (e2e)', () => {
       expect(beer.others.value).toBeCloseTo(12344.62, 2);
       expect(beer.closing.quantity).toBe(24);
       expect(beer.closing.value).toBeCloseTo(24 * 18404.62, 2);
+      expect(beer.averageCost).toBeCloseTo(18404.62, 2);
+      // Net nhập: the imports less the cancelled one (4 × 30,000).
+      expect(beer.stockIn).toEqual({ quantity: 27, value: 496500 });
+      // Net xuất: sales + exports less the goods put back (the void, the
+      // correction and the cancelled export).
+      expect(beer.stockOut.quantity).toBe(3);
+      expect(beer.stockOut.value).toBeCloseTo(54789.24, 2);
+      expect(
+        beer.opening.quantity + beer.stockIn.quantity - beer.stockOut.quantity,
+      ).toBe(beer.closing.quantity);
+      expect(
+        beer.opening.value + beer.stockIn.value - beer.stockOut.value,
+      ).toBeCloseTo(beer.closing.value, 0);
 
       // Quantities always balance; values up to the rounding of the average.
       expect(

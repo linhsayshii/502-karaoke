@@ -252,8 +252,16 @@ export const INVENTORY_FLOWS: { key: keyof InventoryFlows; label: string }[] = [
   { key: "sales", label: "Bán" },
   { key: "exports", label: "Xuất kho" },
   { key: "others", label: "Hoàn / điều chỉnh" },
+  { key: "stockIn", label: "Nhập" },
+  { key: "stockOut", label: "Xuất" },
   { key: "closing", label: "Tồn cuối" },
 ];
+
+// The groups the report's table shows (web and Excel), left to right: the
+// net nhập and xuất of the stock ledger, so each row balances.
+export const INVENTORY_COLUMNS = INVENTORY_FLOWS.filter((f) =>
+  ["opening", "stockIn", "stockOut", "closing"].includes(f.key),
+);
 
 export function sumFlows(rows: InventoryReportRow[]): InventoryFlows {
   const totals = Object.fromEntries(
@@ -268,23 +276,34 @@ export function sumFlows(rows: InventoryReportRow[]): InventoryFlows {
   return totals;
 }
 
+// The total row (productId 0) sums only the values: quantities of different
+// units do not add up.
+const isTotal = (r: InventoryReportRow) => r.productId === 0;
+
 const inventoryColumns: ExportColumn<InventoryReportRow>[] = [
-  { header: "Món", value: (r) => r.name },
-  { header: "Danh mục", value: (r) => (r.productId ? (r.categoryName ?? NO_CATEGORY) : null) },
-  { header: "Đơn vị", value: (r) => r.unit || null },
-  { header: "Cơ sở", value: (r) => r.branchCode.toUpperCase() || null },
-  ...INVENTORY_FLOWS.flatMap(({ key, label }): ExportColumn<InventoryReportRow>[] => [
-    { header: `${label} – SL`, type: "number", value: (r) => r[key].quantity },
-    { header: `${label} – giá trị`, type: "money", value: (r) => r[key].value },
+  { header: "Tên mặt hàng", value: (r) => r.name },
+  { header: "ĐVT", value: (r) => r.unit || null },
+  { header: "Đơn giá bình quân", type: "money", value: (r) => (isTotal(r) ? null : r.averageCost) },
+  ...INVENTORY_COLUMNS.flatMap(({ key, label }): ExportColumn<InventoryReportRow>[] => [
+    { header: "SL", group: label, type: "number", value: (r) => (isTotal(r) ? null : r[key].quantity) },
+    { header: "Thành tiền", group: label, type: "money", value: (r) => r[key].value },
   ]),
 ];
 
-// `rows`: the products to list (the page may filter them by category).
+const branchColumn: ExportColumn<InventoryReportRow> = {
+  header: "Cơ sở",
+  value: (r) => r.branchCode.toUpperCase() || null,
+};
+
+// `rows`: the products to list (the page may filter them by category). A
+// sheet of several branches names each row's branch in a last column.
 export function inventorySheet(rows: InventoryReportRow[], name = "Xuất nhập tồn"): ExportTable {
-  return toSheet(name, inventoryColumns, rows, {
+  const chain = new Set(rows.map((r) => r.branchCode)).size > 1;
+  return toSheet(name, chain ? [...inventoryColumns, branchColumn] : inventoryColumns, rows, {
     productId: 0,
     name: "Tổng",
     unit: "",
+    averageCost: 0,
     categoryId: null,
     categoryName: null,
     branchCode: "",

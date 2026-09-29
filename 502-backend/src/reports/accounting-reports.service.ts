@@ -48,12 +48,19 @@ export interface StockFlow {
 
 // Nhập – xuất – tồn of a product. imports, sales and exports are positive;
 // others (reversals of cancelled documents and bills, adjustments) signed.
+// stockIn / stockOut are the net nhập / xuất of the stock ledger, so that
+// opening + stockIn − stockOut = closing: stockIn = imports less cancelled
+// imports (and adjustments up), stockOut = sales + exports less the goods
+// put back by voided or corrected bills and cancelled exports (and
+// adjustments down).
 export interface InventoryFlows {
   opening: StockFlow;
   imports: StockFlow;
   sales: StockFlow;
   exports: StockFlow;
   others: StockFlow;
+  stockIn: StockFlow;
+  stockOut: StockFlow;
   closing: StockFlow;
 }
 
@@ -61,6 +68,9 @@ export interface InventoryRow extends InventoryFlows {
   productId: number;
   name: string;
   unit: string;
+  // Đơn giá bình quân: the weighted average cost at the end of the range
+  // (after the last movement before it), which values the closing balance.
+  averageCost: number;
   categoryId: number | null;
   categoryName: string | null;
   branchCode: string;
@@ -79,6 +89,8 @@ const FLOW_KEYS = [
   'sales',
   'exports',
   'others',
+  'stockIn',
+  'stockOut',
   'closing',
 ] as const;
 
@@ -93,6 +105,13 @@ const FLOW_OF: Record<
   REVERSAL: { flow: 'others', sign: 1 },
   ADJUSTMENT: { flow: 'others', sign: 1 },
 };
+
+// Whether a (signed) movement counts as nhập, else as xuất. A reversal out
+// undoes an import; a reversal in puts back what a bill or an export took.
+const isStockIn = (type: StockMovementType, quantity: number) =>
+  type === StockMovementType.IMPORT ||
+  (type === StockMovementType.REVERSAL && quantity < 0) ||
+  (type === StockMovementType.ADJUSTMENT && quantity > 0);
 
 const emptyFlows = (): InventoryFlows =>
   Object.fromEntries(
@@ -226,7 +245,7 @@ export class AccountingReportsService {
           SUM(m."quantity" * m."unitCost")::float8 AS "value"
         FROM "StockMovement" m
         WHERE ${periodWhere(Prisma.sql`m."createdAt"`, Prisma.sql`m."branchId"`, branchId, query.from, query.to)}
-        GROUP BY 1, 2`,
+        GROUP BY 1, 2, m."quantity" > 0`,
     ]);
 
     const flows = new Map<number, InventoryFlows>();
@@ -246,6 +265,8 @@ export class AccountingReportsService {
         };
       }
     }
+    // Every listed product moved before the end of the range, so it has one.
+    const averageCost = new Map(closing.map((b) => [b.productId, b.cost]));
     for (const b of closing) {
       if (b.quantity !== 0) {
         flowsOf(b.productId).closing = {
@@ -254,11 +275,26 @@ export class AccountingReportsService {
         };
       }
     }
+    // Grouped by the sign of the quantity too, so reversals in and out
+    // arrive apart (isStockIn).
+    const add = (
+      entry: StockFlow,
+      sign: number,
+      quantity: number,
+      value: number,
+    ) => {
+      entry.quantity += sign * quantity;
+      entry.value = roundCost(entry.value + sign * value);
+    };
     for (const m of moved) {
       const { flow, sign } = FLOW_OF[m.type];
-      const entry = flowsOf(m.productId)[flow];
-      entry.quantity += sign * m.quantity;
-      entry.value = roundCost(entry.value + sign * m.value);
+      const product = flowsOf(m.productId);
+      add(product[flow], sign, m.quantity, m.value);
+      if (isStockIn(m.type, m.quantity)) {
+        add(product.stockIn, 1, m.quantity, m.value);
+      } else {
+        add(product.stockOut, -1, m.quantity, m.value);
+      }
     }
 
     const products = await this.prisma.product.findMany({
@@ -280,6 +316,7 @@ export class AccountingReportsService {
           categoryId: p.category?.id ?? null,
           categoryName: p.category?.name ?? null,
           branchCode: p.branch.code,
+          averageCost: averageCost.get(p.id) ?? 0,
           ...flows.get(p.id)!,
         }),
       )

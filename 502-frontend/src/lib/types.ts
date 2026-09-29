@@ -313,7 +313,10 @@ export interface ProfitReport {
 }
 
 // GET /reports/inventory (nhập – xuất – tồn). imports, sales and exports
-// are positive; others (reversals, adjustments) signed.
+// are positive; others (reversals, adjustments) signed. stockIn / stockOut
+// are the net nhập / xuất of the stock ledger (opening + stockIn − stockOut
+// = closing): cancelled imports come off stockIn, goods put back by voided
+// bills and cancelled exports off stockOut.
 export interface StockFlow {
   quantity: number;
   value: number;
@@ -325,6 +328,8 @@ export interface InventoryFlows {
   sales: StockFlow;
   exports: StockFlow;
   others: StockFlow;
+  stockIn: StockFlow;
+  stockOut: StockFlow;
   closing: StockFlow;
 }
 
@@ -332,6 +337,8 @@ export interface InventoryReportRow extends InventoryFlows {
   productId: number;
   name: string;
   unit: string;
+  // Đơn giá bình quân at the end of the range (values the closing balance).
+  averageCost: number;
   categoryId: number | null;
   categoryName: string | null;
   branchCode: string;

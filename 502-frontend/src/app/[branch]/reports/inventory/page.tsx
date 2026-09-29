@@ -17,35 +17,30 @@ import { useBranchCode } from "@/lib/branch";
 import { exportWorkbook } from "@/lib/excel-export";
 import { formatAmount, formatMoney, formatNumber } from "@/lib/format";
 import { BUSINESS_DAY_HINT, NO_CATEGORY } from "@/lib/labels";
-import { INVENTORY_FLOWS, inventorySheet, sumFlows } from "@/lib/report-sheets";
+import { INVENTORY_COLUMNS, inventorySheet, sumFlows } from "@/lib/report-sheets";
 import { reportFileName } from "@/lib/reports";
 import { SHOW_FROM } from "@/lib/responsive";
-import type { InventoryFlows, InventoryReport, InventoryReportRow, StockFlow } from "@/lib/types";
+import type { InventoryFlows, InventoryReport, InventoryReportRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const ALL = "all";
 const NONE = "none"; // products without a category
 
-// The columns, left to right, and the narrowest width that shows each.
+// The groups (SL + Thành tiền), left to right, and the narrowest width that
+// shows each: the amounts come first, so Nhập and Xuất show from a small
+// tablet on. ĐVT and đơn giá bình quân get their own columns only on wide
+// screens (DETAILS), with a stand-in under the name below that.
 const SHOW: Partial<Record<keyof InventoryFlows, string>> = {
-  opening: SHOW_FROM.sm,
-  imports: SHOW_FROM.md,
-  sales: SHOW_FROM.md,
-  exports: SHOW_FROM.lg,
-  others: SHOW_FROM.lg,
+  opening: SHOW_FROM.md,
+  stockIn: SHOW_FROM.sm,
+  stockOut: SHOW_FROM.sm,
 };
-const FLOWS = INVENTORY_FLOWS.map((flow) => ({ ...flow, show: SHOW[flow.key] }));
+const DETAILS = SHOW_FROM.lg;
+const DETAILS_STAND_IN = "@5xl/main:hidden";
+const FLOWS = INVENTORY_COLUMNS.map((flow) => ({ ...flow, show: SHOW[flow.key] }));
+const NUM = "text-right tabular-nums";
 
 const categoryKey = (row: InventoryReportRow) => (row.categoryId === null ? NONE : String(row.categoryId));
-
-function FlowCell({ flow, className, strong }: { flow: StockFlow; className?: string; strong?: boolean }) {
-  return (
-    <TableCell className={cn("text-right tabular-nums", strong && "font-medium", className)}>
-      <div>{formatNumber(flow.quantity)}</div>
-      <div className="text-xs font-normal text-muted-foreground">{formatAmount(flow.value)}</div>
-    </TableCell>
-  );
-}
 
 // Nhập – xuất – tồn: per product, the opening balance, what came in and
 // went out (valued at the weighted average cost of each movement) and the
@@ -106,11 +101,11 @@ function InventoryView() {
         <div className={cn("flex flex-col gap-4 transition-opacity md:gap-6", loading && "opacity-60")}>
           <div className="grid gap-4 @xl/main:grid-cols-2 @5xl/main:grid-cols-4">
             <StatTile label="Tồn đầu" value={formatMoney(t.opening.value)} footer={`${formatNumber(t.opening.quantity)} đơn vị hàng`} />
-            <StatTile label="Nhập" value={formatMoney(t.imports.value)} footer={`${formatNumber(t.imports.quantity)} đơn vị hàng`} />
+            <StatTile label="Nhập" value={formatMoney(t.stockIn.value)} footer={`${formatNumber(t.stockIn.quantity)} đơn vị hàng`} />
             <StatTile
-              label="Bán và xuất kho"
-              value={formatMoney(t.sales.value + t.exports.value)}
-              footer={`Bán ${formatMoney(t.sales.value)} · xuất ${formatMoney(t.exports.value)}`}
+              label="Xuất"
+              value={formatMoney(t.stockOut.value)}
+              footer={`Bán ${formatMoney(t.sales.value)} · phiếu xuất ${formatMoney(t.exports.value)}`}
             />
             <StatTile label="Tồn cuối" value={formatMoney(t.closing.value)} footer={`${rows.length} món`} />
           </div>
@@ -119,8 +114,9 @@ function InventoryView() {
             <CardHeader>
               <CardTitle>Theo món</CardTitle>
               <CardDescription>
-                {formatDateRange(data.range)} · Mỗi ô: số lượng, dưới là giá trị (đồng). Tồn cuối = tồn đầu + nhập − bán −
-                xuất + hoàn/điều chỉnh.
+                {formatDateRange(data.range)} · Thành tiền theo giá vốn (đồng); đơn giá bình quân tính đến cuối kỳ. Tồn cuối =
+                tồn đầu + nhập − xuất. Xuất gồm bán hàng và phiếu xuất kho, đã trừ hàng trả lại kho khi hủy hóa đơn hay phiếu
+                xuất; nhập đã trừ phiếu nhập bị hủy.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
@@ -149,40 +145,73 @@ function InventoryView() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Món</TableHead>
+                      <TableHead rowSpan={2}>Tên mặt hàng</TableHead>
+                      <TableHead rowSpan={2} className={DETAILS}>
+                        ĐVT
+                      </TableHead>
+                      <TableHead rowSpan={2} className={cn("text-right whitespace-normal", DETAILS)}>
+                        Đơn giá bình quân
+                      </TableHead>
                       {FLOWS.map((flow) => (
-                        <TableHead key={flow.key} className={cn("text-right", flow.show)}>
+                        <TableHead key={flow.key} colSpan={2} className={cn("border-l text-center", flow.show)}>
                           {flow.label}
                         </TableHead>
                       ))}
+                    </TableRow>
+                    <TableRow>
+                      {FLOWS.map((flow) => [
+                        <TableHead key={`${flow.key}-q`} className={cn("border-l", NUM, flow.show)}>
+                          SL
+                        </TableHead>,
+                        <TableHead key={`${flow.key}-v`} className={cn(NUM, flow.show)}>
+                          Thành tiền
+                        </TableHead>,
+                      ])}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {rows.map((row) => (
                       <TableRow key={row.productId}>
-                        <TableCell className="font-medium">
+                        <TableCell className="font-medium whitespace-normal">
                           <div>{row.name}</div>
                           <div className="text-xs font-normal text-muted-foreground">
-                            {[row.categoryName ?? NO_CATEGORY, row.unit, scope.chain ? row.branchCode.toUpperCase() : null]
+                            {[row.categoryName ?? NO_CATEGORY, scope.chain ? row.branchCode.toUpperCase() : null]
                               .filter(Boolean)
                               .join(" · ")}
                           </div>
+                          <div className={cn("text-xs font-normal text-muted-foreground", DETAILS_STAND_IN)}>
+                            {[row.unit, `ĐG bình quân ${formatAmount(row.averageCost)}`].filter(Boolean).join(" · ")}
+                          </div>
                         </TableCell>
-                        {FLOWS.map((flow) => (
-                          <FlowCell key={flow.key} flow={row[flow.key]} className={flow.show} strong={flow.key === "closing"} />
-                        ))}
+                        <TableCell className={DETAILS}>{row.unit}</TableCell>
+                        <TableCell className={cn(NUM, DETAILS)}>{formatAmount(row.averageCost)}</TableCell>
+                        {FLOWS.map((flow) => {
+                          const strong = flow.key === "closing" && "font-medium";
+                          return [
+                            <TableCell key={`${flow.key}-q`} className={cn("border-l", NUM, strong, flow.show)}>
+                              {formatNumber(row[flow.key].quantity)}
+                            </TableCell>,
+                            <TableCell key={`${flow.key}-v`} className={cn(NUM, strong, flow.show)}>
+                              {formatAmount(row[flow.key].value)}
+                            </TableCell>,
+                          ];
+                        })}
                       </TableRow>
                     ))}
                   </TableBody>
                   {rows.length > 1 && (
                     <TableFooter>
                       <TableRow>
-                        <TableCell>Tổng giá trị</TableCell>
-                        {FLOWS.map((flow) => (
-                          <TableCell key={flow.key} className={cn("text-right tabular-nums", flow.show)}>
+                        <TableCell>Tổng</TableCell>
+                        <TableCell className={DETAILS} />
+                        <TableCell className={DETAILS} />
+                        {FLOWS.map((flow) => [
+                          // Quantities of different units do not add up.
+                          <TableCell key={`${flow.key}-q`} className={cn("border-l", flow.show)} />,
+                          <TableCell key={`${flow.key}-v`} className={cn(NUM, flow.show)}>
                             {formatAmount(t[flow.key].value)}
-                          </TableCell>
-                        ))}
+                          </TableCell>,
+                        ])}
                       </TableRow>
                     </TableFooter>
                   )}

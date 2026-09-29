@@ -89,11 +89,16 @@ const adjustmentsOf = (order: Order): Adjustments => ({
   taxPercent: order.taxPercent,
 });
 
-const quantitiesOf = (order: Order) => {
+// A bill line as shown: saved, or tapped and not saved yet.
+type ShownLine = Line & { price: number; name: string; unit: string };
+
+const quantitiesOf = (lines: Line[]) => {
   const map = new Map<number, number>();
-  for (const item of order.items) map.set(item.productId, (map.get(item.productId) ?? 0) + item.quantity);
+  for (const line of lines) map.set(line.productId, (map.get(line.productId) ?? 0) + line.quantity);
   return map;
 };
+
+const linesOf = (order: Order): Line[] => order.items.map(({ productId, quantity }) => ({ productId, quantity }));
 
 const NONE = "none";
 const ALL = "ALL";
@@ -133,15 +138,25 @@ export default function RoomDetailPage() {
 
   usePageTitle(room ? `Phòng ${room.name}` : null);
 
-  // Item edits are sent one after another, each built on the latest saved
-  // order, so quick taps never overwrite each other.
+  // Edits are sent one after another, each built on the latest saved order,
+  // so quick taps never overwrite each other.
   const orderRef = useRef<Order | null>(null);
   const queueRef = useRef<Promise<void>>(Promise.resolve());
   const pendingRef = useRef(0);
+  // Item taps show at once in `draft` (the whole wanted list); taps made while
+  // a save is out go together in the next one.
+  const [draft, setDraftState] = useState<Line[] | null>(null);
+  const draftRef = useRef<Line[] | null>(null);
+  const syncQueuedRef = useRef(false);
 
   const applyOrder = useCallback((next: Order) => {
     orderRef.current = next;
     setOrder(next);
+  }, []);
+
+  const setDraft = useCallback((lines: Line[] | null) => {
+    draftRef.current = lines;
+    setDraftState(lines);
   }, []);
 
   useEffect(() => {
@@ -160,7 +175,7 @@ export default function RoomDetailPage() {
             ? api.get<FloorStaff[]>("/users/floor-staff", { params: { branch } })
             : Promise.resolve({ data: [] as FloorStaff[] }),
         ]);
-        const mine = quantitiesOf(orderRes.data);
+        const mine = quantitiesOf(orderRes.data.items);
         setOtherPending(new Map(productsRes.data.map((p) => [p.id, (p.pendingQuantity ?? 0) - (mine.get(p.id) ?? 0)])));
         applyOrder(orderRes.data);
         setAdjust(adjustmentsOf(orderRes.data));
@@ -200,19 +215,24 @@ export default function RoomDetailPage() {
     activeOrderId !== undefined,
   );
 
+  // `buildPatch` runs when the edit's turn comes; returning null skips it.
   const saveOrder = useCallback(
-    (buildPatch: (current: Order) => Record<string, unknown>) => {
+    (buildPatch: (current: Order) => Record<string, unknown> | null, onDone?: (saved: boolean) => void) => {
       pendingRef.current += 1;
       queueRef.current = queueRef.current.then(async () => {
         const current = orderRef.current;
+        let saved = false;
         try {
-          if (!current) return;
-          const res = await api.patch<Order>(`/orders/${current.id}`, buildPatch(current));
+          const patch = current && buildPatch(current);
+          if (!current || !patch) return;
+          const res = await api.patch<Order>(`/orders/${current.id}`, patch);
           applyOrder(res.data);
+          saved = true;
         } catch (error) {
           notify.error(error, "Không thể lưu thay đổi");
         } finally {
           pendingRef.current -= 1;
+          onDone?.(saved);
         }
       });
       return queueRef.current;
@@ -220,12 +240,31 @@ export default function RoomDetailPage() {
     [applyOrder, notify],
   );
 
-  const changeItems = (change: (lines: Line[]) => Line[]) =>
-    saveOrder((current) => ({
-      items: change(current.items.map(({ productId, quantity }) => ({ productId, quantity }))).filter(
-        (l) => l.quantity > 0,
-      ),
-    }));
+  const syncItems = () => {
+    if (syncQueuedRef.current) return;
+    syncQueuedRef.current = true;
+    let sent: Line[] | null = null;
+    saveOrder(
+      () => {
+        // Taps from here on wait for the next save.
+        syncQueuedRef.current = false;
+        sent = draftRef.current;
+        return sent && { items: sent };
+      },
+      // Keep the draft while newer taps are still to be sent; after an error
+      // go back to what the server has.
+      (saved) => {
+        if (!saved || draftRef.current === sent) setDraft(null);
+      },
+    );
+  };
+
+  const changeItems = (change: (lines: Line[]) => Line[]) => {
+    const current = orderRef.current;
+    if (!current) return;
+    setDraft(change(draftRef.current ?? linesOf(current)).filter((l) => l.quantity > 0));
+    syncItems();
+  };
 
   const addProduct = (product: Product) =>
     changeItems((lines) =>
@@ -236,6 +275,10 @@ export default function RoomDetailPage() {
 
   const setQuantity = (productId: number, quantity: number) =>
     changeItems((lines) => lines.map((l) => (l.productId === productId ? { ...l, quantity } : l)));
+
+  // Relative to the latest list, so taps faster than a render still all count.
+  const stepQuantity = (productId: number, step: number) =>
+    changeItems((lines) => lines.map((l) => (l.productId === productId ? { ...l, quantity: l.quantity + step } : l)));
 
   const saveAdjustments = async (fields: (keyof Adjustments)[]) => {
     if (!adjust) return;
@@ -260,7 +303,23 @@ export default function RoomDetailPage() {
     }
   };
 
-  const ordered = useMemo(() => (order ? quantitiesOf(order) : new Map<number, number>()), [order]);
+  const shownItems = useMemo<ShownLine[]>(() => {
+    if (!order) return [];
+    const saved = new Map(order.items.map((i) => [i.productId, i]));
+    const productById = new Map(products.map((p) => [p.id, p]));
+    return (draft ?? linesOf(order)).map((line) => {
+      // Saved lines keep their price; a new one takes the menu price, as the server does.
+      const item = saved.get(line.productId);
+      const product = item?.product ?? productById.get(line.productId);
+      return {
+        ...line,
+        price: Number(item?.price ?? productById.get(line.productId)?.price ?? 0),
+        name: product?.name ?? "",
+        unit: product?.unit ?? "",
+      };
+    });
+  }, [order, draft, products]);
+  const ordered = useMemo(() => quantitiesOf(shownItems), [shownItems]);
   const categories = useMemo(() => {
     const names = new Map<string, string>();
     for (const p of products) names.set(p.categoryId ? String(p.categoryId) : OTHER, p.category?.name ?? "Khác");
@@ -301,7 +360,7 @@ export default function RoomDetailPage() {
     startTime: new Date(order.startTime),
     endTime: now,
     pricePerHour: Number(order.pricePerHour),
-    items: order.items.map((i) => ({ price: Number(i.price), quantity: i.quantity })),
+    items: shownItems.map(({ price, quantity }) => ({ price, quantity })),
     ...adjust,
   });
 
@@ -314,7 +373,7 @@ export default function RoomDetailPage() {
   const available = (p: Product) => p.stockQuantity - (otherPending.get(p.id) ?? 0) - (ordered.get(p.id) ?? 0);
   const cskhStaff = staff.filter((s) => s.position === "CSKH");
   const serverStaff = staff.filter((s) => s.position === "SERVER");
-  const itemCount = order.items.reduce((sum, i) => sum + i.quantity, 0);
+  const itemCount = shownItems.reduce((sum, i) => sum + i.quantity, 0);
   const activeAdjustments = [
     adjust.discountPercent || adjust.discountAmount,
     adjust.hourlyDiscountPercent || adjust.hourlyDiscountAmount,
@@ -524,7 +583,7 @@ export default function RoomDetailPage() {
               </p>
             )}
 
-            {order.items.length === 0 ? (
+            {shownItems.length === 0 ? (
               <EmptyState
                 className="border p-6 md:p-8"
                 icon={ShoppingBasketIcon}
@@ -533,14 +592,14 @@ export default function RoomDetailPage() {
               />
             ) : (
               <ItemGroup className="rounded-lg border">
-                {order.items.map((item, index) => (
-                  <Fragment key={item.id}>
+                {shownItems.map((item, index) => (
+                  <Fragment key={item.productId}>
                     {index > 0 && <ItemSeparator />}
                     <Item size="sm" className="rounded-none px-3">
                       <ItemContent className="min-w-32">
-                        <ItemTitle>{item.product.name}</ItemTitle>
+                        <ItemTitle>{item.name}</ItemTitle>
                         <ItemDescription className="tabular-nums">
-                          {formatNumber(item.price)} / {item.product.unit}
+                          {formatNumber(item.price)} / {item.unit}
                         </ItemDescription>
                       </ItemContent>
                       <ItemActions className="ml-auto">
@@ -550,16 +609,16 @@ export default function RoomDetailPage() {
                               <InputGroupButton
                                 size="icon-xs"
                                 aria-label="Bớt 1"
-                                onClick={() => setQuantity(item.productId, item.quantity - 1)}
+                                onClick={() => stepQuantity(item.productId, -1)}
                               >
                                 <MinusIcon />
                               </InputGroupButton>
                             </InputGroupAddon>
                             <InputGroupInput
                               // Remount when the saved quantity changes.
-                              key={`${item.id}-${item.quantity}`}
+                              key={`${item.productId}-${item.quantity}`}
                               inputMode="numeric"
-                              aria-label={`Số lượng ${item.product.name}`}
+                              aria-label={`Số lượng ${item.name}`}
                               className="text-center tabular-nums"
                               defaultValue={item.quantity}
                               onBlur={(e) => {
@@ -572,7 +631,7 @@ export default function RoomDetailPage() {
                               <InputGroupButton
                                 size="icon-xs"
                                 aria-label="Thêm 1"
-                                onClick={() => setQuantity(item.productId, item.quantity + 1)}
+                                onClick={() => stepQuantity(item.productId, 1)}
                               >
                                 <PlusIcon />
                               </InputGroupButton>
@@ -582,13 +641,13 @@ export default function RoomDetailPage() {
                           <span className="text-muted-foreground tabular-nums">×{item.quantity}</span>
                         )}
                         <span className="w-20 text-right font-medium tabular-nums">
-                          {formatNumber(Number(item.price) * item.quantity)}
+                          {formatNumber(item.price * item.quantity)}
                         </span>
                         {canOperate && (
                           <Button
                             variant="ghost"
                             size="icon-sm"
-                            aria-label={`Xóa ${item.product.name}`}
+                            aria-label={`Xóa ${item.name}`}
                             onClick={() => setQuantity(item.productId, 0)}
                           >
                             <Trash2Icon />

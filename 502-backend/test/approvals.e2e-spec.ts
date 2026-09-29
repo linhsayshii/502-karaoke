@@ -261,6 +261,7 @@ describe('Sales approvals (e2e)', () => {
         .expect(403);
       await as('cskh1_cs1').get(`/orders/${other}`).expect(403);
     });
+
   });
 
   describe('discounts', () => {
@@ -395,6 +396,72 @@ describe('Sales approvals (e2e)', () => {
       await as('tn1_cs1')
         .get(`/discount-requests?from=${d}&to=${d}`)
         .expect(403);
+    });
+  });
+
+  describe('a percent never hides an amount', () => {
+    // Billing ignores an amount while its percent is > 0: a cashier must not
+    // get an unapproved amount through by dropping an approved percent.
+    let orderId: number;
+    let url: string;
+
+    it('stores no amount next to a percent', async () => {
+      const room = (
+        await as('ql1_cs1')
+          .post('/rooms', { name: 'E2E-9', pricePerHour: 100000 })
+          .expect(201)
+      ).body as Json;
+      orderId = (await openRoom(room.id as number)).id as number;
+      url = `/orders/${orderId}/adjustments`;
+      const res = (
+        await as('tn1_cs1')
+          .post(url, {
+            discountPercent: 5,
+            discountAmount: 300000,
+            note: 'Khách quen',
+          })
+          .expect(201)
+      ).body as Json;
+      const request = (res.discountRequests as Json[])[0];
+      // Withdrawn before the checks, so the next test starts clean.
+      await as('tn1_cs1')
+        .post(`/discount-requests/${request.id as number}/cancel`)
+        .expect(201);
+      const after = request.after as Json;
+      expect(after.discountPercent).toBe(5);
+      expect(after.discountAmount).toBe(0);
+    });
+
+    it('dropping an approved percent over an amount needs approval', async () => {
+      // The cashier typed 500.000 đ, then 1 %: the manager approves "1 %".
+      const sent = (
+        await as('tn1_cs1')
+          .post(url, {
+            discountAmount: 500000,
+            discountPercent: 1,
+            note: 'Khách quen',
+          })
+          .expect(201)
+      ).body as Json;
+      const id = (sent.discountRequests as Json[])[0].id as number;
+      await as('ql1_cs1').post(`/discount-requests/${id}/approve`).expect(201);
+
+      // Dropping the percent must not bring the 500.000 đ in unapproved.
+      const res = (
+        await as('tn1_cs1')
+          .post(url, {
+            discountPercent: 0,
+            discountAmount: 500000,
+            note: 'Đổi sang tiền',
+          })
+          .expect(201)
+      ).body as Json;
+      expect(res.discountPercent).toBe(1);
+      expect(Number(res.discountAmount)).toBe(0);
+      // orderDetailInclude only carries the PENDING request.
+      const [pending] = res.discountRequests as Json[];
+      expect(pending.note).toBe('Đổi sang tiền');
+      expect((pending.after as Json).discountAmount).toBe(500000);
     });
   });
 

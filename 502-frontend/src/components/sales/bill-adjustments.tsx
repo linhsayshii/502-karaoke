@@ -65,7 +65,9 @@ export function BillAdjustments({ order, billFor, canApply, onSubmit, onCancelRe
   };
 
   // Percent follows the live bill (the server applies it at checkout);
-  // typing an amount makes it a fixed sum.
+  // typing an amount makes it a fixed sum. Only one of the pair is kept: a
+  // percent > 0 wins in billing, so an amount left behind it would come back
+  // unseen once the percent is dropped (the server stores it as 0 too).
   const row = (id: string, label: string, pk: PercentKey, ak: AmountKey) => (
     <Field className={ADJUSTMENT_ROW}>
       <FieldLabel htmlFor={`${id}-percent`} className={ADJUSTMENT_LABEL}>
@@ -81,7 +83,7 @@ export function BillAdjustments({ order, billFor, canApply, onSubmit, onCancelRe
           disabled={!!pending}
           className="text-right tabular-nums"
           value={draft[pk]}
-          onChange={(e) => setDraft({ ...draft, [pk]: clampPercent(e.target.value) })}
+          onChange={(e) => setDraft({ ...draft, [pk]: clampPercent(e.target.value), [ak]: 0 })}
         />
         <InputGroupAddon align="inline-end">
           <InputGroupText>%</InputGroupText>

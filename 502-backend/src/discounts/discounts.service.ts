@@ -21,6 +21,7 @@ import {
   Adjustments,
   changedKeys,
   needsApproval,
+  normalizeAdjustments,
   pickAdjustments,
 } from '../orders/discount-rules';
 import {
@@ -97,7 +98,11 @@ export class DiscountsService {
     return this.prisma.$transaction(async (tx) => {
       const order = await this.lockPendingOrder(tx, user, orderId);
       const before = adjustmentsOf(order);
-      const after: Adjustments = { ...before, ...pickAdjustments(dto) };
+      // Stored (and requested) without an amount behind a percent > 0.
+      const after = normalizeAdjustments({
+        ...before,
+        ...pickAdjustments(dto),
+      });
       if (changedKeys(before, after).length === 0) {
         throw new BadRequestException('Không có thay đổi');
       }

@@ -94,7 +94,11 @@ function MovementHistory({ product }: { product: LedgerProduct }) {
             <TableHead>Thời gian</TableHead>
             <TableHead>Loại</TableHead>
             <TableHead className="hidden sm:table-cell">Chứng từ</TableHead>
-            <TableHead className="text-right">Số lượng</TableHead>
+            <TableHead className="text-right">
+              {/* A phone has room for the short header only. */}
+              <span className="sm:hidden">SL</span>
+              <span className="hidden sm:inline">Số lượng</span>
+            </TableHead>
             <TableHead className="text-right">Tồn sau</TableHead>
             <TableHead className="hidden sm:table-cell">Người thực hiện</TableHead>
           </TableRow>
@@ -111,13 +115,13 @@ function MovementHistory({ product }: { product: LedgerProduct }) {
                 <TableCell>
                   <Badge variant={MOVEMENT_BADGE[m.type]}>{MOVEMENT_LABELS[m.type]}</Badge>
                 </TableCell>
-                <TableCell className="hidden max-w-44 truncate sm:table-cell">{source(m)}</TableCell>
+                <TableCell className="hidden whitespace-normal wrap-anywhere sm:table-cell">{source(m)}</TableCell>
                 <TableCell className={cn("text-right font-medium tabular-nums", m.quantity < 0 && "text-destructive")}>
                   {m.quantity > 0 ? "+" : ""}
                   {formatNumber(m.quantity)}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">{formatNumber(m.balanceAfter)}</TableCell>
-                <TableCell className="hidden sm:table-cell">{m.createdBy?.fullName ?? "—"}</TableCell>
+                <TableCell className="hidden whitespace-normal sm:table-cell">{m.createdBy?.fullName ?? "—"}</TableCell>
               </TableRow>
             ))
           )}

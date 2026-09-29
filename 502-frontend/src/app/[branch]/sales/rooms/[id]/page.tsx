@@ -373,7 +373,7 @@ export default function RoomDetailPage() {
     return (
       <>
         <Skeleton className="h-12 w-72" />
-        <div className="grid gap-4 @4xl/main:grid-cols-[minmax(0,1fr)_26rem]">
+        <div className="grid gap-4 @2xl/main:grid-cols-2">
           <Skeleton className="h-[28rem] rounded-xl" />
           <Skeleton className="h-[28rem] rounded-xl" />
         </div>
@@ -516,7 +516,7 @@ export default function RoomDetailPage() {
       <div
         className={cn(
           "grid items-start gap-4 md:gap-6",
-          showLeft && "@4xl/main:grid-cols-[minmax(0,1fr)_24rem] @6xl/main:grid-cols-[minmax(0,1fr)_28rem]",
+          showLeft && "@2xl/main:grid-cols-2",
         )}
       >
         {showLeft && (
@@ -584,36 +584,38 @@ export default function RoomDetailPage() {
                         }
                       />
                     ) : (
-                      <div className="grid grid-cols-2 gap-2 @lg/menu:grid-cols-3 @3xl/menu:grid-cols-4">
-                        {menu.map((product) => {
+                      <ItemGroup className="overflow-hidden rounded-lg border">
+                        {menu.map((product, index) => {
                           const left = available(product);
                           const inBill = ordered.get(product.id);
                           return (
-                            <Button
-                              key={product.id}
-                              variant="outline"
-                              className="relative h-auto min-h-24 flex-col items-start justify-between gap-2 p-3 text-left whitespace-normal"
-                              onClick={() => addProduct(product)}
-                            >
-                              {inBill && <Badge className="absolute top-2 right-2 tabular-nums">×{inBill}</Badge>}
-                              <span className="line-clamp-2 pr-8 font-medium">{product.name}</span>
-                              <span className="flex w-full flex-col gap-0.5">
-                                <span className="font-semibold tabular-nums">{formatNumber(product.price)}</span>
-                                {product.trackStock && (
-                                  <span
-                                    className={cn(
-                                      "text-xs font-normal",
-                                      left <= 0 ? "text-destructive" : "text-muted-foreground",
+                            <Fragment key={product.id}>
+                              {index > 0 && <ItemSeparator />}
+                              <Item
+                                asChild
+                                size="sm"
+                                className="w-full flex-nowrap rounded-none px-3 text-left hover:bg-accent/50 focus-visible:ring-inset"
+                              >
+                                <button type="button" onClick={() => addProduct(product)}>
+                                  <ItemContent className="min-w-0">
+                                    <ItemTitle>{product.name}</ItemTitle>
+                                    {product.trackStock && (
+                                      <ItemDescription className={cn(left <= 0 && "text-destructive")}>
+                                        {left <= 0 ? "Hết hàng trong kho" : `Còn ${formatNumber(left)} ${product.unit}`}
+                                      </ItemDescription>
                                     )}
-                                  >
-                                    {left <= 0 ? "Hết hàng trong kho" : `Còn ${formatNumber(left)} ${product.unit}`}
-                                  </span>
-                                )}
-                              </span>
-                            </Button>
+                                  </ItemContent>
+                                  <ItemActions className="shrink-0">
+                                    {inBill && <Badge className="tabular-nums">×{inBill}</Badge>}
+                                    <span className="font-semibold tabular-nums">{formatNumber(product.price)}</span>
+                                    <PlusIcon className="size-4 text-muted-foreground" />
+                                  </ItemActions>
+                                </button>
+                              </Item>
+                            </Fragment>
                           );
                         })}
-                      </div>
+                      </ItemGroup>
                     )}
                   </CardContent>
                 </TabsContent>
@@ -630,7 +632,7 @@ export default function RoomDetailPage() {
         )}
 
         <Card
-          className={cn("min-w-0", showLeft && "order-first @4xl/main:order-none @4xl/main:sticky @4xl/main:top-4")}
+          className={cn("min-w-0", showLeft && "order-first @2xl/main:order-none @2xl/main:sticky @2xl/main:top-4")}
         >
           <CardHeader>
             <CardTitle>Hóa đơn #{order.id}</CardTitle>

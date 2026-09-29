@@ -10,8 +10,14 @@ import { RouteGuard } from "@/components/route-guard";
 // Signed-in layout (dashboard-01 / sidebar-07 pattern): collapsible inset
 // sidebar, header with breadcrumb, and the page. Each page fades in when the
 // path changes.
+// A room (/<branch>/sales/rooms/<id>) is the cashier's work screen: it takes
+// the whole window, without the sidebar and the header (the page has its own
+// way back to the room map).
+const FULL_SCREEN = /^\/[^/]+\/sales\/rooms\/[^/]+$/;
+
 export function AppShell({ defaultOpen, children }: { defaultOpen: boolean; children: React.ReactNode }) {
   const pathname = usePathname();
+  const fullScreen = FULL_SCREEN.test(pathname);
 
   return (
     <SidebarProvider
@@ -23,10 +29,10 @@ export function AppShell({ defaultOpen, children }: { defaultOpen: boolean; chil
         } as React.CSSProperties
       }
     >
-      <AppSidebar variant="inset" />
+      {!fullScreen && <AppSidebar variant="inset" />}
       <SidebarInset className="min-w-0">
         <PageTitleProvider>
-          <SiteHeader />
+          {!fullScreen && <SiteHeader />}
           <div className="@container/main flex flex-1 flex-col">
             <RouteGuard>
               <div

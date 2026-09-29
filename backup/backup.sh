@@ -83,13 +83,19 @@ ensure_folder() {
   esac
 }
 
-# Kích thước (byte) của một file trên WebDAV, theo DAV:getcontentlength.
+# Kích thước (byte) của một file trên WebDAV: DAV:getcontentlength, không có
+# thì Content-Length của HEAD. In ra chuỗi rỗng khi máy chủ không cho biết.
 remote_size() {
   code=$(dav --request PROPFIND --header 'Depth: 0' --header 'Content-Type: application/xml' \
     --data '<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:getcontentlength/></d:prop></d:propfind>' \
     "$1")
-  [ "$code" = 207 ] || return 1
-  tr -d '\r\n' < "$TMP_BODY" | grep -o 'getcontentlength[^>]*>[[:space:]]*[0-9][0-9]*' | grep -o '[0-9][0-9]*$' | head -n 1
+  if [ "$code" = 207 ]; then
+    n=$(tr -d '\r\n' < "$TMP_BODY" | grep -o 'getcontentlength[^>]*>[[:space:]]*[0-9][0-9]*' | grep -o '[0-9][0-9]*$' | head -n 1 || true)
+    if [ -n "$n" ]; then echo "$n"; return 0; fi
+  fi
+  code=$(dav --head "$1")
+  [ "$code" = 200 ] || return 0
+  tr -d '\r' < "$TMP_BODY" | grep -i '^content-length:' | tail -n 1 | grep -o '[0-9][0-9]*' || true
 }
 
 upload() {
@@ -103,7 +109,9 @@ upload() {
     *) fail "tải $name lên WebDAV thất bại: $(explain "$code")" ;;
   esac
   remote=$(remote_size "$BASE$name" || true)
-  if [ "$remote" != "$size" ]; then
+  if [ -z "$remote" ]; then
+    log "Cảnh báo: máy chủ WebDAV không cho biết kích thước file, không so được với bản gốc"
+  elif [ "$remote" != "$size" ]; then
     dav --request DELETE "$BASE$name" > /dev/null
     fail "file $name trên WebDAV có $remote byte, khác bản gốc $size byte; đã xoá bản lỗi"
   fi
@@ -138,7 +146,7 @@ prune_remote() {
 # ---- kiểm tra ---------------------------------------------------------------
 
 if [ "$MODE" = check ]; then
-  pg_isready --quiet --timeout=10 || fail "không kết nối được database ($PGHOST)"
+  pg_isready --quiet --timeout=10 || fail "không kết nối được database (${PGHOST:-chưa đặt PGHOST})"
   psql --no-psqlrc --quiet --tuples-only --command 'SELECT 1' > /dev/null || fail "không đăng nhập được database"
   log "Database: kết nối được."
   [ -w "$DIR" ] || fail "không ghi được vào thư mục $DIR"
@@ -158,6 +166,10 @@ exec 9> /tmp/backup.lock
 flock -n 9 || fail "một lần sao lưu khác đang chạy"
 
 mkdir -p "$DIR"
+# File tạm của một lần chạy bị dừng giữa chừng (container tắt khi đang
+# pg_dump). Chỉ xoá file cũ hơn 1 ngày: scripts/backup.sh trên máy chủ cũng
+# ghi file tạm ở đây, không nằm trong khoá ở trên.
+find "$DIR" -maxdepth 1 -name 'karaoke_*.sql.gz.tmp' -mmin +1440 -exec rm -f {} \; || true
 file="$DIR/karaoke_$(date +%Y%m%d_%H%M%S).sql.gz"
 # Không bao giờ ghi đè một bản đã có (hai lần chạy trong cùng một giây).
 while [ -e "$file" ]; do

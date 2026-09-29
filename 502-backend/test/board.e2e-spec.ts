@@ -225,4 +225,21 @@ describe('Board role (e2e)', () => {
         .length,
     ).toBe(3);
   });
+
+  // Last: it locks hdqt1 out of the purge for 15 minutes.
+  it('locks the purge after too many wrong passwords', async () => {
+    const wrong = { scope: 'all', password: 'sai-mat-khau' };
+    // The purges above cleared the earlier wrong attempt: five in a row.
+    for (let i = 0; i < 5; i++) {
+      await as('hdqt1').post('/admin/purge', wrong).expect(403);
+    }
+    const res = await as('hdqt1')
+      .post('/admin/purge', { scope: 'all', password: '12345678' })
+      .expect(429);
+    expect((res.body as Json).message).toBe(
+      'Nhập sai mật khẩu quá nhiều lần. Vui lòng thử lại sau 15 phút.',
+    );
+    // The lock is for the purge only: the account still logs in.
+    await login('hdqt1');
+  });
 });

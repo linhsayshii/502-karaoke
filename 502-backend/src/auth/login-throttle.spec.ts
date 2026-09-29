@@ -42,6 +42,13 @@ describe('LoginThrottle', () => {
     expect(() => throttle.assertAllowed('ql1_cs1')).not.toThrow();
   });
 
+  it('names the refused action given by the caller', () => {
+    fail('purge:7', MAX_FAILED_LOGINS);
+    expect(() =>
+      throttle.assertAllowed('purge:7', 'Nhập sai mật khẩu'),
+    ).toThrow('Nhập sai mật khẩu quá nhiều lần. Vui lòng thử lại sau 15 phút.');
+  });
+
   it('unlocks after the lock period', () => {
     fail('tn1_cs1', MAX_FAILED_LOGINS);
     clock += LOGIN_LOCK_MS;

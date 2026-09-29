@@ -110,18 +110,18 @@ export default function StockPage() {
             <ExportExcelButton onExport={products && shown.length > 0 ? exportExcel : undefined} />
             {canWrite && (
               <>
-            <Button variant="outline" asChild>
-              <Link href={`/${branch}/inventory/export`}>
-                <PackageMinusIcon data-icon="inline-start" />
-                Xuất hàng
-              </Link>
-            </Button>
-            <Button asChild>
-              <Link href={`/${branch}/inventory/import`}>
-                <PackagePlusIcon data-icon="inline-start" />
-                Nhập hàng
-              </Link>
-            </Button>
+                <Button variant="outline" asChild>
+                  <Link href={`/${branch}/inventory/export`}>
+                    <PackageMinusIcon data-icon="inline-start" />
+                    Xuất hàng
+                  </Link>
+                </Button>
+                <Button asChild>
+                  <Link href={`/${branch}/inventory/import`}>
+                    <PackagePlusIcon data-icon="inline-start" />
+                    Nhập hàng
+                  </Link>
+                </Button>
               </>
             )}
           </>

@@ -47,7 +47,7 @@ export class DataPurgeService {
     };
 
     const key = `purge:${actor.id}`;
-    this.throttle.assertAllowed(key);
+    this.throttle.assertAllowed(key, 'Nhập sai mật khẩu');
     const account = await this.prisma.user.findUnique({
       where: { id: actor.id },
       select: { password: true },

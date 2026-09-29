@@ -196,16 +196,16 @@ export default function FundsPage() {
         info={`Phiếu thu tiền hóa đơn và phiếu chi nhập hàng được ghi tự động. ${BUSINESS_DAY_HINT}`}
         actions={
           canWrite && (
-          <>
-            <Button variant="outline" onClick={() => openForm("EXPENSE")}>
-              <ArrowUpRightIcon data-icon="inline-start" />
-              Lập phiếu chi
-            </Button>
-            <Button onClick={() => openForm("INCOME")}>
-              <ArrowDownLeftIcon data-icon="inline-start" />
-              Lập phiếu thu
-            </Button>
-          </>
+            <>
+              <Button variant="outline" onClick={() => openForm("EXPENSE")}>
+                <ArrowUpRightIcon data-icon="inline-start" />
+                Lập phiếu chi
+              </Button>
+              <Button onClick={() => openForm("INCOME")}>
+                <ArrowDownLeftIcon data-icon="inline-start" />
+                Lập phiếu thu
+              </Button>
+            </>
           )
         }
       />

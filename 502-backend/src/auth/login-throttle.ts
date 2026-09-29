@@ -22,13 +22,14 @@ export class LoginThrottle {
   private attempts = new Map<string, Attempts>();
   now = () => Date.now();
 
-  assertAllowed(username: string) {
+  // `what` names the refused action in the message (the purge reuses this).
+  assertAllowed(username: string, what = 'Đăng nhập sai') {
     const entry = this.attempts.get(keyOf(username));
     const now = this.now();
     if (entry && entry.lockedUntil > now) {
       const minutes = Math.ceil((entry.lockedUntil - now) / 60_000);
       throw new HttpException(
-        `Đăng nhập sai quá nhiều lần. Vui lòng thử lại sau ${minutes} phút.`,
+        `${what} quá nhiều lần. Vui lòng thử lại sau ${minutes} phút.`,
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }

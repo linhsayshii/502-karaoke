@@ -6,7 +6,7 @@ set -eu
 # crond chạy job với môi trường tối giản: ghi lại các biến cần dùng để
 # backup.sh đọc (file chỉ root đọc được vì có mật khẩu).
 umask 077
-export -p | grep -E '^export (PG[A-Z]+|WEBDAV_[A-Z_]+|KEEP_DAYS|TZ)=' > /run/backup.env
+export -p | grep -E '^export (PG[A-Z]+|WEBDAV_[A-Z_]+|KEEP_DAYS|TZ)=' > /run/backup.env || true
 umask 022
 
 if ! printf '%s\n' "$BACKUP_CRON" | grep -Eq '^[^[:space:]]+([[:space:]]+[^[:space:]]+){4}$'; then

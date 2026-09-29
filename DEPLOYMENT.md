@@ -248,7 +248,7 @@ docker compose logs backup
 
 Mỗi lần sao lưu:
 - Ghi ra file tạm, kiểm tra file nén (`gzip -t`) rồi mới đổi tên, nên không bao giờ để lại file hỏng hay ghi đè bản đã có. Hai lần chạy chồng nhau thì lần sau dừng.
-- Sau khi tải lên, so kích thước file trên WebDAV với bản gốc; khác nhau thì xoá bản trên WebDAV và báo lỗi.
+- Sau khi tải lên, so kích thước file trên WebDAV với bản gốc; khác nhau thì xoá bản trên WebDAV và báo lỗi. Máy chủ WebDAV không cho biết kích thước thì chỉ ghi cảnh báo vào log.
 - Lỗi WebDAV (sai mật khẩu, mất mạng...) không làm mất bản trong `backups/`: lần chạy đó báo lỗi, container chuyển sang `unhealthy` đến lần sao lưu thành công sau.
 
 **Theo dõi:** `docker compose ps` hiện `backup` là `(healthy)` khi lần sao lưu gần nhất thành công và chưa quá 26 giờ, `(unhealthy)` khi lần gần nhất lỗi hoặc đã hơn 26 giờ không sao lưu được. Chi tiết: `docker compose logs backup` hoặc `backups/backup.log`; trạng thái lần gần nhất ở `backups/.backup-status`.

@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 # Service sao lưu: pg_dump hằng ngày vào ./backups và tải lên WebDAV.
 # Cùng bản PostgreSQL với service db (pg_dump phải cùng hoặc mới hơn máy chủ).
 FROM postgres:17-alpine

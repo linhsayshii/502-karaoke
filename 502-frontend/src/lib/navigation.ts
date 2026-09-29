@@ -97,7 +97,7 @@ export const NAV_GROUPS: NavGroup[] = [
 
 // Staff only see the rooms they serve.
 function titleFor(item: NavItem, user: User | null) {
-  return item.path === "/sales/rooms" && !can(user, "sales.operate") ? "Phòng đang phục vụ" : item.title;
+  return item.path === "/sales/rooms" && user?.role === "STAFF" ? "Phòng đang phục vụ" : item.title;
 }
 
 // Groups and items the account may use (empty groups dropped), titled as

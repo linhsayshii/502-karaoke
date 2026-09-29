@@ -37,6 +37,7 @@ export class DataPurgeService {
     this.throttle.recordSuccess(key);
 
     let branchId: number | undefined;
+    let branchName = '';
     if (dto.scope === 'branch') {
       if (!dto.branch) throw new BadRequestException('Vui lòng chọn cơ sở');
       const branch = await this.prisma.branch.findUnique({
@@ -44,6 +45,7 @@ export class DataPurgeService {
       });
       if (!branch) throw new NotFoundException('Không tìm thấy cơ sở');
       branchId = branch.id;
+      branchName = branch.name;
     }
 
     const own = branchId === undefined ? {} : { branchId };
@@ -68,7 +70,7 @@ export class DataPurgeService {
       message:
         branchId === undefined
           ? 'Đã xóa toàn bộ dữ liệu hệ thống'
-          : `Đã xóa toàn bộ dữ liệu cơ sở ${dto.branch}`,
+          : `Đã xóa toàn bộ dữ liệu của ${branchName}`,
       deleted: {
         orders: orders.count,
         orderItems: items.count,

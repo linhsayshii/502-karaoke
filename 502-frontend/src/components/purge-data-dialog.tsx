@@ -83,7 +83,7 @@ export function PurgeDataDialog({ open, onOpenChange }: { open: boolean; onOpenC
           className="w-full"
         >
           <ToggleGroupItem value="branch" className="flex-1">
-            Cơ sở {branchName}
+            {branchName}
           </ToggleGroupItem>
           <ToggleGroupItem value="all" className="flex-1">
             Toàn bộ hệ thống

@@ -49,6 +49,7 @@ import {
 } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useAuth } from "@/components/auth-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -57,6 +58,8 @@ import { PageHeader } from "@/components/layout/page-header";
 import { usePageTitle } from "@/components/layout/page-title";
 import { BillSummary } from "@/components/sales/bill-summary";
 import { CheckoutDialog } from "@/components/sales/checkout-dialog";
+import { PrPicker } from "@/components/sales/pr-picker";
+import { RoomPrList, type PrTimes } from "@/components/sales/room-pr-list";
 import { useNotify } from "@/hooks/use-notify";
 import { useNow } from "@/hooks/use-now";
 import { usePolling } from "@/hooks/use-polling";
@@ -120,6 +123,9 @@ export default function RoomDetailPage() {
   const now = useNow();
   const canOperate = can(user, "sales.operate");
   const canCancel = can(user, "sales.cancel");
+  const canAssignPr = can(user, "pr.assign");
+  // The left card: the menu for who sells, the PR/KTV tiles for who assigns them.
+  const showLeft = canOperate || canAssignPr;
   const staffView = user?.role === "STAFF";
   const roomsPath = `/${branch}/sales/rooms`;
 
@@ -219,11 +225,7 @@ export default function RoomDetailPage() {
   // saved order, so quick taps and PR/KTV changes never overwrite each other.
   // `send` runs when the write's turn comes; returning null skips it.
   const enqueue = useCallback(
-    (
-      send: (current: Order) => Promise<Order> | null,
-      errorMessage: string,
-      onDone?: (saved: boolean) => void,
-    ) => {
+    (send: (current: Order) => Promise<Order> | null, errorMessage: string, onDone?: (saved: boolean) => void) => {
       pendingRef.current += 1;
       queueRef.current = queueRef.current.then(async () => {
         const current = orderRef.current;
@@ -259,9 +261,13 @@ export default function RoomDetailPage() {
     [enqueue],
   );
 
-  // PR/KTV writes (/pr/sessions…) answer with the whole order.
+  // PR/KTV writes (/pr/sessions…) answer with the whole order. Resolves to
+  // whether it was saved (errors are toasted here).
   const runOrderAction = useCallback(
-    (send: () => Promise<Order>, errorMessage: string) => enqueue(() => send(), errorMessage),
+    (send: () => Promise<Order>, errorMessage: string) =>
+      new Promise<boolean>((resolve) => {
+        enqueue(() => send(), errorMessage, resolve);
+      }),
     [enqueue],
   );
 
@@ -314,6 +320,18 @@ export default function RoomDetailPage() {
 
   const setStaffMember = (field: "cskhId" | "serverId", value: string) =>
     saveOrder(() => ({ [field]: value === NONE ? null : Number(value) }));
+
+  const addPr = (prStaffId: number) =>
+    runOrderAction(
+      () => api.post<Order>("/pr/sessions", { orderId: orderRef.current!.id, prStaffId }).then((r) => r.data),
+      "Không thể thêm PR/KTV",
+    );
+  const endPr = (id: number) =>
+    runOrderAction(() => api.post<Order>(`/pr/sessions/${id}/end`).then((r) => r.data), "Không thể cho PR ra");
+  const savePr = (id: number, times: PrTimes) =>
+    runOrderAction(() => api.patch<Order>(`/pr/sessions/${id}`, times).then((r) => r.data), "Không thể sửa giờ PR");
+  const removePr = (id: number) =>
+    runOrderAction(() => api.delete<Order>(`/pr/sessions/${id}`).then((r) => r.data), "Không thể xóa lượt PR");
 
   const cancelSession = async () => {
     if (!order) return;
@@ -498,94 +516,121 @@ export default function RoomDetailPage() {
       <div
         className={cn(
           "grid items-start gap-4 md:gap-6",
-          canOperate && "@4xl/main:grid-cols-[minmax(0,1fr)_24rem] @6xl/main:grid-cols-[minmax(0,1fr)_28rem]",
+          showLeft && "@4xl/main:grid-cols-[minmax(0,1fr)_24rem] @6xl/main:grid-cols-[minmax(0,1fr)_28rem]",
         )}
       >
-        {canOperate && (
+        {showLeft && (
           <Card className="@container/menu min-w-0">
-            <CardHeader>
-              <CardTitle>Thực đơn</CardTitle>
-              <CardDescription>Chạm vào món để thêm 1 phần vào hóa đơn.</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              <InputGroup>
-                <InputGroupAddon>
-                  <SearchIcon />
-                </InputGroupAddon>
-                <InputGroupInput
-                  placeholder="Tìm món..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  aria-label="Tìm món"
-                />
-              </InputGroup>
-              {categories.length > 1 && (
-                <ToggleGroup
-                  type="single"
-                  variant="outline"
-                  size="sm"
-                  spacing={2}
-                  value={category}
-                  onValueChange={(value) => value && setCategory(value)}
-                  className="w-full flex-wrap"
-                  aria-label="Danh mục"
-                >
-                  <ToggleGroupItem value={ALL}>Tất cả</ToggleGroupItem>
-                  {categories.map(([id, name]) => (
-                    <ToggleGroupItem key={id} value={id}>
-                      {name}
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              )}
-              {menu.length === 0 ? (
-                <EmptyState
-                  icon={UtensilsCrossedIcon}
-                  title={products.length === 0 ? "Chưa có mặt hàng" : "Không tìm thấy món"}
-                  description={
-                    products.length === 0
-                      ? "Quản lý thêm mặt hàng trong Cài đặt bán hàng."
-                      : "Thử từ khóa khác hoặc chọn danh mục khác."
-                  }
-                />
-              ) : (
-                <div className="grid grid-cols-2 gap-2 @lg/menu:grid-cols-3 @3xl/menu:grid-cols-4">
-                  {menu.map((product) => {
-                    const left = available(product);
-                    const inBill = ordered.get(product.id);
-                    return (
-                      <Button
-                        key={product.id}
-                        variant="outline"
-                        className="relative h-auto min-h-24 flex-col items-start justify-between gap-2 p-3 text-left whitespace-normal"
-                        onClick={() => addProduct(product)}
-                      >
-                        {inBill && <Badge className="absolute top-2 right-2 tabular-nums">×{inBill}</Badge>}
-                        <span className="line-clamp-2 pr-8 font-medium">{product.name}</span>
-                        <span className="flex w-full flex-col gap-0.5">
-                          <span className="font-semibold tabular-nums">{formatNumber(product.price)}</span>
-                          {product.trackStock && (
-                            <span
-                              className={cn(
-                                "text-xs font-normal",
-                                left <= 0 ? "text-destructive" : "text-muted-foreground",
-                              )}
-                            >
-                              {left <= 0 ? "Hết hàng trong kho" : `Còn ${formatNumber(left)} ${product.unit}`}
-                            </span>
-                          )}
-                        </span>
-                      </Button>
-                    );
-                  })}
+            <Tabs defaultValue={canOperate ? "menu" : "pr"} className="gap-4">
+              <CardHeader>
+                <CardTitle>{canOperate ? "Thực đơn & PR/KTV" : "PR/KTV"}</CardTitle>
+                <CardDescription>
+                  {canOperate && canAssignPr
+                    ? "Chạm vào món hoặc PR/KTV để thêm vào phòng."
+                    : canOperate
+                      ? "Chạm vào món để thêm 1 phần vào hóa đơn."
+                      : "Chạm vào PR/KTV để đưa vào phòng."}
+                </CardDescription>
+              </CardHeader>
+              {canOperate && canAssignPr && (
+                <div className="px-6">
+                  <TabsList className="w-full">
+                    <TabsTrigger value="menu">Thực đơn</TabsTrigger>
+                    <TabsTrigger value="pr">PR/KTV</TabsTrigger>
+                  </TabsList>
                 </div>
               )}
-            </CardContent>
+              {canOperate && (
+                <TabsContent value="menu">
+                  <CardContent className="flex flex-col gap-4">
+                    <InputGroup>
+                      <InputGroupAddon>
+                        <SearchIcon />
+                      </InputGroupAddon>
+                      <InputGroupInput
+                        placeholder="Tìm món..."
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        aria-label="Tìm món"
+                      />
+                    </InputGroup>
+                    {categories.length > 1 && (
+                      <ToggleGroup
+                        type="single"
+                        variant="outline"
+                        size="sm"
+                        spacing={2}
+                        value={category}
+                        onValueChange={(value) => value && setCategory(value)}
+                        className="w-full flex-wrap"
+                        aria-label="Danh mục"
+                      >
+                        <ToggleGroupItem value={ALL}>Tất cả</ToggleGroupItem>
+                        {categories.map(([id, name]) => (
+                          <ToggleGroupItem key={id} value={id}>
+                            {name}
+                          </ToggleGroupItem>
+                        ))}
+                      </ToggleGroup>
+                    )}
+                    {menu.length === 0 ? (
+                      <EmptyState
+                        icon={UtensilsCrossedIcon}
+                        title={products.length === 0 ? "Chưa có mặt hàng" : "Không tìm thấy món"}
+                        description={
+                          products.length === 0
+                            ? "Quản lý thêm mặt hàng trong Cài đặt bán hàng."
+                            : "Thử từ khóa khác hoặc chọn danh mục khác."
+                        }
+                      />
+                    ) : (
+                      <div className="grid grid-cols-2 gap-2 @lg/menu:grid-cols-3 @3xl/menu:grid-cols-4">
+                        {menu.map((product) => {
+                          const left = available(product);
+                          const inBill = ordered.get(product.id);
+                          return (
+                            <Button
+                              key={product.id}
+                              variant="outline"
+                              className="relative h-auto min-h-24 flex-col items-start justify-between gap-2 p-3 text-left whitespace-normal"
+                              onClick={() => addProduct(product)}
+                            >
+                              {inBill && <Badge className="absolute top-2 right-2 tabular-nums">×{inBill}</Badge>}
+                              <span className="line-clamp-2 pr-8 font-medium">{product.name}</span>
+                              <span className="flex w-full flex-col gap-0.5">
+                                <span className="font-semibold tabular-nums">{formatNumber(product.price)}</span>
+                                {product.trackStock && (
+                                  <span
+                                    className={cn(
+                                      "text-xs font-normal",
+                                      left <= 0 ? "text-destructive" : "text-muted-foreground",
+                                    )}
+                                  >
+                                    {left <= 0 ? "Hết hàng trong kho" : `Còn ${formatNumber(left)} ${product.unit}`}
+                                  </span>
+                                )}
+                              </span>
+                            </Button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </CardContent>
+                </TabsContent>
+              )}
+              {canAssignPr && (
+                <TabsContent value="pr">
+                  <CardContent>
+                    <PrPicker branch={branch} orderId={order.id} sessions={order.prSessions ?? []} onAdd={addPr} />
+                  </CardContent>
+                </TabsContent>
+              )}
+            </Tabs>
           </Card>
         )}
 
         <Card
-          className={cn("min-w-0", canOperate && "order-first @4xl/main:order-none @4xl/main:sticky @4xl/main:top-4")}
+          className={cn("min-w-0", showLeft && "order-first @4xl/main:order-none @4xl/main:sticky @4xl/main:top-4")}
         >
           <CardHeader>
             <CardTitle>Hóa đơn #{order.id}</CardTitle>
@@ -607,6 +652,17 @@ export default function RoomDetailPage() {
                 CSKH: {order.cskh?.fullName ?? "—"} · Phục vụ: {order.server?.fullName ?? "—"}
               </p>
             )}
+
+            <div className="flex flex-col gap-2">
+              <h3 className="text-sm font-medium">PR/KTV</h3>
+              <RoomPrList
+                sessions={order.prSessions ?? []}
+                canEdit={canAssignPr}
+                onEnd={endPr}
+                onSave={savePr}
+                onRemove={removePr}
+              />
+            </div>
 
             {shownItems.length === 0 ? (
               <EmptyState
@@ -701,7 +757,7 @@ export default function RoomDetailPage() {
                   <FieldGroup className="gap-3">
                     {adjustmentRow("discount", "Giảm giá món", "discountPercent", "discountAmount")}
                     {adjustmentRow("hourly-discount", "Giảm giá giờ", "hourlyDiscountPercent", "hourlyDiscountAmount")}
-                            <Field className={ADJUSTMENT_ROW}>
+                    <Field className={ADJUSTMENT_ROW}>
                       <FieldLabel htmlFor="tax-percent" className={ADJUSTMENT_LABEL}>
                         Thuế VAT
                       </FieldLabel>

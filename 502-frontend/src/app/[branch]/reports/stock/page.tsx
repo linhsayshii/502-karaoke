@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { EmptyState, TableEmpty } from "@/components/data-states";
 import { formatDateRange } from "@/components/date-range-picker";
+import { InfoPopover } from "@/components/info-popover";
 import { ProductLedgerSheet, type LedgerProduct } from "@/components/inventory/product-ledger-sheet";
 import { PageHeader } from "@/components/layout/page-header";
 import { ReportToolbar } from "@/components/reports/report-toolbar";
@@ -131,12 +132,15 @@ function StockView() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Theo món</CardTitle>
-              <CardDescription>
-                {formatDateRange(data.range)} · Xuất gồm bán hàng và phiếu xuất kho, đã trừ hàng trả lại kho khi hủy hóa
-                đơn hay phiếu xuất; nhập đã trừ phiếu nhập bị hủy. Bấm vào một món để xem sổ kho của nó. File Excel có đủ
-                mọi món, kèm chi tiết bán, phiếu xuất và hoàn / điều chỉnh.
-              </CardDescription>
+              <div className="flex items-center gap-1">
+                <CardTitle>Theo món</CardTitle>
+                <InfoPopover>
+                  Xuất gồm bán hàng và phiếu xuất kho, đã trừ hàng trả lại kho khi hủy hóa đơn hay phiếu xuất; nhập đã trừ phiếu
+                  nhập bị hủy. Bấm vào một món để xem sổ kho của nó. File Excel có đủ mọi món, kèm chi tiết bán, phiếu xuất và
+                  hoàn / điều chỉnh.
+                </InfoPopover>
+              </div>
+              <CardDescription>{formatDateRange(data.range)}</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
               {all.length === 0 ? (

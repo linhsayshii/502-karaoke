@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/data-states";
 import { formatDateRange } from "@/components/date-range-picker";
+import { InfoPopover } from "@/components/info-popover";
 import { PageHeader } from "@/components/layout/page-header";
 import { ReportToolbar } from "@/components/reports/report-toolbar";
 import { StatTile } from "@/components/stat-tile";
@@ -116,12 +117,15 @@ function InventoryView() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Theo món</CardTitle>
-              <CardDescription>
-                {formatDateRange(data.range)} · Thành tiền theo giá vốn (đồng); đơn giá bình quân tính đến cuối kỳ. Tồn cuối =
-                tồn đầu + nhập − xuất. Xuất gồm bán hàng và phiếu xuất kho, đã trừ hàng trả lại kho khi hủy hóa đơn hay phiếu
-                xuất; nhập đã trừ phiếu nhập bị hủy.
-              </CardDescription>
+              <div className="flex items-center gap-1">
+                <CardTitle>Theo món</CardTitle>
+                <InfoPopover>
+                  Thành tiền theo giá vốn (đồng); đơn giá bình quân tính đến cuối kỳ. Tồn cuối = tồn đầu + nhập − xuất. Xuất gồm
+                  bán hàng và phiếu xuất kho, đã trừ hàng trả lại kho khi hủy hóa đơn hay phiếu xuất; nhập đã trừ phiếu nhập bị
+                  hủy.
+                </InfoPopover>
+              </div>
+              <CardDescription>{formatDateRange(data.range)}</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
               {categories.size > 1 && (

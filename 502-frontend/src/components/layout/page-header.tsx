@@ -1,9 +1,6 @@
 "use client";
 
-import { InfoIcon } from "lucide-react";
-
-import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { InfoPopover } from "@/components/info-popover";
 import { cn } from "@/lib/utils";
 
 interface PageHeaderProps {
@@ -23,19 +20,7 @@ export function PageHeader({ title, description, info, actions, className }: Pag
       <div className="flex min-w-0 flex-col gap-1">
         <div className="flex items-center gap-1">
           <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-          {info && (
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="ghost" size="icon" className="size-7 shrink-0 text-muted-foreground">
-                  <InfoIcon />
-                  <span className="sr-only">Thông tin</span>
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="start" className="w-80 max-w-[calc(100vw-2rem)] text-sm text-pretty">
-                {info}
-              </PopoverContent>
-            </Popover>
-          )}
+          {info && <InfoPopover>{info}</InfoPopover>}
         </div>
         {description && <p className="text-sm text-pretty text-muted-foreground">{description}</p>}
       </div>

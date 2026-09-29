@@ -198,8 +198,9 @@ export default function RoomDetailPage() {
       .then(({ data }) => {
         if (data.status === "APPROVED") notify.success(`Quản lý ${data.decidedBy?.fullName ?? ""} đã duyệt giảm giá`);
         else if (data.status === "REJECTED") notify.warning(`Giảm giá bị từ chối: ${data.decisionNote ?? ""}`);
+        else if (data.status === "EXPIRED") notify.warning("Yêu cầu giảm giá đã hết hạn, hãy gửi lại");
       })
-      .catch(() => {});
+      .catch(() => notify.warning("Yêu cầu giảm giá đã được xử lý"));
   }, [order?.discountRequests, notify]);
 
   // Pick up changes made on another device (and notice a closed session).
@@ -341,6 +342,12 @@ export default function RoomDetailPage() {
       return true;
     } catch (error) {
       notify.error(error, "Không thể hủy yêu cầu");
+      // A manager may have decided first: show the order as it is now.
+      try {
+        applyOrder((await api.get<Order>(`/orders/${orderRef.current!.id}`)).data);
+      } catch {
+        // The next poll retries.
+      }
       return false;
     }
   };

@@ -215,21 +215,26 @@ export default function RoomDetailPage() {
     activeOrderId !== undefined,
   );
 
-  // `buildPatch` runs when the edit's turn comes; returning null skips it.
-  const saveOrder = useCallback(
-    (buildPatch: (current: Order) => Record<string, unknown> | null, onDone?: (saved: boolean) => void) => {
+  // Every write of the order goes through one queue, each built on the latest
+  // saved order, so quick taps and PR/KTV changes never overwrite each other.
+  // `send` runs when the write's turn comes; returning null skips it.
+  const enqueue = useCallback(
+    (
+      send: (current: Order) => Promise<Order> | null,
+      errorMessage: string,
+      onDone?: (saved: boolean) => void,
+    ) => {
       pendingRef.current += 1;
       queueRef.current = queueRef.current.then(async () => {
         const current = orderRef.current;
         let saved = false;
         try {
-          const patch = current && buildPatch(current);
-          if (!current || !patch) return;
-          const res = await api.patch<Order>(`/orders/${current.id}`, patch);
-          applyOrder(res.data);
+          const request = current && send(current);
+          if (!request) return;
+          applyOrder(await request);
           saved = true;
         } catch (error) {
-          notify.error(error, "Không thể lưu thay đổi");
+          notify.error(error, errorMessage);
         } finally {
           pendingRef.current -= 1;
           onDone?.(saved);
@@ -238,6 +243,26 @@ export default function RoomDetailPage() {
       return queueRef.current;
     },
     [applyOrder, notify],
+  );
+
+  // `buildPatch` runs when the edit's turn comes; returning null skips it.
+  const saveOrder = useCallback(
+    (buildPatch: (current: Order) => Record<string, unknown> | null, onDone?: (saved: boolean) => void) =>
+      enqueue(
+        (current) => {
+          const patch = buildPatch(current);
+          return patch && api.patch<Order>(`/orders/${current.id}`, patch).then((res) => res.data);
+        },
+        "Không thể lưu thay đổi",
+        onDone,
+      ),
+    [enqueue],
+  );
+
+  // PR/KTV writes (/pr/sessions…) answer with the whole order.
+  const runOrderAction = useCallback(
+    (send: () => Promise<Order>, errorMessage: string) => enqueue(() => send(), errorMessage),
+    [enqueue],
   );
 
   const syncItems = () => {

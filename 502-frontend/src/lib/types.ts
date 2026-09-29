@@ -131,6 +131,8 @@ export interface Order {
   startTime: string;
   endTime: string | null;
   updatedAt: string;
+  // Only on a single order (GET/PATCH /orders/:id), not in bill lists.
+  prSessions?: PrSession[];
   // Hourly price fixed when the session opened.
   pricePerHour: string | number;
   paymentMethod: PaymentMethod | null;
@@ -485,6 +487,39 @@ export interface PrAttendance {
   note: string | null;
   prStaff: Pick<PrStaff, "id" | "code" | "name">;
   createdBy: StaffRef | null;
+}
+
+// A PR/KTV visit to a room (not billed): Order.prSessions.
+export interface PrSession {
+  id: number;
+  orderId: number;
+  prStaffId: number;
+  startAt: string;
+  endAt: string | null; // null: still in the room
+  prStaff: Pick<PrStaff, "id" | "code" | "name">;
+}
+
+// GET /pr/available: who can be put into a room, and where they are now.
+export interface AvailablePr {
+  id: number;
+  code: string | null;
+  name: string;
+  checkedIn: boolean;
+  currentRoom: { orderId: number; roomName: string | null } | null;
+}
+
+// GET /pr/stats: hours in rooms per PR/KTV over a range of business days.
+export interface PrStatsRow {
+  prStaffId: number;
+  minutes: number;
+  sessions: number;
+  rooms: number;
+}
+
+export interface PrStats {
+  range: { from: string; to: string };
+  totals: Omit<PrStatsRow, "prStaffId">;
+  rows: PrStatsRow[];
 }
 
 export interface ManagedUser extends User {

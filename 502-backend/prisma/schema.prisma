@@ -35,6 +35,7 @@ model Branch {
   billCounters     BillCounter[]
   prStaff          PrStaff[]
   prAttendances    PrAttendance[]
+  prSessions       PrSession[]
 }
 
 enum Role {
@@ -82,6 +83,7 @@ model User {
   fundTransactionsCancelled FundTransaction[] @relation("FundTransactionCancelledBy")
   dataPurgeLogs             DataPurgeLog[]
   prAttendancesRecorded     PrAttendance[]    @relation("PrAttendanceRecordedBy")
+  prSessionsCreated         PrSession[]       @relation("PrSessionCreatedBy")
 
   @@index([branchId])
 }
@@ -101,6 +103,7 @@ model PrStaff {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
   attendances PrAttendance[]
+  sessions    PrSession[]
 
   @@index([branchId])
 }
@@ -124,6 +127,29 @@ model PrAttendance {
 
   @@unique([prStaffId, businessDate])
   @@index([branchId, businessDate])
+}
+
+// Một lượt PR/KTV ngồi trong một phòng đang hát. Không tính tiền trên hóa
+// đơn, chỉ để thống kê giờ. Vài chục lượt mỗi cơ sở mỗi ngày (~100k dòng/năm
+// cho cả chuỗi). Mỗi PR có tối đa một lượt đang mở: PrSessionsService giữ quy
+// tắc này bằng khóa dòng PrStaff (Prisma 5 không biểu diễn được partial index).
+model PrSession {
+  id          Int       @id @default(autoincrement())
+  branchId    Int
+  branch      Branch    @relation(fields: [branchId], references: [id])
+  orderId     Int
+  order       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  prStaffId   Int
+  prStaff     PrStaff   @relation(fields: [prStaffId], references: [id])
+  startAt     DateTime
+  endAt       DateTime?
+  createdById Int?
+  createdBy   User?     @relation("PrSessionCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime  @default(now())
+
+  @@index([orderId]) // room page, checkout / cancel
+  @@index([branchId, startAt]) // GET /pr/stats
+  @@index([prStaffId, endAt]) // is this PR in another room?
 }
 
 model Category {
@@ -269,6 +295,7 @@ model Order {
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   items           OrderItem[]
+  prSessions      PrSession[]
   stockMovements  StockMovement[]
   fundTransaction FundTransaction?
 

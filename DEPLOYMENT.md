@@ -514,7 +514,7 @@ Sau khi cập nhật:
 
 - Migration chỉ thêm bảng `PrSession` và ba chỉ mục, không đụng dữ liệu cũ, chạy trong tích tắc.
 - Trong trang phòng có tab **PR/KTV**: chạm vào PR để ghi giờ vào, nút **Ra** để ghi giờ ra, **Sửa giờ**/**Xóa** khi gán nhầm (chỉ khi phòng còn mở). Thanh toán hoặc hủy phiên tự đóng các PR còn trong phòng. PR không tính tiền trên hóa đơn.
-- Thu ngân, quản lý và tài khoản "Quản lý PR/KTV" gán được; HĐQT và nhân viên chỉ xem.
+- Thu ngân, quản lý và tài khoản "Quản lý PR/KTV" gán được; HĐQT và nhân viên thường chỉ xem.
 - Trang *Danh sách PR/KTV* đổi tên thành **Thống kê PR**: chọn khoảng ngày để xem số giờ trong phòng, số lượt và số phòng của từng PR.
 
 ## 7. Xử lý sự cố

@@ -10,11 +10,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ReportPrismaService } from '../prisma/report-prisma.service';
 import { AuthUser } from '../auth/auth-user';
 import { BranchScopeService } from '../common/branch-scope.service';
-import {
-  businessDateOf,
-  businessDatesBetween,
-  businessDayRange,
-} from '../common/dates';
+import { businessDateOf, businessDatesBetween } from '../common/dates';
+import { periodWhere, utcTimestamp } from '../reports/report-sql';
 import { orderDetailInclude } from '../orders/order-include';
 import { lockOrderRow } from '../orders/order-lock';
 import { canAssignPr, canViewPr } from './pr.service';
@@ -175,6 +172,11 @@ export class PrSessionsService {
             : null;
       const staff = await this.lockStaff(tx, current.prStaffId);
       if (current.endAt && endAt === null) {
+        if (!staff.active) {
+          throw new BadRequestException(
+            `${staff.name} đã nghỉ, không gán được`,
+          );
+        }
         await this.assertNotElsewhere(tx, staff, id);
       }
       this.assertTimes(order.startTime, startAt, endAt, new Date());
@@ -208,9 +210,17 @@ export class PrSessionsService {
     }
     const branchId = await this.branchScope.resolveBranchId(user, query.branch);
     businessDatesBetween(query.from, query.to); // 400 when too long
-    const { gte, lt } = businessDayRange(query.from, query.to);
-    const minutesSql = Prisma.sql`GREATEST(CEIL(EXTRACT(EPOCH FROM (COALESCE("endAt", now()) - "startAt")) / 60), 0)`;
-    const where = Prisma.sql`"branchId" = ${branchId} AND "startAt" >= ${gte} AND "startAt" < ${lt}`;
+    // The columns are UTC `timestamp`s: bind UTC timestamps (utcTimestamp), not
+    // Dates or now(), which follow the database time zone.
+    const nowSql = utcTimestamp(new Date());
+    const minutesSql = Prisma.sql`GREATEST(CEIL(EXTRACT(EPOCH FROM (COALESCE("endAt", ${nowSql}) - "startAt")) / 60), 0)`;
+    const where = periodWhere(
+      Prisma.sql`"startAt"`,
+      Prisma.sql`"branchId"`,
+      branchId,
+      query.from,
+      query.to,
+    );
     // At most one row per PR of the branch, so no LIMIT.
     const [rows, totals] = await Promise.all([
       this.reportDb.$queryRaw<

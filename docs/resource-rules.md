@@ -28,6 +28,7 @@ Nguyên tắc gốc: **không có gì được lớn lên mãi.** Mỗi danh sá
 11. **Index chỉ thêm khi có truy vấn dùng đến** (kiểm tra bằng `EXPLAIN`). Mỗi index tốn thêm SSD và thêm một lần ghi mỗi khi dòng thay đổi.
 12. **Công việc định kỳ** không chạy bằng `setInterval` trong backend. Dùng cron ở một service riêng, như service `backup`.
 13. **Thư viện:** gói chỉ dùng khi build hay test (`@types/*`, CLI, công cụ test) để ở `devDependencies`, vì image production cài `npm ci --omit=dev`. Trước khi thêm thư viện mới, xem dung lượng của nó và kiểm tra xem thư viện có sẵn đã làm được việc đó chưa.
+14. **`$queryRaw` không bao giờ gắn trực tiếp một `Date` của JS và không dùng `now()` để so với cột `timestamp`.** Prisma lưu giờ UTC vào cột `timestamp(3)` không kèm múi giờ, còn `Date` được gắn thành `timestamptz` và `now()` theo múi giờ của phiên, nên ở production (database chạy `TZ=Asia/Ho_Chi_Minh`) mốc thời gian lệch 7 giờ: lượt đang mở tính dư 7 giờ, khoảng ngày kinh doanh bị dịch. Dùng `utcTimestamp()` (cả cho "bây giờ") và `periodWhere()` trong `src/reports/report-sql.ts`. Test e2e có SQL thô theo thời gian nên chạy với `ALTER DATABASE … SET timezone TO 'Asia/Ho_Chi_Minh'` (xem `test/pr.e2e-spec.ts`).
 
 ## 2. Frontend (Next.js)
 

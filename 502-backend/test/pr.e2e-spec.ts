@@ -49,6 +49,13 @@ describe('PR/KTV (e2e)', () => {
       env: { ...process.env, SEED_DEMO: '1' },
       stdio: 'pipe',
     });
+    // Production runs the database in Asia/Ho_Chi_Minh, where raw SQL that
+    // binds a JS Date or uses now() against a UTC `timestamp` column goes
+    // wrong. Only new connections see it, so set it before the app connects.
+    execSync(
+      `docker exec kara502-pg psql -U postgres -d karaoke_test -c "ALTER DATABASE karaoke_test SET timezone TO 'Asia/Ho_Chi_Minh'"`,
+      { stdio: 'pipe' },
+    );
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
@@ -73,6 +80,11 @@ describe('PR/KTV (e2e)', () => {
 
   afterAll(async () => {
     await app.close();
+    // Leave the database as the other e2e suites expect it.
+    execSync(
+      `docker exec kara502-pg psql -U postgres -d karaoke_test -c "ALTER DATABASE karaoke_test RESET timezone"`,
+      { stdio: 'pipe' },
+    );
   });
 
   it('is closed to accounts without the flag', async () => {
@@ -469,6 +481,35 @@ describe('PR/KTV (e2e)', () => {
       const body = cancelled.body as Json;
       const dao = sessionsOf(body).find((s) => s.prStaffId === daoId)!;
       expect(dao.endAt).toBe(body.endTime);
+    });
+
+    it('counts an open visit up to now, whatever the database time zone', async () => {
+      const yenId = idOf(
+        await as('ql1_cs1').post('/pr/staff', { name: 'Yến' }).expect(201),
+      );
+      // P102 was paid above, so it is free again.
+      const orderD = idOf(
+        await as('tn1_cs1').post('/orders', { roomId: roomB }).expect(201),
+      );
+      await app.get(PrismaService).order.update({
+        where: { id: orderD },
+        data: { startTime: new Date(Date.now() - 2 * 3600_000) },
+      });
+      await as('tn1_cs1')
+        .post('/pr/sessions', {
+          orderId: orderD,
+          prStaffId: yenId,
+          startAt: minutesAgo(45),
+        })
+        .expect(201);
+      const stats = (
+        await as('ql1_cs1')
+          .get(`/pr/stats?from=${today}&to=${today}`)
+          .expect(200)
+      ).body as { rows: { prStaffId: number; minutes: number }[] };
+      const yen = stats.rows.find((r) => r.prStaffId === yenId)!;
+      expect(yen.minutes).toBeGreaterThanOrEqual(45);
+      expect(yen.minutes).toBeLessThan(47);
     });
 
     it('sums the hours of each PR over a range', async () => {

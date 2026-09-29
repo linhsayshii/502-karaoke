@@ -9,6 +9,7 @@ import { OrderStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth-user';
 import { BranchScopeService } from '../common/branch-scope.service';
+import { businessDateOf } from '../common/dates';
 import { orderDetailInclude } from '../orders/order-include';
 import { lockOrderRow } from '../orders/order-lock';
 import { canAssignPr } from './pr.service';
@@ -18,6 +19,15 @@ import { AddPrSessionDto, UpdatePrSessionDto } from './dto/pr-session.dto';
 type Db = Prisma.TransactionClient;
 
 const CLOSED_MESSAGE = 'Phòng đã đóng, không sửa PR được nữa';
+const AVAILABLE_LIMIT = 500;
+
+export interface AvailablePr {
+  id: number;
+  code: string | null;
+  name: string;
+  checkedIn: boolean;
+  currentRoom: { orderId: number; roomName: string | null } | null;
+}
 
 @Injectable()
 export class PrSessionsService {
@@ -25,6 +35,61 @@ export class PrSessionsService {
     private prisma: PrismaService,
     private branchScope: BranchScopeService,
   ) {}
+
+  // Active PR/KTV of the branch for the room page: who is on today's roll
+  // call (first), and the room each one is sitting in right now.
+  async available(
+    user: AuthUser,
+    branch?: string,
+  ): Promise<[AvailablePr[], number]> {
+    this.assertAssign(user);
+    const branchId = await this.branchScope.resolveBranchId(user, branch);
+    const today = new Date(`${businessDateOf(new Date())}T00:00:00Z`);
+    const where: Prisma.PrStaffWhereInput = { branchId, active: true };
+    const [rows, total] = await Promise.all([
+      this.prisma.prStaff.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        take: AVAILABLE_LIMIT,
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          // Unique (prStaffId, businessDate) index.
+          attendances: {
+            where: { businessDate: today, checkOutAt: null },
+            select: { id: true },
+            take: 1,
+          },
+          // PrSession(prStaffId, endAt) index.
+          sessions: {
+            where: { endAt: null },
+            select: {
+              orderId: true,
+              order: { select: { room: { select: { name: true } } } },
+            },
+            take: 1,
+          },
+        },
+      }),
+      this.prisma.prStaff.count({ where }),
+    ]);
+    const list = rows.map((r) => ({
+      id: r.id,
+      code: r.code,
+      name: r.name,
+      checkedIn: r.attendances.length > 0,
+      currentRoom: r.sessions[0]
+        ? {
+            orderId: r.sessions[0].orderId,
+            roomName: r.sessions[0].order.room?.name ?? null,
+          }
+        : null,
+    }));
+    // Sorting at most 500 rows already loaded (nothing is summed).
+    list.sort((a, b) => Number(b.checkedIn) - Number(a.checkedIn));
+    return [list, total];
+  }
 
   // Puts a PR/KTV into an open room from `startAt` (default now).
   add(user: AuthUser, dto: AddPrSessionDto) {

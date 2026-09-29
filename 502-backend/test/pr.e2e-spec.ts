@@ -375,6 +375,27 @@ describe('PR/KTV (e2e)', () => {
         .expect(200);
     });
 
+    it('lists who can be put into a room, with where they are', async () => {
+      await as('ql1_cs1')
+        .post('/pr/attendance', { prStaffId: cucId })
+        .expect(201);
+      const res = await as('tn1_cs1').get('/pr/available').expect(200);
+      expect(res.headers['x-total-count']).toBeDefined();
+      const list = res.body as Json[];
+      // Checked in today first.
+      expect(list[0]).toMatchObject({
+        id: cucId,
+        checkedIn: true,
+        currentRoom: null,
+      });
+      expect(list.find((p) => p.id === hoaId)).toMatchObject({
+        checkedIn: false,
+        currentRoom: { orderId: orderB, roomName: 'P102' },
+      });
+      await as('tn1_cs2').get('/pr/available?branch=cs1').expect(403);
+      await as('pv1_cs1').get('/pr/available').expect(200); // managesPr
+    });
+
     it('closes open visits at checkout and freezes them', async () => {
       const paid = await as('tn1_cs1')
         .post(`/orders/${orderB}/checkout`, { paymentMethod: 'CASH' })

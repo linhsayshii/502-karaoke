@@ -31,7 +31,11 @@ import {
   ListAttendanceQuery,
   UpdateAttendanceDto,
 } from './dto/pr-attendance.dto';
-import { AddPrSessionDto, UpdatePrSessionDto } from './dto/pr-session.dto';
+import {
+  AddPrSessionDto,
+  PrBranchQuery,
+  UpdatePrSessionDto,
+} from './dto/pr-session.dto';
 
 // PR/KTV list, roll call and visits in rooms. Open to every role here because
 // the right comes from the account's "Quản lý PR/KTV" flag as well as its role;
@@ -120,6 +124,15 @@ export class PrController {
     @Param('id', ParseIntPipe) id: number,
   ) {
     return this.prService.removeAttendance(user, id);
+  }
+
+  @Get('available')
+  available(
+    @CurrentUser() user: AuthUser,
+    @Query() query: PrBranchQuery,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    return withTotalCount(res, this.sessions.available(user, query.branch));
   }
 
   @Post('sessions')

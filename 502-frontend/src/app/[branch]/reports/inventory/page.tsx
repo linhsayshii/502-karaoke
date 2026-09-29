@@ -39,6 +39,10 @@ const DETAILS = SHOW_FROM.lg;
 const DETAILS_STAND_IN = "@5xl/main:hidden";
 const FLOWS = INVENTORY_COLUMNS.map((flow) => ({ ...flow, show: SHOW[flow.key] }));
 const NUM = "text-right tabular-nums";
+// Every group (SL + Thành tiền) gets the same width, whatever its numbers,
+// and so do ĐVT and đơn giá; the name column takes what is left.
+const QTY_WIDTH = "w-20";
+const VALUE_WIDTH = "w-32";
 
 const categoryKey = (row: InventoryReportRow) => (row.categoryId === null ? NONE : String(row.categoryId));
 
@@ -146,10 +150,10 @@ function InventoryView() {
                   <TableHeader>
                     <TableRow>
                       <TableHead rowSpan={2}>Tên mặt hàng</TableHead>
-                      <TableHead rowSpan={2} className={DETAILS}>
+                      <TableHead rowSpan={2} className={cn(QTY_WIDTH, DETAILS)}>
                         ĐVT
                       </TableHead>
-                      <TableHead rowSpan={2} className={cn("text-right whitespace-normal", DETAILS)}>
+                      <TableHead rowSpan={2} className={cn("text-right whitespace-normal", VALUE_WIDTH, DETAILS)}>
                         Đơn giá bình quân
                       </TableHead>
                       {FLOWS.map((flow) => (
@@ -160,10 +164,10 @@ function InventoryView() {
                     </TableRow>
                     <TableRow>
                       {FLOWS.map((flow) => [
-                        <TableHead key={`${flow.key}-q`} className={cn("border-l", NUM, flow.show)}>
+                        <TableHead key={`${flow.key}-q`} className={cn("border-l", NUM, QTY_WIDTH, flow.show)}>
                           SL
                         </TableHead>,
-                        <TableHead key={`${flow.key}-v`} className={cn(NUM, flow.show)}>
+                        <TableHead key={`${flow.key}-v`} className={cn(NUM, VALUE_WIDTH, flow.show)}>
                           Thành tiền
                         </TableHead>,
                       ])}

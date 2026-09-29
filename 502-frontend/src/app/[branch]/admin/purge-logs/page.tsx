@@ -24,6 +24,7 @@ const DELETED_LABELS: [string, string][] = [
   ["rooms", "phòng"],
   ["prStaff", "PR/KTV"],
   ["prAttendances", "lượt điểm danh"],
+  ["prSessions", "lượt PR vào phòng"],
 ];
 
 function deletedSummary(log: DataPurgeLog) {

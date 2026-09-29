@@ -23,12 +23,20 @@ export function PrPicker({
   branch: string;
   orderId: number;
   sessions: PrSession[];
-  onAdd: (prStaffId: number) => void;
+  // Resolves once the request ended (saved or not).
+  onAdd: (prStaffId: number) => Promise<unknown>;
 }) {
   // Reload when this room's visits change (added, ended, removed): the tiles
   // remount with a new key and fetch again, while the search text stays here.
   const signature = sessions.map((s) => `${s.id}:${s.endAt ?? ""}`).join(",");
   const [search, setSearch] = useState("");
+  // Tiles stay disabled while an add is in flight, so a double tap cannot
+  // queue a second request for the same PR.
+  const [pending, setPending] = useState(false);
+  const add = (prStaffId: number) => {
+    setPending(true);
+    onAdd(prStaffId).finally(() => setPending(false));
+  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -43,7 +51,7 @@ export function PrPicker({
           aria-label="Tìm PR/KTV"
         />
       </InputGroup>
-      <PrTiles key={signature} branch={branch} orderId={orderId} keyword={search.trim().toLowerCase()} onAdd={onAdd} />
+      <PrTiles key={signature} branch={branch} orderId={orderId} keyword={search.trim().toLowerCase()} pending={pending} onAdd={add} />
     </div>
   );
 }
@@ -52,11 +60,13 @@ function PrTiles({
   branch,
   orderId,
   keyword,
+  pending,
   onAdd,
 }: {
   branch: string;
   orderId: number;
   keyword: string;
+  pending: boolean;
   onAdd: (prStaffId: number) => void;
 }) {
   const { data, total, loading } = useApiData<AvailablePr[]>(
@@ -96,7 +106,7 @@ function PrTiles({
               <Button
                 key={pr.id}
                 variant="outline"
-                disabled={!!pr.currentRoom}
+                disabled={pending || !!pr.currentRoom}
                 className="relative h-auto min-h-20 flex-col items-start justify-between gap-2 p-3 text-left whitespace-normal"
                 onClick={() => onAdd(pr.id)}
               >

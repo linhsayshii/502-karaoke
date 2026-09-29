@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  DiscountSource,
   OrderEventType,
   OrderStatus,
   PaymentMethod,
@@ -40,7 +41,9 @@ import { isServerOf, SERVE_FORBIDDEN } from './order-access';
 import {
   assertNoPendingRequest,
   expirePendingRequests,
+  logAdjustmentChange,
 } from './discount-ledger';
+import { changedKeys, pickAdjustments } from './discount-rules';
 
 type Db = Prisma.TransactionClient;
 
@@ -714,6 +717,23 @@ export class OrdersService {
             editReason: reason.trim(),
           },
         });
+
+        // Discounts / VAT changed on a paid bill: logged with the reason.
+        const before = adjustmentsOf(order);
+        const after = { ...before, ...pickAdjustments(fields) };
+        if (changedKeys(before, after).length > 0) {
+          await logAdjustmentChange(tx, {
+            branchId: order.branchId,
+            orderId: id,
+            source: DiscountSource.PAID_EDIT,
+            before,
+            after,
+            amountBefore: Number(order.finalAmount),
+            amountAfter: bill.finalAmount,
+            note: reason,
+            userId: user.id,
+          });
+        }
 
         await this.syncSoldStock(tx, order.branchId, id, user.id);
         await this.snapshotItemCosts(tx, id);

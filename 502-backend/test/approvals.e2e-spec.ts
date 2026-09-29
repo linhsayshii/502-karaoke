@@ -294,6 +294,108 @@ describe('Sales approvals (e2e)', () => {
       ).body as Json;
       expect(res.discountPercent).toBe(0);
     });
+
+    it('reaches every manager of the branch, and nobody else', async () => {
+      const queue = await as('ql1_cs1')
+        .get('/discount-requests/pending')
+        .expect(200);
+      expect(queue.headers['x-total-count']).toBe('1');
+      expect(((queue.body as Json[])[0].order as Json).id).toBe(orderId);
+      const count = (
+        await as('ql1_cs1').get('/discount-requests/pending-count').expect(200)
+      ).body as Json;
+      expect(count.count).toBe(1);
+      expect(
+        (
+          (await as('admin').get('/discount-requests/pending').expect(200))
+            .body as Json[]
+        ).length,
+      ).toBe(1);
+      expect(
+        (await as('ql1_cs2').get('/discount-requests/pending').expect(200))
+          .body,
+      ).toEqual([]);
+      await as('tn1_cs1').get('/discount-requests/pending').expect(403);
+    });
+
+    it('the first manager decides; the next one is told who did', async () => {
+      const [request] = (
+        await as('ql1_cs1').get('/discount-requests/pending').expect(200)
+      ).body as Json[];
+      const id = request.id as number;
+      await as('ql1_cs2').post(`/discount-requests/${id}/approve`).expect(403);
+      const approved = (
+        await as('ql1_cs1').post(`/discount-requests/${id}/approve`).expect(201)
+      ).body as Json;
+      expect(approved.status).toBe('APPROVED');
+      const second = await as('admin')
+        .post(`/discount-requests/${id}/reject`, { note: 'Không' })
+        .expect(409);
+      expect((second.body as Json).message).toMatch(/đã được .* duyệt lúc/);
+      const order = (await as('tn1_cs1').get(`/orders/${orderId}`).expect(200))
+        .body as Json;
+      expect(order.discountPercent).toBe(10);
+      expect(order.discountRequests).toEqual([]);
+      const seen = (
+        await as('tn1_cs1').get(`/discount-requests/${id}`).expect(200)
+      ).body as Json;
+      expect(seen.status).toBe('APPROVED');
+    });
+
+    it('rejects with a reason, cancels, and expires when the session is cancelled', async () => {
+      const url = `/orders/${orderId}/adjustments`;
+      const req = async () =>
+        (
+          (
+            await as('tn1_cs1')
+              .post(url, { hourlyDiscountAmount: 10000, note: 'Lỗi âm thanh' })
+              .expect(201)
+          ).body as { discountRequests: Json[] }
+        ).discountRequests[0].id as number;
+
+      const a = await req();
+      await as('ql1_cs1').post(`/discount-requests/${a}/reject`).expect(400);
+      await as('ql1_cs1')
+        .post(`/discount-requests/${a}/reject`, { note: 'Không đúng' })
+        .expect(201);
+
+      const b = await req();
+      await as('tn1_cs1').post(`/discount-requests/${b}/cancel`).expect(201);
+
+      // Checkout is refused while it waits; cancelling the session expires it.
+      const c = await req();
+      await as('tn1_cs1')
+        .post(`/orders/${orderId}/checkout`, { paymentMethod: 'CASH' })
+        .expect(409);
+      await as('ql1_cs1').post(`/orders/${orderId}/cancel`).expect(200);
+      const late = await as('ql1_cs1')
+        .post(`/discount-requests/${c}/approve`)
+        .expect(409);
+      expect((late.body as Json).message).toMatch(/hết hạn/);
+    });
+
+    it('keeps a log the board can read', async () => {
+      const today = new Date();
+      const d = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      const res = await as('ql1_cs1')
+        .get(`/discount-requests?from=2026-01-01&to=${d}`)
+        .expect(200);
+      const rows = res.body as Json[];
+      const statuses = rows.map((r) => r.status);
+      expect(statuses).toEqual(
+        expect.arrayContaining(['APPROVED', 'REJECTED', 'CANCELLED']),
+      );
+      // The chain manager's paid-bill correction of Task 3 was logged too.
+      const all = (
+        await as('admin')
+          .get(`/discount-requests?from=2026-01-01&to=${d}`)
+          .expect(200)
+      ).body as Json[];
+      expect(all.some((r) => r.source === 'PAID_EDIT')).toBe(true);
+      await as('tn1_cs1')
+        .get(`/discount-requests?from=${d}&to=${d}`)
+        .expect(403);
+    });
   });
 
   describe('discounts applied at once', () => {

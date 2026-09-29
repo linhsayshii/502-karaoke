@@ -51,7 +51,7 @@ import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
 import { initials } from "@/lib/format";
-import { POSITION_LABELS, ROLE_LABELS, can } from "@/lib/permissions";
+import { POSITION_LABELS, ROLE_LABELS } from "@/lib/permissions";
 import { ONLY_NARROW, SHOW_FROM } from "@/lib/responsive";
 import type { ManagedUser, Role, StaffPosition } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -113,9 +113,10 @@ export default function UsersPage() {
   const branch = useBranchCode();
   const { user: me, branches } = useAuth();
   const notify = useNotify();
-  const isChainManager = can(me, "branch.switch");
+  const isChainManager = me?.role === "CHAIN_MANAGER";
+  const noBranchRole = (role: Role) => role === "CHAIN_MANAGER" || role === "BOARD";
   const assignableRoles: Role[] = isChainManager
-    ? ["CHAIN_MANAGER", "BRANCH_MANAGER", "CASHIER", "STAFF"]
+    ? ["CHAIN_MANAGER", "BRANCH_MANAGER", "CASHIER", "STAFF", "BOARD"]
     : BRANCH_MANAGEABLE;
 
   const [branchFilter, setBranchFilter] = useState(branch);
@@ -184,7 +185,7 @@ export default function UsersPage() {
     fullName: submitted && !form.fullName.trim(),
     username: submitted && isNew && !USERNAME_RE.test(form.username.trim().toLowerCase()),
     password: submitted && isNew && form.password !== "" && form.password.length < 6,
-    branch: submitted && isChainManager && form.role !== "CHAIN_MANAGER" && !form.branchId,
+    branch: submitted && isChainManager && !noBranchRole(form.role) && !form.branchId,
   };
 
   const save = async (e: React.FormEvent) => {
@@ -195,7 +196,7 @@ export default function UsersPage() {
       !form.fullName.trim() ||
       (isNew && !USERNAME_RE.test(form.username.trim().toLowerCase())) ||
       (isNew && form.password !== "" && form.password.length < 6) ||
-      (isChainManager && form.role !== "CHAIN_MANAGER" && !form.branchId);
+      (isChainManager && !noBranchRole(form.role) && !form.branchId);
     if (bad) return;
     const assignment = {
       fullName: form.fullName.trim(),
@@ -203,7 +204,7 @@ export default function UsersPage() {
       role: form.role,
       position: form.position === NONE ? null : form.position,
       // Branch managers can only place accounts in their own branch (server enforces it).
-      branchId: form.role === "CHAIN_MANAGER" ? null : isChainManager ? Number(form.branchId) || null : me?.branchId,
+      branchId: noBranchRole(form.role) ? null : isChainManager ? Number(form.branchId) || null : me?.branchId,
     };
     setSaving(true);
     try {
@@ -536,7 +537,7 @@ export default function UsersPage() {
                     </Select>
                   </Field>
                 </div>
-                {isChainManager && form.role !== "CHAIN_MANAGER" && (
+                {isChainManager && !noBranchRole(form.role) && (
                   <Field data-invalid={invalid.branch || undefined}>
                     <FieldLabel htmlFor="user-branch">Cơ sở</FieldLabel>
                     <Select value={form.branchId} onValueChange={(branchId) => setForm({ ...form, branchId })}>

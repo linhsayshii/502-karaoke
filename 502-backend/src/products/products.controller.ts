@@ -16,7 +16,7 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/auth-user';
-import { MANAGERS, SALES } from '../auth/roles';
+import { MANAGERS, SALES_READERS } from '../auth/roles';
 
 @ApiTags('products')
 @ApiBearerAuth()
@@ -35,7 +35,7 @@ export class ProductsController {
   }
 
   @Get()
-  @Roles(...SALES)
+  @Roles(...SALES_READERS)
   @ApiQuery({ name: 'includeInactive', required: false, type: Boolean })
   findAll(
     @CurrentUser() user: AuthUser,
@@ -50,7 +50,7 @@ export class ProductsController {
   }
 
   @Get(':id')
-  @Roles(...SALES)
+  @Roles(...SALES_READERS)
   findOne(
     @CurrentUser() user: AuthUser,
     @Param('id', ParseIntPipe) id: number,

@@ -16,7 +16,7 @@ import { UpdateCategoryDto } from './dto/update-category.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/auth-user';
-import { MANAGERS, SALES } from '../auth/roles';
+import { MANAGERS, SALES_READERS } from '../auth/roles';
 
 @ApiTags('categories')
 @ApiBearerAuth()
@@ -35,13 +35,13 @@ export class CategoriesController {
   }
 
   @Get()
-  @Roles(...SALES)
+  @Roles(...SALES_READERS)
   findAll(@CurrentUser() user: AuthUser, @Query('branch') branch?: string) {
     return this.categoriesService.findAll(user, branch);
   }
 
   @Get(':id')
-  @Roles(...SALES)
+  @Roles(...SALES_READERS)
   findOne(
     @CurrentUser() user: AuthUser,
     @Param('id', ParseIntPipe) id: number,

@@ -39,6 +39,7 @@ enum Role {
   BRANCH_MANAGER // Quản lý cơ sở
   CASHIER // Thu ngân
   STAFF // Nhân viên
+  BOARD // Hội đồng quản trị — view only, all branches; may wipe data
 }
 
 // Floor duty of an employee; who can be picked as CSKH / phục vụ on a room.
@@ -47,7 +48,7 @@ enum StaffPosition {
   SERVER
 }
 
-// Every account is an employee. branchId is null only for CHAIN_MANAGER.
+// Every account is an employee. branchId is null only for CHAIN_MANAGER and BOARD.
 // password is null until a manager activates the account (cannot log in).
 model User {
   id                        Int               @id @default(autoincrement())

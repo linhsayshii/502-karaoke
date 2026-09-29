@@ -12,6 +12,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { TableEmpty, TableSkeleton } from "@/components/data-states";
 import { DateRangePicker, formatDateRange, type DateRangeValue } from "@/components/date-range-picker";
+import { useAuth } from "@/components/auth-provider";
+import { can } from "@/lib/permissions";
 import { PageHeader } from "@/components/layout/page-header";
 import { LineItemsTable } from "@/components/line-items-table";
 import { ReasonDialog } from "@/components/reason-dialog";
@@ -203,6 +205,7 @@ function DocumentSheet({
 
 function DocumentDetail({ id, onChanged }: { id: number; onChanged: () => void }) {
   const notify = useNotify();
+  const { user } = useAuth();
   const [doc, setDoc] = useState<StockDocument | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
 
@@ -301,7 +304,7 @@ function DocumentDetail({ id, onChanged }: { id: number; onChanged: () => void }
         )}
       </div>
 
-      {doc && !doc.cancelledAt && (
+      {doc && !doc.cancelledAt && can(user, "inventory") && (
         <SheetFooter className="border-t">
           <Button variant="destructive" onClick={() => setCancelOpen(true)}>
             <BanIcon data-icon="inline-start" />

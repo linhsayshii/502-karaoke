@@ -14,7 +14,7 @@ import { InventoryService } from './inventory.service';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/auth-user';
-import { MANAGERS } from '../auth/roles';
+import { MANAGERS, READERS } from '../auth/roles';
 import { CancelReasonDto } from '../common/dto/cancel-reason.dto';
 import { CreateStockDocumentDto } from './dto/create-stock-document.dto';
 import {
@@ -24,7 +24,7 @@ import {
 
 @ApiTags('inventory')
 @ApiBearerAuth()
-@Roles(...MANAGERS)
+@Roles(...READERS)
 @Controller('inventory')
 export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
@@ -51,6 +51,7 @@ export class InventoryController {
   }
 
   @Post('documents')
+  @Roles(...MANAGERS)
   createDocument(
     @CurrentUser() user: AuthUser,
     @Query('branch') branch: string | undefined,
@@ -61,6 +62,7 @@ export class InventoryController {
 
   // Reverses the document's stock movements and its fund payment.
   @Post('documents/:id/cancel')
+  @Roles(...MANAGERS)
   @HttpCode(HttpStatus.OK)
   cancelDocument(
     @CurrentUser() user: AuthUser,

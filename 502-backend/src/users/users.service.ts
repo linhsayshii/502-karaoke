@@ -216,7 +216,9 @@ export class UsersService {
       throw new ForbiddenException('Bạn không có quyền quản lý tài khoản');
     }
 
-    if (role === Role.CHAIN_MANAGER) return { role, branchId: null };
+    if (role === Role.CHAIN_MANAGER || role === Role.BOARD) {
+      return { role, branchId: null };
+    }
     if (branchId === null) {
       throw new BadRequestException('Vui lòng chọn cơ sở cho tài khoản');
     }

@@ -1,4 +1,4 @@
-export type Role = "CHAIN_MANAGER" | "BRANCH_MANAGER" | "CASHIER" | "STAFF";
+export type Role = "CHAIN_MANAGER" | "BRANCH_MANAGER" | "CASHIER" | "STAFF" | "BOARD";
 export type StaffPosition = "CSKH" | "SERVER";
 
 export interface BranchRef {

@@ -15,6 +15,8 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TableEmpty, TableSkeleton } from "@/components/data-states";
 import { ExportExcelButton } from "@/components/export-excel-button";
+import { useAuth } from "@/components/auth-provider";
+import { can } from "@/lib/permissions";
 import { PageHeader } from "@/components/layout/page-header";
 import { useApiData } from "@/hooks/use-api-data";
 import { useNotify } from "@/hooks/use-notify";
@@ -67,6 +69,8 @@ function StatTile({ label, value, footer }: { label: string; value: string; foot
 // rooms, and what is really available.
 export default function StockPage() {
   const branch = useBranchCode();
+  const { user } = useAuth();
+  const canWrite = can(user, "inventory");
   const { data: list, loading } = useApiData<Product[]>("/inventory/stock", { branch }, [], "Không thể tải tồn kho");
   const products = loading && list.length === 0 ? null : list;
   const [search, setSearch] = useState("");
@@ -104,6 +108,8 @@ export default function StockPage() {
         actions={
           <>
             <ExportExcelButton onExport={products && shown.length > 0 ? exportExcel : undefined} />
+            {canWrite && (
+              <>
             <Button variant="outline" asChild>
               <Link href={`/${branch}/inventory/export`}>
                 <PackageMinusIcon data-icon="inline-start" />
@@ -116,6 +122,8 @@ export default function StockPage() {
                 Nhập hàng
               </Link>
             </Button>
+              </>
+            )}
           </>
         }
       />

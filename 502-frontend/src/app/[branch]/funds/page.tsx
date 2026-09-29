@@ -41,6 +41,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { TableEmpty, TableSkeleton } from "@/components/data-states";
 import { DateRangePicker, formatDateRange, type DateRangeValue } from "@/components/date-range-picker";
 import { ExportExcelButton } from "@/components/export-excel-button";
+import { useAuth } from "@/components/auth-provider";
+import { can } from "@/lib/permissions";
 import { PageHeader } from "@/components/layout/page-header";
 import { ReasonDialog } from "@/components/reason-dialog";
 import { StatTile } from "@/components/stat-tile";
@@ -87,6 +89,8 @@ function nowInput() {
 export default function FundsPage() {
   const branch = useBranchCode();
   const notify = useNotify();
+  const { user } = useAuth();
+  const canWrite = can(user, "funds");
   const [range, setRange] = useState<DateRangeValue>(() => ({ from: firstDayOfMonth(), to: businessDate() }));
   const [type, setType] = useState<FundType | typeof ALL>(ALL);
   const [method, setMethod] = useState<PaymentMethod | typeof ALL>(ALL);
@@ -191,6 +195,7 @@ export default function FundsPage() {
         title="Sổ quỹ"
         info={`Phiếu thu tiền hóa đơn và phiếu chi nhập hàng được ghi tự động. ${BUSINESS_DAY_HINT}`}
         actions={
+          canWrite && (
           <>
             <Button variant="outline" onClick={() => openForm("EXPENSE")}>
               <ArrowUpRightIcon data-icon="inline-start" />
@@ -201,6 +206,7 @@ export default function FundsPage() {
               Lập phiếu thu
             </Button>
           </>
+          )
         }
       />
 
@@ -360,7 +366,7 @@ export default function FundsPage() {
                       </TableCell>
                       <TableCell className={SHOW_FROM.lg}>{t.createdBy?.fullName ?? "—"}</TableCell>
                       <TableCell>
-                        {manual && !t.cancelledAt && (
+                        {canWrite && manual && !t.cancelledAt && (
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button variant="ghost" size="icon-sm" aria-label="Thao tác phiếu">

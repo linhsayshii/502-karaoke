@@ -14,6 +14,7 @@ Karaoke 502 is a management system for a **chain of karaoke venues/restaurants**
 - `BRANCH_MANAGER` — Quản lý cơ sở: the same, but only their own branch, and only manages `CASHIER`/`STAFF` accounts.
 - `CASHIER` — Thu ngân: own branch, cashier work only (open rooms, order, checkout). No inventory, reports, funds, catalog or accounts.
 - `STAFF` — Nhân viên: read-only view of the rooms whose open session they serve (as CSKH or phục vụ).
+- `BOARD` — Hội đồng quản trị (HĐQT): no branch, **view only** on every branch (reports, bills, stock, fund, rooms, accounts list; `READERS`/`SALES_READERS`/`ALL_BRANCH_ROLES` in `src/auth/roles.ts`; write routes stay on `MANAGERS`/`SALES`). Its one write is `POST /admin/purge {scope: 'branch'|'all', branch?, password}` (`src/data-purge`, BOARD only): after re-checking the caller's own password (403 on a wrong one, throttled like logins) it deletes in one transaction the bills, stock documents/movements, fund entries, products, categories and rooms of that branch or of the whole system; branches and accounts stay. Frontend: `Xóa dữ liệu` in the `NavUser` menu (`components/purge-data-dialog.tsx`); `lib/permissions.ts` gives BOARD only the `*.view` permissions, so write buttons and pages (`inventory`, `funds`, `sales.settings`, `users`, `imports`) stay hidden. Created by the chain manager (migration `20260929000000_board_role`).
 
 `User.position` (`CSKH` | `SERVER`) is independent of the role: it marks who can be assigned to a room session. Floor staff may have no password (`password` is nullable) and then cannot log in.
 

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import api, { getSessionExpiresAt, onSessionChange, onSessionExpired, setSession } from "@/lib/api";
 import { BrandMark } from "@/components/brand";
 import { Spinner } from "@/components/ui/spinner";
+import { can } from "@/lib/permissions";
 import type { Branch, User } from "@/lib/types";
 
 interface LoginData {
@@ -34,7 +35,7 @@ export function homePath(user: User, branches: Branch[]) {
 }
 
 export function canOpenBranch(user: User, branches: Branch[], code: string) {
-  return user.role === "CHAIN_MANAGER"
+  return can(user, "branch.switch")
     ? branches.some((b) => b.code === code)
     : user.branch?.code === code;
 }

@@ -73,16 +73,16 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Kho",
     items: [
-      { title: "Tồn kho", path: "/inventory/stock", icon: Boxes, permission: "inventory" },
+      { title: "Tồn kho", path: "/inventory/stock", icon: Boxes, permission: "inventory.view" },
       { title: "Nhập hàng", path: "/inventory/import", icon: PackagePlus, permission: "inventory" },
       { title: "Xuất hàng", path: "/inventory/export", icon: PackageMinus, permission: "inventory" },
-      { title: "Phiếu kho", path: "/inventory/documents", icon: FileText, permission: "inventory" },
+      { title: "Phiếu kho", path: "/inventory/documents", icon: FileText, permission: "inventory.view" },
       { title: "Danh mục hàng", path: "/inventory/settings", icon: Tags, permission: "inventory" },
     ],
   },
   {
     label: "Kế toán",
-    items: [{ title: "Sổ quỹ", path: "/funds", icon: Wallet, permission: "funds" }],
+    items: [{ title: "Sổ quỹ", path: "/funds", icon: Wallet, permission: "funds.view" }],
   },
   {
     label: "Quản trị",

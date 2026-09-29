@@ -8,6 +8,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   BRANCH_MANAGER: "Quản lý cơ sở",
   CASHIER: "Thu ngân",
   STAFF: "Nhân viên",
+  BOARD: "Hội đồng quản trị",
 };
 
 export const POSITION_LABELS = { CSKH: "CSKH", SERVER: "Phục vụ" } as const;
@@ -17,29 +18,37 @@ export type Permission =
   | "sales.operate" // open rooms, order, checkout
   | "sales.cancel"
   | "sales.editPaid" // correct a paid bill (stock and fund follow)
-  | "sales.reports"
+  | "sales.reports" // bill list (view)
   | "reports" // Báo cáo (managers)
   | "reports.chain" // whole-chain reports and branch comparison
   | "sales.settings" // rooms, categories, products
-  | "inventory"
-  | "funds"
+  | "inventory" // change stock, catalog
+  | "inventory.view" // stock and documents (read only)
+  | "funds" // write fund entries
+  | "funds.view" // sổ quỹ (read only)
+  | "purge" // wipe data (HĐQT only)
   | "users"
   | "branches"
   | "imports"; // Excel import (each kind also needs its own permission)
 
 const MANAGERS: Role[] = ["CHAIN_MANAGER", "BRANCH_MANAGER"];
+// HĐQT is read-only: it only appears in the "view" permissions below.
+const READERS: Role[] = [...MANAGERS, "BOARD"];
 
 const MATRIX: Record<Permission, Role[]> = {
-  "branch.switch": ["CHAIN_MANAGER"],
+  "branch.switch": ["CHAIN_MANAGER", "BOARD"],
   "sales.operate": [...MANAGERS, "CASHIER"],
   "sales.cancel": MANAGERS,
   "sales.editPaid": MANAGERS,
-  "sales.reports": MANAGERS,
-  reports: MANAGERS,
-  "reports.chain": ["CHAIN_MANAGER"],
+  "sales.reports": READERS,
+  reports: READERS,
+  "reports.chain": ["CHAIN_MANAGER", "BOARD"],
   "sales.settings": MANAGERS,
   inventory: MANAGERS,
+  "inventory.view": READERS,
   funds: MANAGERS,
+  "funds.view": READERS,
+  purge: ["BOARD"],
   users: MANAGERS,
   branches: ["CHAIN_MANAGER"],
   imports: MANAGERS,
@@ -56,8 +65,10 @@ const ROUTE_PERMISSIONS: [string, Permission][] = [
   ["/sales/statistics", "sales.reports"],
   ["/sales/overview", "sales.reports"],
   ["/sales/settings", "sales.settings"],
+  ["/inventory/stock", "inventory.view"],
+  ["/inventory/documents", "inventory.view"],
   ["/inventory", "inventory"],
-  ["/funds", "funds"],
+  ["/funds", "funds.view"],
   ["/admin/branches", "branches"],
   ["/imports", "imports"],
   ["/admin/reports", "reports"],

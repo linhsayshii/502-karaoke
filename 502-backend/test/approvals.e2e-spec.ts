@@ -260,6 +260,14 @@ describe('Sales approvals (e2e)', () => {
         })
         .expect(403);
       await as('cskh1_cs1').get(`/orders/${other}`).expect(403);
+      // Not even a PR/KTV into the room they look after.
+      const hoa = (
+        (await as('ql1_cs1').post('/pr/staff', { name: 'Hoa' }).expect(201))
+          .body as Json
+      ).id as number;
+      await as('cskh1_cs1')
+        .post('/pr/sessions', { orderId: mine, prStaffId: hoa })
+        .expect(403);
     });
 
   });

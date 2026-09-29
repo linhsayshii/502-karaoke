@@ -277,9 +277,18 @@ export class PrSessionsService {
   }
 
   // Order first, then the PR row (the same order everywhere, and checkout
-  // only locks orders and products): no deadlocks.
+  // only locks orders and products): no deadlocks. The fields the rules use
+  // (server, lock time) are read only once the row is locked, so a lock-time
+  // or server change committed meanwhile is seen.
   private async lockOpenOrder(tx: Db, user: AuthUser, orderId: number) {
-    const order = await tx.order.findUnique({
+    const found = await tx.order.findUnique({
+      where: { id: orderId },
+      select: { branchId: true },
+    });
+    if (!found) throw new NotFoundException('Không tìm thấy phòng đang hát');
+    this.branchScope.assertBranchAccess(user, found.branchId);
+    await lockOrderRow(tx, orderId, OrderStatus.PENDING, CLOSED_MESSAGE);
+    const order = await tx.order.findUniqueOrThrow({
       where: { id: orderId },
       select: {
         id: true,
@@ -289,9 +298,6 @@ export class PrSessionsService {
         timeLockedAt: true,
       },
     });
-    if (!order) throw new NotFoundException('Không tìm thấy phòng đang hát');
-    this.branchScope.assertBranchAccess(user, order.branchId);
-    await lockOrderRow(tx, orderId, OrderStatus.PENDING, CLOSED_MESSAGE);
     if (!order.startTime) {
       throw new BadRequestException('Phòng chưa bắt đầu tính giờ');
     }

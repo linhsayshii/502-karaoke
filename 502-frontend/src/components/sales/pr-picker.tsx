@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ListLimitNotice } from "@/components/data-states";
 import { useApiData } from "@/hooks/use-api-data";
 import type { AvailablePr, PrSession } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 const TILES = "grid grid-cols-2 gap-2 @lg/menu:grid-cols-3 @3xl/menu:grid-cols-4";
 
@@ -39,7 +40,7 @@ export function PrPicker({
   };
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
       <InputGroup>
         <InputGroupAddon>
           <SearchIcon />
@@ -98,7 +99,8 @@ function PrTiles({
           description={data.length === 0 ? "Thêm PR/KTV ở trang Thống kê PR." : "Thử từ khóa khác."}
         />
       ) : (
-        <div className={TILES}>
+        // Scrolls inside the card; the padding keeps the focus ring visible.
+        <div className={cn(TILES, "-m-1 min-h-0 overflow-y-auto p-1")}>
           {shown.map((pr) => {
             const here = pr.currentRoom?.orderId === orderId;
             const elsewhere = pr.currentRoom && !here;

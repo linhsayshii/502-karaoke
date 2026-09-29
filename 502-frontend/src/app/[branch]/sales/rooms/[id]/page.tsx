@@ -112,6 +112,10 @@ const ADJUSTMENT_ROW =
 const ADJUSTMENT_LABEL = "col-span-2 font-normal @sm/field-group:col-span-1";
 const clampPercent = (value: string) => Math.min(100, Math.max(0, Number(value) || 0));
 const nonNegative = (value: string) => Math.max(0, Math.floor(Number(value) || 0));
+// Side by side, both cards are as tall as the menu card showing 10 dishes
+// (header, tabs, search and one line of categories above them), never taller
+// than the screen; longer lists scroll inside the card.
+const PANEL_HEIGHT = "@2xl/main:h-[min(61rem,calc(100svh-8rem))]";
 
 export default function RoomDetailPage() {
   const params = useParams<{ id: string }>();
@@ -374,8 +378,8 @@ export default function RoomDetailPage() {
       <>
         <Skeleton className="h-12 w-72" />
         <div className="grid gap-4 @2xl/main:grid-cols-2">
-          <Skeleton className="h-[28rem] rounded-xl" />
-          <Skeleton className="h-[28rem] rounded-xl" />
+          <Skeleton className={cn("h-[28rem] rounded-xl", PANEL_HEIGHT)} />
+          <Skeleton className={cn("h-[28rem] rounded-xl", PANEL_HEIGHT)} />
         </div>
       </>
     );
@@ -520,8 +524,8 @@ export default function RoomDetailPage() {
         )}
       >
         {showLeft && (
-          <Card className="@container/menu min-w-0">
-            <Tabs defaultValue={canOperate ? "menu" : "pr"} className="gap-4">
+          <Card className={cn("@container/menu min-w-0", PANEL_HEIGHT)}>
+            <Tabs defaultValue={canOperate ? "menu" : "pr"} className="min-h-0 flex-1 gap-4">
               <CardHeader>
                 <CardTitle>{canOperate ? "Thực đơn & PR/KTV" : "PR/KTV"}</CardTitle>
                 <CardDescription>
@@ -541,8 +545,8 @@ export default function RoomDetailPage() {
                 </div>
               )}
               {canOperate && (
-                <TabsContent value="menu">
-                  <CardContent className="flex flex-col gap-4">
+                <TabsContent value="menu" className="flex min-h-0 flex-col">
+                  <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
                     <InputGroup>
                       <InputGroupAddon>
                         <SearchIcon />
@@ -584,7 +588,7 @@ export default function RoomDetailPage() {
                         }
                       />
                     ) : (
-                      <ItemGroup className="overflow-hidden rounded-lg border">
+                      <ItemGroup className="min-h-0 overflow-y-auto rounded-lg border">
                         {menu.map((product, index) => {
                           const left = available(product);
                           const inBill = ordered.get(product.id);
@@ -621,8 +625,8 @@ export default function RoomDetailPage() {
                 </TabsContent>
               )}
               {canAssignPr && (
-                <TabsContent value="pr">
-                  <CardContent>
+                <TabsContent value="pr" className="flex min-h-0 flex-col">
+                  <CardContent className="flex min-h-0 flex-1 flex-col">
                     <PrPicker branch={branch} orderId={order.id} sessions={order.prSessions ?? []} onAdd={addPr} />
                   </CardContent>
                 </TabsContent>
@@ -632,7 +636,10 @@ export default function RoomDetailPage() {
         )}
 
         <Card
-          className={cn("min-w-0", showLeft && "order-first @2xl/main:order-none @2xl/main:sticky @2xl/main:top-4")}
+          className={cn(
+            "min-w-0",
+            showLeft && ["order-first @2xl/main:order-none @2xl/main:sticky @2xl/main:top-4", PANEL_HEIGHT],
+          )}
         >
           <CardHeader>
             <CardTitle>Hóa đơn #{order.id}</CardTitle>
@@ -643,7 +650,8 @@ export default function RoomDetailPage() {
               <Badge variant="destructive">Đang hát</Badge>
             </CardAction>
           </CardHeader>
-          <CardContent className="flex flex-col gap-4">
+          {/* Scrolls when the bill is longer than the card; header and Thanh toán stay. */}
+          <CardContent className="-my-1 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto py-1">
             {canOperate ? (
               <FieldGroup className="grid grid-cols-2 gap-3">
                 {staffSelect("cskhId", "CSKH", cskhStaff)}

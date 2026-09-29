@@ -45,6 +45,11 @@ export function formatDuration(minutes: number) {
   return `${hours} giờ ${String(rest).padStart(2, "0")} phút`;
 }
 
+// A duration as HH:mm (125 minutes → "02:05"); hours may pass 24.
+export function formatClock(minutes: number) {
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
 // Elapsed time on the room map: "45 phút" up to an hour, then "1h23p"
 // (hours, then the minutes left over).
 export function formatElapsed(minutes: number) {

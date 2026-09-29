@@ -82,6 +82,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: "Hàng hóa", path: "/reports/products", icon: Package, permission: "reports" },
       { title: "Khung giờ", path: "/reports/hours", icon: Clock, permission: "reports" },
       { title: "Lãi lỗ", path: "/reports/profit", icon: Scale, permission: "reports" },
+      { title: "Tồn kho", path: "/reports/stock", icon: Boxes, permission: "reports" },
       { title: "Xuất nhập tồn", path: "/reports/inventory", icon: Warehouse, permission: "reports" },
       { title: "So sánh cơ sở", path: "/reports/branches", icon: ChartLine, permission: "reports.chain" },
     ],
@@ -89,7 +90,6 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Kho",
     items: [
-      { title: "Tồn kho", path: "/inventory/stock", icon: Boxes, permission: "inventory.view" },
       { title: "Nhập hàng", path: "/inventory/import", icon: PackagePlus, permission: "inventory" },
       { title: "Xuất hàng", path: "/inventory/export", icon: PackageMinus, permission: "inventory" },
       { title: "Phiếu kho", path: "/inventory/documents", icon: FileText, permission: "inventory.view" },

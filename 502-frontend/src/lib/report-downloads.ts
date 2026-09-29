@@ -1,9 +1,11 @@
 import {
+  Boxes,
   ChartColumnBig,
   ChartLine,
   Clock,
   DoorOpen,
   Package,
+  ReceiptText,
   Scale,
   UserRound,
   Wallet,
@@ -14,6 +16,7 @@ import api from "@/lib/api";
 import type { ExportTable } from "@/lib/excel-export";
 import type { Permission } from "@/lib/permissions";
 import {
+  billsSheet,
   branchPeriodsSheet,
   branchesSheet,
   fundEntriesSheet,
@@ -26,6 +29,7 @@ import {
   revenuePeriodsSheet,
   roomsSheet,
   staffSheet,
+  stockQuantitySheet,
 } from "@/lib/report-sheets";
 import { dayCount, MAX_BILLS_RANGE_DAYS } from "@/lib/reports";
 import type {
@@ -35,6 +39,7 @@ import type {
   GroupBy,
   HoursReport,
   InventoryReport,
+  Order,
   ProductReport,
   ProfitReport,
   RevenueReport,
@@ -86,6 +91,18 @@ const periods = (ctx: DownloadContext) => ({ ...range(ctx), groupBy: ctx.groupBy
 
 // GET /funds returns at most this many entries (funds.service.ts).
 const FUND_ENTRIES_LIMIT = 500;
+// GET /orders returns at most this many bills (orders.service.ts findAll).
+const BILLS_LIMIT = 1000;
+
+// Hóa đơn and Sổ quỹ are lists of one branch, over at most a year.
+const branchListUnavailable =
+  (title: string) =>
+  ({ chain, from, to }: Pick<DownloadContext, "chain" | "from" | "to">) =>
+    chain
+      ? `${title} chỉ xuất theo từng cơ sở.`
+      : dayCount(from, to) > MAX_BILLS_RANGE_DAYS
+        ? `${title} chỉ xuất tối đa ${MAX_BILLS_RANGE_DAYS} ngày.`
+        : null;
 
 export const DOWNLOAD_REPORTS: DownloadReport[] = [
   {
@@ -202,15 +219,50 @@ export const DOWNLOAD_REPORTS: DownloadReport[] = [
     ],
   },
   {
+    title: "Tồn kho",
+    description: "Tồn đầu, nhập, xuất, tồn cuối của từng món theo số lượng, kèm chi tiết bán, phiếu xuất và hoàn / điều chỉnh.",
+    icon: Boxes,
+    sheets: [
+      {
+        key: "stock",
+        label: "Theo số lượng",
+        sheet: "Tồn kho",
+        // The same request as Xuất nhập tồn: one download fetches it once.
+        build: async (ctx) =>
+          stockQuantitySheet((await ctx.get<InventoryReport>("/reports/inventory", range(ctx))).rows, "Tồn kho"),
+      },
+    ],
+  },
+  {
+    title: "Hóa đơn",
+    description: "Danh sách hóa đơn đã thanh toán và đã hủy: giờ vào ra, CSKH, phục vụ, thu ngân, tiền giờ, tiền hàng, giảm giá, VAT.",
+    icon: ReceiptText,
+    unavailable: branchListUnavailable("Hóa đơn"),
+    sheets: [
+      {
+        key: "bills",
+        label: "Danh sách",
+        sheet: "Hóa đơn",
+        build: async (ctx) => {
+          const orders = await ctx.get<Order[]>("/orders", range(ctx));
+          if (orders.length >= BILLS_LIMIT) {
+            ctx.warn(
+              `Sheet "Hóa đơn" chỉ gồm ${BILLS_LIMIT} hóa đơn mới nhất; chọn khoảng ngày ngắn hơn để có đủ.`,
+            );
+          }
+          return billsSheet(
+            orders.filter((o) => o.status !== "PENDING"),
+            "Hóa đơn",
+          );
+        },
+      },
+    ],
+  },
+  {
     title: "Sổ quỹ",
     description: "Tồn đầu kỳ, thu, chi, tồn cuối kỳ theo hình thức, và danh sách phiếu thu chi.",
     icon: Wallet,
-    unavailable: ({ chain, from, to }) =>
-      chain
-        ? "Sổ quỹ chỉ xuất theo từng cơ sở."
-        : dayCount(from, to) > MAX_BILLS_RANGE_DAYS
-          ? `Sổ quỹ chỉ xuất tối đa ${MAX_BILLS_RANGE_DAYS} ngày.`
-          : null,
+    unavailable: branchListUnavailable("Sổ quỹ"),
     sheets: [
       {
         key: "funds.summary",

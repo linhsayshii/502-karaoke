@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ReceiptTextIcon, SearchIcon } from "lucide-react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
@@ -10,13 +11,17 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ListLimitNotice, TableEmpty, TableSkeleton } from "@/components/data-states";
 import { DateRangePicker, formatDateRange, type DateRangeValue } from "@/components/date-range-picker";
+import { ExportExcelButton } from "@/components/export-excel-button";
 import { PageHeader } from "@/components/layout/page-header";
 import { BillSheet, ORDER_STATUS_BADGE } from "@/components/sales/bill-sheet";
 import { useNotify } from "@/hooks/use-notify";
 import api, { totalCountOf } from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
-import { billLabel, businessDate, formatDuration, formatMoney, formatNumber, formatTime, minutesBetween } from "@/lib/format";
+import { exportWorkbook } from "@/lib/excel-export";
+import { billLabel, businessDate, formatClock, formatMoney, formatNumber, formatTime, minutesBetween } from "@/lib/format";
 import { BUSINESS_DAY_HINT, ORDER_STATUS_LABELS, PAYMENT_METHOD_LABELS } from "@/lib/labels";
+import { billsSheet } from "@/lib/report-sheets";
+import { reportFileName } from "@/lib/reports";
 import { SHOW_FROM } from "@/lib/responsive";
 import type { Order, OrderStatus, OrderSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -26,7 +31,7 @@ type StatusFilter = Exclude<OrderStatus, "PENDING"> | typeof ALL;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // A whole số hóa đơn (DDMM + room + sequence) is looked up over every day.
 const FULL_BILL_NUMBER_RE = /^\d{11,}$/;
-const COLUMNS = [SHOW_FROM.xs, "", SHOW_FROM.sm, SHOW_FROM.md, SHOW_FROM.lg, SHOW_FROM.sm, "", ""];
+const COLUMNS = [SHOW_FROM.xs, "", SHOW_FROM.sm, SHOW_FROM.md, SHOW_FROM.lg, SHOW_FROM.lg, SHOW_FROM.sm, "", ""];
 
 // Closed bills (paid or cancelled) of a period, by business day of payment /
 // cancellation — the same days as Doanh thu and Sổ quỹ.
@@ -111,12 +116,30 @@ function BillsView() {
     [listed, status, keyword, numberQuery],
   );
 
+  // The bills as filtered on screen, with every column of the bill.
+  const exportExcel = async () => {
+    const name = numberQuery
+      ? `hoa-don_${branch}_${numberQuery}.xlsx`
+      : reportFileName("hoa-don", branch, range.from, range.to);
+    await exportWorkbook(name, [billsSheet(shown)]);
+    if (!numberQuery && orders && total !== null && total > orders.length) {
+      toast.warning(
+        `File chỉ gồm ${formatNumber(orders.length)} / ${formatNumber(total)} hóa đơn mới nhất; chọn khoảng ngày ngắn hơn để có đủ.`,
+      );
+    }
+  };
+
   return (
     <>
       <PageHeader
         title="Hóa đơn"
         info={`Hóa đơn đã thanh toán hoặc đã hủy, theo ngày kinh doanh lúc thanh toán/hủy. ${BUSINESS_DAY_HINT}`}
-        actions={<DateRangePicker value={range} onChange={setRange} align="end" />}
+        actions={
+          <>
+            <ExportExcelButton onExport={listed && shown.length > 0 ? exportExcel : undefined} />
+            <DateRangePicker value={range} onChange={setRange} align="end" />
+          </>
+        }
       />
 
       <Card>
@@ -183,7 +206,8 @@ function BillsView() {
                   <TableHead>Phòng</TableHead>
                   <TableHead className={SHOW_FROM.sm}>Giờ vào – ra</TableHead>
                   <TableHead className={SHOW_FROM.md}>Thời lượng</TableHead>
-                  <TableHead className={SHOW_FROM.lg}>CSKH / Phục vụ</TableHead>
+                  <TableHead className={SHOW_FROM.lg}>CSKH</TableHead>
+                  <TableHead className={SHOW_FROM.lg}>Phục vụ</TableHead>
                   <TableHead className={SHOW_FROM.sm}>Hình thức</TableHead>
                   <TableHead className="text-right">Thành tiền</TableHead>
                   <TableHead>Trạng thái</TableHead>
@@ -194,7 +218,7 @@ function BillsView() {
                   <TableSkeleton columns={COLUMNS} />
                 ) : shown.length === 0 ? (
                   <TableEmpty
-                    colSpan={8}
+                    colSpan={9}
                     icon={ReceiptTextIcon}
                     title="Không có hóa đơn"
                     description="Không có hóa đơn nào khớp với bộ lọc trong khoảng thời gian này."
@@ -216,11 +240,14 @@ function BillsView() {
                       <TableCell className={cn("tabular-nums", SHOW_FROM.sm)}>
                         {formatTime(order.startTime)} – {formatTime(order.endTime)}
                       </TableCell>
-                      <TableCell className={SHOW_FROM.md}>
-                        {order.endTime ? formatDuration(minutesBetween(order.startTime, new Date(order.endTime))) : "—"}
+                      <TableCell className={cn("tabular-nums", SHOW_FROM.md)}>
+                        {order.endTime ? formatClock(minutesBetween(order.startTime, new Date(order.endTime))) : "—"}
                       </TableCell>
-                      <TableCell className={cn("max-w-48 truncate", SHOW_FROM.lg)}>
-                        {[order.cskh?.fullName, order.server?.fullName].filter(Boolean).join(" / ") || "—"}
+                      <TableCell className={cn("max-w-40 truncate", SHOW_FROM.lg)}>
+                        {order.cskh?.fullName ?? "—"}
+                      </TableCell>
+                      <TableCell className={cn("max-w-40 truncate", SHOW_FROM.lg)}>
+                        {order.server?.fullName ?? "—"}
                       </TableCell>
                       <TableCell className={SHOW_FROM.sm}>
                         {order.paymentMethod ? PAYMENT_METHOD_LABELS[order.paymentMethod] : "—"}

@@ -1,10 +1,20 @@
 import { toSheet, type ExportColumn, type ExportTable } from "@/lib/excel-export";
-import { billLabel, formatDate, formatDateTime, formatMoney, formatPercent } from "@/lib/format";
+import {
+  billLabel,
+  businessDate,
+  formatClock,
+  formatDate,
+  formatDateTime,
+  formatMoney,
+  formatPercent,
+  minutesBetween,
+} from "@/lib/format";
 import {
   DOC_TYPE_LABELS,
   FUND_TYPE_LABELS,
   NO_CATEGORY,
   NO_ROOM,
+  ORDER_STATUS_LABELS,
   PAYMENT_METHOD_LABELS,
   roomTypeLabel,
   STAFF_ROLE_LABELS,
@@ -23,6 +33,7 @@ import type {
   HoursReport,
   InventoryFlows,
   InventoryReportRow,
+  Order,
   ProductGroup,
   ProductReport,
   ProductReportRow,
@@ -353,6 +364,122 @@ export function branchPeriodsSheet(data: BranchesReport, name = "Doanh thu theo 
     values: data.branches.map((b) => b.revenue),
     total: data.totals.revenue,
   });
+}
+
+// ---- Tồn kho (số lượng)
+
+// The quantities of Xuất nhập tồn, every product and every flow: the
+// balance (tồn đầu + nhập − xuất = tồn cuối), then what nhập and xuất are
+// made of (tồn đầu + nhập theo phiếu − bán − phiếu xuất ± hoàn / điều
+// chỉnh = tồn cuối too). No total row: quantities of different units do
+// not add up.
+const stockQuantityColumns: ExportColumn<InventoryReportRow>[] = [
+  { header: "Tên mặt hàng", value: (r) => r.name },
+  { header: "Danh mục", value: (r) => r.categoryName ?? NO_CATEGORY },
+  { header: "ĐVT", value: (r) => r.unit || null },
+  ...INVENTORY_COLUMNS.map(
+    ({ key, label }): ExportColumn<InventoryReportRow> => ({
+      header: label,
+      group: "Số lượng",
+      type: "number",
+      value: (r) => r[key].quantity,
+    }),
+  ),
+  ...(
+    [
+      ["imports", "Nhập theo phiếu"],
+      ["sales", "Bán"],
+      ["exports", "Phiếu xuất"],
+      ["others", "Hoàn / điều chỉnh (±)"],
+    ] as const
+  ).map(
+    ([key, header]): ExportColumn<InventoryReportRow> => ({
+      header,
+      group: "Chi tiết phát sinh",
+      type: "number",
+      value: (r) => r[key].quantity,
+    }),
+  ),
+];
+
+export function stockQuantitySheet(rows: InventoryReportRow[], name = "Tồn kho"): ExportTable {
+  const chain = new Set(rows.map((r) => r.branchCode)).size > 1;
+  return toSheet(name, chain ? [...stockQuantityColumns, branchColumn] : stockQuantityColumns, rows);
+}
+
+// ---- Hóa đơn
+
+// A bill, or the total row (order null) of the paid ones.
+interface BillRow {
+  order: Order | null;
+  amounts: number[] | null;
+}
+
+// The amounts of a bill, left to right. A cancelled bill has none: it is
+// out of every total, as in the revenue report.
+const BILL_AMOUNTS: [string, (o: Order) => number][] = [
+  ["Tiền giờ", (o) => Number(o.hourlyFee)],
+  ["Giảm tiền giờ", (o) => Number(o.hourlyDiscountAmount)],
+  ["Tiền hàng", (o) => Number(o.totalProductPrice)],
+  ["Giảm tiền hàng", (o) => Number(o.discountAmount)],
+  ["Doanh thu chưa VAT", (o) => Number(o.finalAmount) - Number(o.taxAmount)],
+  ["VAT", (o) => Number(o.taxAmount)],
+  ["Thành tiền", (o) => Number(o.finalAmount)],
+];
+
+const billText = (value: (o: Order) => string | null | undefined) => (r: BillRow) =>
+  r.order ? (value(r.order) ?? null) : null;
+
+const billNote = (o: Order) =>
+  [
+    o.status === "CANCELLED" &&
+      `Đã hủy: ${[o.cancelReason, o.cancelledBy?.fullName].filter(Boolean).join(" · ") || "—"}`,
+    o.editedAt && `Đã sửa: ${[o.editReason, o.editedBy?.fullName].filter(Boolean).join(" · ") || "—"}`,
+  ]
+    .filter(Boolean)
+    .join("; ") || null;
+
+const billColumns: ExportColumn<BillRow>[] = [
+  {
+    header: "Số hóa đơn",
+    value: (r) => (r.order ? billLabel(r.order) : "Tổng hóa đơn đã thanh toán"),
+  },
+  { header: "Ngày", value: billText((o) => o.endTime && formatDate(businessDate(new Date(o.endTime)))) },
+  { header: "Phòng", value: billText((o) => o.room?.name ?? NO_ROOM) },
+  { header: "Giờ vào", value: billText((o) => formatDateTime(o.startTime)) },
+  { header: "Giờ ra", value: billText((o) => formatDateTime(o.endTime)) },
+  {
+    header: "Thời lượng",
+    value: billText((o) => (o.endTime ? formatClock(minutesBetween(o.startTime, new Date(o.endTime))) : null)),
+  },
+  { header: "CSKH", value: billText((o) => o.cskh?.fullName) },
+  { header: "Phục vụ", value: billText((o) => o.server?.fullName) },
+  { header: "Thu ngân", value: billText((o) => o.checkedOutBy?.fullName) },
+  { header: "Giá giờ", type: "money", value: (r) => (r.order ? Number(r.order.pricePerHour) : null) },
+  ...BILL_AMOUNTS.map(
+    ([header], i): ExportColumn<BillRow> => ({ header, type: "money", value: (r) => r.amounts?.[i] ?? null }),
+  ),
+  { header: "Hình thức", value: billText((o) => o.paymentMethod && PAYMENT_METHOD_LABELS[o.paymentMethod]) },
+  { header: "Trạng thái", value: billText((o) => ORDER_STATUS_LABELS[o.status]) },
+  {
+    header: "Hàng đã gọi",
+    value: billText((o) => o.items.map((i) => `${i.product?.name ?? `#${i.productId}`} × ${i.quantity}`).join("; ")),
+  },
+  { header: "Ghi chú", value: billText(billNote) },
+];
+
+// `orders`: closed bills (paid or cancelled), as listed. The last row sums
+// the paid ones.
+export function billsSheet(orders: Order[], name = "Hóa đơn"): ExportTable {
+  const paid = orders.filter((o) => o.status === "COMPLETED");
+  const rows = orders.map(
+    (order): BillRow => ({
+      order,
+      amounts: order.status === "COMPLETED" ? BILL_AMOUNTS.map(([, amount]) => amount(order)) : null,
+    }),
+  );
+  const totals = BILL_AMOUNTS.map(([, amount]) => paid.reduce((sum, o) => sum + amount(o), 0));
+  return toSheet(name, billColumns, rows, { order: null, amounts: totals });
 }
 
 // ---- Sổ quỹ

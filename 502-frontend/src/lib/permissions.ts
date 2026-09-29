@@ -86,7 +86,7 @@ const ROUTE_PERMISSIONS: [string, Permission][] = [
   ["/sales/statistics", "sales.reports"],
   ["/sales/overview", "sales.reports"],
   ["/sales/settings", "catalog.view"],
-  ["/inventory/stock", "inventory.view"],
+  ["/inventory/stock", "reports"], // redirects to /reports/stock
   ["/inventory/documents", "inventory.view"],
   ["/inventory/settings", "catalog.view"],
   ["/inventory", "inventory"],

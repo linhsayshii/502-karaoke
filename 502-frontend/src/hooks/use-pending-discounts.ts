@@ -18,10 +18,17 @@ export function usePendingDiscounts(): number | null {
   const [count, setCount] = useState<number | null>(null);
   // Last count seen: the toast fires only when it grows, never on first load.
   const last = useRef<number | null>(null);
+  // Numbers the requests: a response older than one already applied is dropped,
+  // so overlapping loads (poll + DISCOUNTS_CHANGED) never fake a rise.
+  const requestSeq = useRef(0);
+  const appliedSeq = useRef(0);
 
   const load = useCallback(async () => {
+    const seq = ++requestSeq.current;
     try {
       const { data } = await api.get<{ count: number }>("/discount-requests/pending-count");
+      if (seq < appliedSeq.current) return;
+      appliedSeq.current = seq;
       if (last.current !== null && data.count > last.current) {
         toast.info("Có yêu cầu giảm giá mới chờ duyệt");
       }

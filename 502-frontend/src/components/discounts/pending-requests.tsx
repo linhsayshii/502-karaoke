@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { CheckIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState, ListLimitNotice } from "@/components/data-states";
 import { ReasonDialog } from "@/components/reason-dialog";
@@ -19,10 +20,10 @@ import type { DiscountRequestRow } from "@/lib/types";
 // branch); whoever acts first wins, the other gets a 409 naming who decided.
 export function PendingRequests() {
   const notify = useNotify();
-  const { data, total, loading, reload } = useApiData<DiscountRequestRow[]>(
+  const { data, total, loading, reload } = useApiData<DiscountRequestRow[] | null>(
     "/discount-requests/pending",
     {},
-    [],
+    null,
     "Không thể tải yêu cầu chờ duyệt",
   );
   const [rejecting, setRejecting] = useState<DiscountRequestRow | null>(null);
@@ -59,19 +60,30 @@ export function PendingRequests() {
     }
   };
 
-  if (!loading && data.length === 0) {
+  // `data` stays null until the first load lands; a poll (loading again)
+  // keeps showing the current list or empty state.
+  const rows = data ?? [];
+  if (data === null && loading) {
+    return (
+      <div className="grid gap-4 @3xl/main:grid-cols-2">
+        <Skeleton className="h-44 w-full" />
+        <Skeleton className="hidden h-44 w-full @3xl/main:block" />
+      </div>
+    );
+  }
+  if (rows.length === 0) {
     return <EmptyState icon={CheckIcon} title="Không có yêu cầu chờ duyệt" />;
   }
   return (
     <div className="flex flex-col gap-4">
       <ListLimitNotice
-        shown={data.length}
+        shown={rows.length}
         total={total}
         noun="yêu cầu"
         hint="Duyệt hoặc từ chối bớt để thấy các yêu cầu còn lại."
       />
       <div className="grid gap-4 @3xl/main:grid-cols-2">
-        {data.map((r) => (
+        {rows.map((r) => (
           <Card key={r.id}>
             <CardHeader>
               <CardTitle>

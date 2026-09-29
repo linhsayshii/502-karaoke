@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { BadgePercentIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ListLimitNotice, TableEmpty, TableSkeleton } from "@/components/data-states";
 import { DateRangePicker, type DateRangeValue } from "@/components/date-range-picker";
@@ -20,6 +21,7 @@ const STATUS: Record<DiscountRequestStatus, { label: string; variant: "success" 
   CANCELLED: { label: "Đã hủy", variant: "secondary" },
   EXPIRED: { label: "Hết hạn", variant: "secondary" },
 };
+const ALL = "all";
 const SOURCE: Record<DiscountSource, string> = {
   REQUEST: "Thu ngân xin",
   DIRECT: "Áp trực tiếp",
@@ -31,16 +33,32 @@ const SOURCE: Record<DiscountSource, string> = {
 export function DiscountLog() {
   const branch = useBranchCode();
   const [range, setRange] = useState<DateRangeValue>(() => ({ from: businessDate(), to: businessDate() }));
+  const [status, setStatus] = useState<DiscountRequestStatus | typeof ALL>(ALL);
   const { data, total, loading } = useApiData<DiscountRequestRow[]>(
     "/discount-requests",
-    { branch, ...range },
+    { branch, ...range, status: status === ALL ? undefined : status },
     [],
     "Không thể tải nhật ký giảm giá",
   );
   return (
     <div className="flex flex-col gap-4">
-      <div>
+      <div className="flex flex-wrap items-center gap-2">
         <DateRangePicker value={range} onChange={setRange} />
+        <Select value={status} onValueChange={(value) => setStatus(value as DiscountRequestStatus | typeof ALL)}>
+          <SelectTrigger className="w-full sm:w-48" aria-label="Lọc trạng thái">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem value={ALL}>Tất cả trạng thái</SelectItem>
+              {(Object.keys(STATUS) as DiscountRequestStatus[]).map((key) => (
+                <SelectItem key={key} value={key}>
+                  {STATUS[key].label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
       </div>
       <ListLimitNotice
         shown={data.length}

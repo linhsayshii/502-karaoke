@@ -179,7 +179,7 @@ function BillDetail({ orderId, onChanged }: { orderId: number; onChanged: () => 
         )}
       </div>
 
-      {order?.status === "COMPLETED" && (can(user, "sales.editPaid") || can(user, "sales.cancel")) && (
+      {order?.status === "COMPLETED" && (can(user, "sales.editPaid") || can(user, "sales.void")) && (
         <SheetFooter className="border-t">
           {can(user, "sales.editPaid") && (
             <Button variant="outline" onClick={() => setEditOpen(true)}>
@@ -187,7 +187,7 @@ function BillDetail({ orderId, onChanged }: { orderId: number; onChanged: () => 
               Sửa hóa đơn
             </Button>
           )}
-          {can(user, "sales.cancel") && (
+          {can(user, "sales.void") && (
             <Button variant="destructive" onClick={() => setVoidOpen(true)}>
               <BanIcon data-icon="inline-start" />
               Hủy hóa đơn

@@ -69,6 +69,7 @@ export interface Room {
   activeOrder?: {
     id: number;
     startTime: string;
+    timeLockedAt: string | null;
     cskh: StaffRef | null;
     server: StaffRef | null;
   } | null;
@@ -128,6 +129,11 @@ export interface Order {
   editedBy?: StaffRef | null;
   editedAt?: string | null;
   editReason?: string | null;
+  // Chốt giờ: the room fee stops here; checkout takes it as endTime.
+  timeLockedAt: string | null;
+  timeLockedBy?: StaffRef | null;
+  // Only on a single order: the discount request waiting for a manager (0 or 1).
+  discountRequests?: PendingDiscount[];
   startTime: string;
   endTime: string | null;
   updatedAt: string;
@@ -566,4 +572,37 @@ export interface DataPurgeLog {
   success: boolean;
   deleted: Record<string, number> | null;
   userAgent: string | null;
+}
+
+export type Adjustments = Pick<
+  Order,
+  "discountPercent" | "hourlyDiscountPercent" | "taxPercent"
+> & { discountAmount: number; hourlyDiscountAmount: number };
+
+export type DiscountRequestStatus = "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED" | "EXPIRED";
+export type DiscountSource = "REQUEST" | "DIRECT" | "PAID_EDIT";
+
+export interface PendingDiscount {
+  id: number;
+  after: Adjustments;
+  note: string | null;
+  amountBefore: string | number;
+  amountAfter: string | number;
+  createdAt: string;
+  requestedBy: StaffRef | null;
+}
+
+// GET /discount-requests (queue, log, one request).
+export interface DiscountRequestRow extends Omit<PendingDiscount, "after"> {
+  branchId: number;
+  orderId: number;
+  status: DiscountRequestStatus;
+  source: DiscountSource;
+  before: Adjustments;
+  after: Adjustments;
+  decidedAt: string | null;
+  decisionNote: string | null;
+  decidedBy: StaffRef | null;
+  branch: { id: number; code: string; name: string };
+  order: { id: number; billNumber: string | null; status: OrderStatus; room: { id: number; name: string } | null };
 }

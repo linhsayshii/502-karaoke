@@ -68,29 +68,14 @@ import { computeBill } from "@/lib/billing";
 import { useBranchCode } from "@/lib/branch";
 import { formatDuration, formatMoney, formatNumber, formatTime } from "@/lib/format";
 import { can } from "@/lib/permissions";
-import type { FloorStaff, Order, Product, Room } from "@/lib/types";
+import { adjustmentsOf } from "@/lib/discount-rules";
+import type { Adjustments, FloorStaff, Order, Product, Room } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type Line = { productId: number; quantity: number };
 
-interface Adjustments {
-  discountPercent: number;
-  discountAmount: number;
-  hourlyDiscountPercent: number;
-  hourlyDiscountAmount: number;
-  taxPercent: number;
-}
-
 type PercentKey = "discountPercent" | "hourlyDiscountPercent";
 type AmountKey = "discountAmount" | "hourlyDiscountAmount";
-
-const adjustmentsOf = (order: Order): Adjustments => ({
-  discountPercent: order.discountPercent,
-  discountAmount: Number(order.discountAmount),
-  hourlyDiscountPercent: order.hourlyDiscountPercent,
-  hourlyDiscountAmount: Number(order.hourlyDiscountAmount),
-  taxPercent: order.taxPercent,
-});
 
 // A bill line as shown: saved, or tapped and not saved yet.
 type ShownLine = Line & { price: number; name: string; unit: string };

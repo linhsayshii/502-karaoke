@@ -1,4 +1,4 @@
-import type { Role, User } from "@/lib/types";
+import type { Order, Role, User } from "@/lib/types";
 
 // UI-side copy of the backend permission matrix. It only hides what the user
 // cannot use; the backend guards are what actually enforce access.
@@ -18,6 +18,9 @@ export type Permission =
   | "sales.operate" // open rooms, order, checkout
   | "sales.cancel"
   | "sales.editPaid" // correct a paid bill (stock and fund follow)
+  | "sales.void" // void a paid bill (chain manager only)
+  | "discounts.approve" // approve / reject cashiers' discount requests
+  | "discounts.view" // discount log (read only)
   | "sales.reports" // bill list (view)
   | "reports" // Báo cáo (managers)
   | "reports.chain" // whole-chain reports and branch comparison
@@ -46,7 +49,10 @@ const MATRIX: Record<Permission, Role[]> = {
   "branch.switch": ["CHAIN_MANAGER", "BOARD"],
   "sales.operate": [...MANAGERS, "CASHIER"],
   "sales.cancel": MANAGERS,
-  "sales.editPaid": MANAGERS,
+  "sales.editPaid": ["CHAIN_MANAGER"],
+  "sales.void": ["CHAIN_MANAGER"],
+  "discounts.approve": MANAGERS,
+  "discounts.view": READERS,
   "sales.reports": READERS,
   reports: READERS,
   "reports.chain": ["CHAIN_MANAGER", "BOARD"],
@@ -85,6 +91,7 @@ const ROUTE_PERMISSIONS: [string, Permission][] = [
   ["/reports", "reports"],
   ["/sales/statistics", "sales.reports"],
   ["/sales/overview", "sales.reports"],
+  ["/sales/discounts", "discounts.view"],
   ["/sales/settings", "catalog.view"],
   ["/inventory/stock", "reports"], // redirects to /reports/stock
   ["/inventory/documents", "inventory.view"],
@@ -102,4 +109,10 @@ const ROUTE_PERMISSIONS: [string, Permission][] = [
 export function canVisit(user: User | null, subPath: string): boolean {
   const rule = ROUTE_PERMISSIONS.find(([prefix]) => subPath.startsWith(prefix));
   return rule ? can(user, rule[1]) : !!user;
+}
+
+// The floor staff member assigned as server of this session: orders for it,
+// brings PR/KTV in and locks its time. The backend checks it again.
+export function isServerOf(user: User | null, order: Pick<Order, "serverId">): boolean {
+  return !!user && user.role === "STAFF" && order.serverId === user.id;
 }

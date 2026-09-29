@@ -1,4 +1,5 @@
 import {
+  BadgePercent,
   Boxes,
   Building2,
   ChartColumnBig,
@@ -57,6 +58,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: ReceiptText,
         permission: "sales.reports",
       },
+      { title: "Duyệt giảm giá", path: "/sales/discounts", icon: BadgePercent, permission: "discounts.view" },
       { title: "Cài đặt bán hàng", path: "/sales/settings", icon: Settings2, permission: "catalog.view" },
     ],
   },

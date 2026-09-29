@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Product direction
 
-Karaoke 502 is a management system for a **chain of karaoke venues/restaurants** (branches `cs1`–`cs4`, "Cơ sở 1–4"). The target scope is:
+Karaoke 502 is a management system for a **chain of karaoke venues/restaurants** (branches `cs1`–`cs5`, "Cơ sở 1–5"). The target scope is:
 - **Sales (Bán hàng)**: room sessions, ordering food/drinks into a room, checkout/billing per branch.
 - **Inventory (Kho)**: stock import (nhập kho) and export (xuất kho), stock levels.
 - **Accounting (Kế toán)**: revenue/bill/staff statistics, cash fund (quỹ thu/chi), and accounting reports generated inside the system.
@@ -43,7 +43,7 @@ npx jest -t "test name"               # single test by name
 npm run test:e2e           # test/{foundation,reports,costing}.e2e-spec.ts --runInBand; resets the DB in test/e2e.env (karaoke_test)
 npx prisma migrate dev --name <name>  # after editing prisma/schema.prisma
 npx prisma migrate deploy             # production
-npx prisma db seed         # branches cs1–cs4 + admin (CHAIN_MANAGER), ql1_cs1, tn1_cs1, pv1_cs1, password 12345678; SEED_DEMO=1 adds cskh1_cs1, ql1_cs2, tn1_cs2, pv1_cs2 (same password), rooms and products for cs1/cs2
+npx prisma db seed         # branches cs1–cs5 + admin (CHAIN_MANAGER), ql1_cs1, tn1_cs1, pv1_cs1, and for cs5 also ql1_cs5, tn1_cs5, cskh1_cs5, pv1_cs5 plus its 44 VIP rooms (201–609 without 408, prices in `seed.ts`), password 12345678; SEED_DEMO=1 adds cskh1_cs1, ql1_cs2, tn1_cs2, pv1_cs2 (same password), rooms and products for cs1/cs2
 ```
 Migrations: `0_init` is the baseline of the legacy `db push` schema; `20260926000000_foundation` is hand-written and migrates legacy rows (see root `DEPLOYMENT.md` §6); `20260926120000_linked_flows` adds the price snapshot, payment methods, fund links and cancel fields (§6.6); `20260927000000_edit_paid_bills` sets the VAT default to 10%, the room type default to VIP and adds the `editedAt/editedBy/editReason` of corrected bills (§6.7); `20260927120000_bill_number` adds bill numbers and numbers the closed bills (§6.8); `20260927180000_report_indexes` adds the report indexes `Order(status, endTime)` and `OrderItem(orderId)` (§6.9); `20260928000000_reports_costing` adds `OrderItem.unitCost` and `StockMovement.unitCost/costAfter` (cost of goods; old rows keep 0 except each product's last movement, backfilled with the current cost price; §6.10). `test/fixtures/legacy-data.sql` is legacy-shaped data for rehearsing them. Don't use `prisma db push` any more. `prisma migrate dev` needs a TTY; elsewhere write the SQL with `npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url <db> --script`.
 

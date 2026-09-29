@@ -1,6 +1,6 @@
 # 🎤 Karaoke 502
 
-Hệ thống quản lý chuỗi quán karaoke nhiều cơ sở (`cs1`–`cs4`):
+Hệ thống quản lý chuỗi quán karaoke nhiều cơ sở (`cs1`–`cs5`):
 
 - **Bán hàng**: mở phòng, gọi món vào phòng, tính tiền giờ, thanh toán (tiền mặt / chuyển khoản), hủy hóa đơn.
 - **Kho**: phiếu nhập/xuất, sổ kho, tồn kho riêng từng cơ sở; thanh toán tự trừ kho, hủy hóa đơn/phiếu tự hoàn kho.
@@ -28,7 +28,7 @@ Cần [Docker](https://docs.docker.com/get-docker/) có Compose v2.
 ```bash
 cp .env.docker.example .env        # rồi đổi POSTGRES_PASSWORD, JWT_SECRET, JWT_REFRESH_SECRET
 docker compose up -d --build
-docker compose exec backend node dist/prisma/seed.js   # chỉ lần đầu: tạo cs1–cs4 và các tài khoản mặc định
+docker compose exec backend node dist/prisma/seed.js   # chỉ lần đầu: tạo cs1–cs5 và các tài khoản mặc định
 ```
 
 Mở http://localhost:3000 và đăng nhập `admin` / `12345678`. Dữ liệu nằm trong `./data/postgres` và vẫn còn sau `docker compose down`.

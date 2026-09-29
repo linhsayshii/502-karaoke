@@ -8,6 +8,7 @@ const BRANCHES = [
   { code: 'cs2', name: 'Cơ sở 2' },
   { code: 'cs3', name: 'Cơ sở 3' },
   { code: 'cs4', name: 'Cơ sở 4' },
+  { code: 'cs5', name: 'Cơ sở 5' },
 ];
 
 // Every seeded account gets this password; change it after the first login.
@@ -41,6 +42,32 @@ const USERS: SeedUser[] = [
     fullName: 'Phục vụ CS1',
     role: Role.STAFF,
     branch: 'cs1',
+    position: StaffPosition.SERVER,
+  },
+  {
+    username: 'ql1_cs5',
+    fullName: 'Quản lý CS5',
+    role: Role.BRANCH_MANAGER,
+    branch: 'cs5',
+  },
+  {
+    username: 'tn1_cs5',
+    fullName: 'Thu ngân CS5',
+    role: Role.CASHIER,
+    branch: 'cs5',
+  },
+  {
+    username: 'cskh1_cs5',
+    fullName: 'CSKH CS5',
+    role: Role.STAFF,
+    branch: 'cs5',
+    position: StaffPosition.CSKH,
+  },
+  {
+    username: 'pv1_cs5',
+    fullName: 'Phục vụ CS5',
+    role: Role.STAFF,
+    branch: 'cs5',
     position: StaffPosition.SERVER,
   },
 ];
@@ -95,6 +122,35 @@ async function seedUsers(users: SeedUser[], branchIds: Map<string, number>) {
   console.log(
     `Accounts ready (password ${DEFAULT_PASSWORD}): ${users.map((u) => u.username).join(', ')}`,
   );
+}
+
+// Cơ sở 5: floors 2–6, rooms x01–x09 (no 408), all VIP. Price per hour by room.
+const CS5_PRICE_990 = new Set([204, 304, 308, 404, 504, 508, 604, 608]);
+const CS5_PRICE_1100 = new Set([208, 601]);
+const CS5_ROOMS: { name: string; pricePerHour: number }[] = [];
+for (let floor = 2; floor <= 6; floor++) {
+  for (let n = 1; n <= 9; n++) {
+    const code = floor * 100 + n;
+    if (code === 408) continue;
+    CS5_ROOMS.push({
+      name: String(code),
+      pricePerHour: CS5_PRICE_1100.has(code)
+        ? 1100000
+        : CS5_PRICE_990.has(code)
+          ? 990000
+          : 690000,
+    });
+  }
+}
+
+// Only when the branch has no rooms yet, so re-running never overwrites edited prices.
+async function seedCs5Rooms(branchIds: Map<string, number>) {
+  const branchId = branchIds.get('cs5')!;
+  if ((await prisma.room.count({ where: { branchId } })) > 0) return;
+  await prisma.room.createMany({
+    data: CS5_ROOMS.map((r) => ({ branchId, type: 'VIP', ...r })),
+  });
+  console.log(`Rooms ready for cs5: ${CS5_ROOMS.length}`);
 }
 
 async function seedDemo(branchIds: Map<string, number>) {
@@ -176,6 +232,7 @@ async function main() {
   }
 
   await seedUsers(USERS, branchIds);
+  await seedCs5Rooms(branchIds);
 
   if (process.env.SEED_DEMO === '1') await seedDemo(branchIds);
 }

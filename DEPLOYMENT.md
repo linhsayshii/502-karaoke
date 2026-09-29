@@ -96,7 +96,7 @@ Lần đầu build mất vài phút.
 
 ### 2.5. Tạo dữ liệu ban đầu
 
-Tạo các cơ sở `cs1`–`cs4` và các tài khoản mặc định, tất cả có mật khẩu `12345678`: `admin` (quản lý hệ thống), `ql1_cs1` (quản lý cơ sở 1), `tn1_cs1` (thu ngân cơ sở 1), `pv1_cs1` (phục vụ cơ sở 1). **Chỉ chạy một lần** trên database mới (không chạy khi chuyển từ bản cũ sang):
+Tạo các cơ sở `cs1`–`cs5` và các tài khoản mặc định, tất cả có mật khẩu `12345678`: `admin` (quản lý hệ thống), `ql1_cs1` (quản lý cơ sở 1), `tn1_cs1` (thu ngân cơ sở 1), `pv1_cs1` (phục vụ cơ sở 1); riêng cơ sở 5 có thêm `ql1_cs5`, `tn1_cs5`, `cskh1_cs5`, `pv1_cs5` và 44 phòng VIP (201–609, không có 408). **Chỉ chạy một lần** trên database mới (không chạy khi chuyển từ bản cũ sang):
 
 ```bash
 docker compose exec backend node dist/prisma/seed.js

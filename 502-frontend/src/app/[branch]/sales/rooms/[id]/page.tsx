@@ -328,7 +328,7 @@ export default function RoomDetailPage() {
     );
   const endPr = (id: number) =>
     runOrderAction(() => api.post<Order>(`/pr/sessions/${id}/end`).then((r) => r.data), "Không thể cho PR ra");
-  const savePr = (id: number, times: PrTimes) =>
+  const savePr = (id: number, times: Partial<PrTimes>) =>
     runOrderAction(() => api.patch<Order>(`/pr/sessions/${id}`, times).then((r) => r.data), "Không thể sửa giờ PR");
   const removePr = (id: number) =>
     runOrderAction(() => api.delete<Order>(`/pr/sessions/${id}`).then((r) => r.data), "Không thể xóa lượt PR");

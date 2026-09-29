@@ -47,7 +47,7 @@ export function RoomPrList({
   sessions: PrSession[];
   canEdit: boolean;
   onEnd: (id: number) => void;
-  onSave: (id: number, times: PrTimes) => Promise<boolean>;
+  onSave: (id: number, times: Partial<PrTimes>) => Promise<boolean>;
   onRemove: (id: number) => Promise<boolean>;
 }) {
   const now = useNow();
@@ -67,12 +67,21 @@ export function RoomPrList({
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editing) return;
+    // The inputs show minutes only: a field left as it was keeps its exact
+    // moment (with seconds), and only what the user changed is sent.
+    const times: Partial<PrTimes> = {};
+    if (form.startAt !== toDateTimeInput(new Date(editing.startAt))) {
+      times.startAt = new Date(form.startAt).toISOString();
+    }
+    const endWas = editing.endAt ? toDateTimeInput(new Date(editing.endAt)) : "";
+    if (form.endAt !== endWas) times.endAt = form.endAt ? new Date(form.endAt).toISOString() : null;
+    if (Object.keys(times).length === 0) {
+      setEditing(null);
+      return;
+    }
     setSaving(true);
     try {
-      const saved = await onSave(editing.id, {
-        startAt: new Date(form.startAt).toISOString(),
-        endAt: form.endAt ? new Date(form.endAt).toISOString() : null,
-      });
+      const saved = await onSave(editing.id, times);
       if (saved) setEditing(null);
     } finally {
       setSaving(false);

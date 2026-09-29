@@ -33,26 +33,8 @@ import { OrderItemDto } from './dto/order-item.dto';
 import { ListOrdersQuery } from './dto/order-queries';
 import { Bill, billedHoursOf, computeBill } from './billing';
 import { billNumberPrefixRange, nextBillNumber } from './bill-number';
-
-const staffRef = { select: { id: true, fullName: true } };
-// Only what the screens show: bill lists return up to 1000 orders, so a
-// whole product or room row per line would be carried for nothing.
-const orderInclude = {
-  room: { select: { id: true, name: true, type: true } },
-  cskh: staffRef,
-  server: staffRef,
-  createdBy: staffRef,
-  checkedOutBy: staffRef,
-  cancelledBy: staffRef,
-  editedBy: staffRef,
-  items: {
-    include: { product: { select: { id: true, name: true, unit: true } } },
-    orderBy: { id: 'asc' },
-  },
-  fundTransaction: {
-    select: { id: true, method: true, amount: true, cancelledAt: true },
-  },
-} satisfies Prisma.OrderInclude;
+import { orderDetailInclude, orderInclude } from './order-include';
+import { closeOpenPrSessions, lockOrderRow } from './order-lock';
 
 type Db = Prisma.TransactionClient;
 type BillableOrder = Pick<
@@ -185,13 +167,7 @@ export class OrdersService {
     if (!order) throw new NotFoundException('Không tìm thấy hóa đơn');
     this.branchScope.assertBranchAccess(user, order.branchId);
 
-    // UPDATE takes the row lock; a concurrent writer waits here and then
-    // re-checks the status.
-    const { count } = await tx.order.updateMany({
-      where: { id, status },
-      data: { updatedAt: new Date() },
-    });
-    if (count === 0) throw new ConflictException(conflictMessage);
+    await lockOrderRow(tx, id, status, conflictMessage);
 
     return tx.order.findUniqueOrThrow({
       where: { id },
@@ -230,7 +206,7 @@ export class OrdersService {
           status: OrderStatus.PENDING,
           startTime: new Date(),
         },
-        include: orderInclude,
+        include: orderDetailInclude,
       });
     });
   }
@@ -301,7 +277,7 @@ export class OrdersService {
   async findOne(user: AuthUser, id: number) {
     const order = await this.prisma.order.findUnique({
       where: { id },
-      include: orderInclude,
+      include: orderDetailInclude,
     });
     if (!order) throw new NotFoundException('Không tìm thấy hóa đơn');
     this.assertCanView(user, order);
@@ -337,7 +313,7 @@ export class OrdersService {
       return tx.order.update({
         where: { id },
         data,
-        include: orderInclude,
+        include: orderDetailInclude,
       });
     });
   }
@@ -444,6 +420,7 @@ export class OrdersService {
             checkedOutById: user.id,
           },
         });
+        await closeOpenPrSessions(tx, id, endTime);
 
         if (order.roomId) {
           await tx.room.update({
@@ -491,7 +468,7 @@ export class OrdersService {
 
         return tx.order.findUniqueOrThrow({
           where: { id },
-          include: orderInclude,
+          include: orderDetailInclude,
         });
       },
       { timeout: 15000 },
@@ -527,6 +504,7 @@ export class OrdersService {
           cancelReason: reason?.trim() || null,
         },
       });
+      await closeOpenPrSessions(tx, id, now);
       if (order.roomId) {
         await tx.room.update({
           where: { id: order.roomId },
@@ -535,7 +513,7 @@ export class OrdersService {
       }
       return tx.order.findUniqueOrThrow({
         where: { id },
-        include: orderInclude,
+        include: orderDetailInclude,
       });
     });
   }
@@ -590,7 +568,7 @@ export class OrdersService {
 
         return tx.order.findUniqueOrThrow({
           where: { id },
-          include: orderInclude,
+          include: orderDetailInclude,
         });
       },
       { timeout: 15000 },
@@ -706,7 +684,7 @@ export class OrdersService {
 
         return tx.order.findUniqueOrThrow({
           where: { id },
-          include: orderInclude,
+          include: orderDetailInclude,
         });
       },
       { timeout: 15000 },

@@ -85,6 +85,8 @@ export class DataPurgeService {
             .count,
           orderItems: (await tx.orderItem.deleteMany({ where: viaOrder }))
             .count,
+          // Before orders: a visit points at an order and a PR.
+          prSessions: (await tx.prSession.deleteMany({ where: own })).count,
           orders: (await tx.order.deleteMany({ where: own })).count,
           stockDocumentLines: (
             await tx.stockDocumentLine.deleteMany({ where: viaDocument })

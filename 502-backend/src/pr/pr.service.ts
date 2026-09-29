@@ -8,7 +8,7 @@ import {
 import { Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth-user';
-import { MANAGERS } from '../auth/roles';
+import { MANAGERS, SALES } from '../auth/roles';
 import { BranchScopeService } from '../common/branch-scope.service';
 import { businessDateOf, getBusinessDayRange } from '../common/dates';
 import {
@@ -26,14 +26,25 @@ import {
 const STAFF_LIMIT = 500;
 const ATTENDANCE_LIMIT = 500;
 
-// Branch/chain managers, and any account marked "Quản lý PR/KTV".
+// Branch/chain managers, and any account marked "Quản lý PR/KTV". HĐQT is
+// view only, even when the flag is set on its account.
 export function canManagePr(user: AuthUser): boolean {
-  return MANAGERS.includes(user.role) || user.managesPr;
+  return (
+    user.role !== Role.BOARD && (MANAGERS.includes(user.role) || user.managesPr)
+  );
 }
 
 // HĐQT sees the lists, read only.
 export function canViewPr(user: AuthUser): boolean {
   return canManagePr(user) || user.role === Role.BOARD;
+}
+
+// Who may put PR/KTV into a room: anyone who sells (cashiers, managers) and
+// any account marked "Quản lý PR/KTV". Never HĐQT (view only).
+export function canAssignPr(user: AuthUser): boolean {
+  return (
+    user.role !== Role.BOARD && (SALES.includes(user.role) || user.managesPr)
+  );
 }
 
 const staffSelect = {
@@ -140,16 +151,22 @@ export class PrService {
     });
   }
 
-  // Removes someone never on a roll call; otherwise marks them as left, so
-  // past roll calls keep their name.
+  // Removes someone never on a roll call nor in a room; otherwise marks them
+  // as left, so past roll calls and room visits keep their name.
   async removeStaff(user: AuthUser, id: number) {
     this.assertManage(user);
     await this.getStaff(user, id);
-    const attended = await this.prisma.prAttendance.findFirst({
-      where: { prStaffId: id },
-      select: { id: true },
-    });
-    if (attended) {
+    const [attended, visited] = await Promise.all([
+      this.prisma.prAttendance.findFirst({
+        where: { prStaffId: id },
+        select: { id: true },
+      }),
+      this.prisma.prSession.findFirst({
+        where: { prStaffId: id },
+        select: { id: true },
+      }),
+    ]);
+    if (attended || visited) {
       await this.prisma.prStaff.update({
         where: { id },
         data: { active: false },

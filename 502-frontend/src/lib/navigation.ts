@@ -70,7 +70,7 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: ClipboardCheck,
         permission: "pr.view",
       },
-      { title: "Danh sách PR/KTV", path: "/pr/staff", icon: Contact, permission: "pr.view" },
+      { title: "Thống kê PR", path: "/pr/staff", icon: Contact, permission: "pr.view" },
     ],
   },
   {

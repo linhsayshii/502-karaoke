@@ -125,6 +125,21 @@ Thêm điện thoại nhân viên, đi qua proxy Next.js (frontend 384 MB, backe
 
 Chỗ nghẽn duy nhất còn lại là đăng nhập dồn cùng lúc. Mỗi lần kiểm tra mật khẩu (bcrypt, cố tình tốn CPU) mất ~65 ms CPU, nên 200 lần trong 3 giây trên backend 1 CPU phải xếp hàng tới 25 giây. Máy chủ nhiều CPU thì nhanh hơn, vì backend không bị giới hạn CPU. Thực tế nhân viên đăng nhập rải trong vài phút, và mỗi phiên dùng 24 giờ.
 
+Kết quả 30/09/2026 (duyệt giảm giá và chốt giờ, migration `20261002000000_sales_approvals`): `bench.mjs` gọi thêm `POST /orders/:id/adjustments` + `POST /discount-requests/:id/approve` (1 phiên trong 5, thu ngân xin giảm 5%, quản lý cơ sở duyệt), `POST /orders/:id/lock-time` (mọi phiên, trước khi thanh toán) và 5 máy quản lý gọi `GET /discount-requests/pending-count` mỗi 15 giây. Cùng một database 547 nghìn hóa đơn, cùng lệnh `node test/load/bench.mjs load 2025-09-29 2026-09-28 10 2`, mỗi kịch bản chạy nhiều lần xen kẽ: (a) backend build từ `main` + bench cũ, (b) backend của nhánh + bench cũ, (c) backend của nhánh + bench mới. Lần chạy đầu chạy khi bộ nhớ đệm database còn nguội nên chậm hơn; RAM của db tăng dần theo thứ tự chạy vì `docker stats` tính cả page cache của container, không theo kịch bản; máy đo là máy dev 10 CPU, số tuyệt đối không so được với bảng trên.
+
+| | (a) `main` | (b) nhánh, bench cũ | (c) nhánh, bench mới |
+|---|---|---|---|
+| Thanh toán p95, 5/4/4 lần chạy (trung vị; nhỏ nhất – lớn nhất) | 483 ms (321 – 777) | 423 ms (372 – 461) | 283 ms (269 – 760) |
+| Thanh toán lớn nhất (các lần chạy) | 666 – 1031 ms | 492 – 744 ms | 381 – 946 ms |
+| Sơ đồ phòng p95 (trung vị) | 87 ms | 62 ms | 75 ms |
+| Một lượt tải toàn bộ báo cáo, trung vị | 10,7 – 11,2 s | 11,1 – 11,5 s | 10,8 – 11,8 s |
+| Chạy thêm 60 giây sau khi tải xong (`DURATION=60`): thanh toán p95 / lớn nhất | 166 / 1402 ms | 168 / 899 ms | 114 / 420 ms |
+| Lỗi 500/503 (cả 16 lần chạy), dòng lỗi trong log backend | 0 | 0 | 0 |
+| RAM cao nhất của backend / db (`docker stats`, lần chạy thường) | 105–124 / 245–421 MiB | 107–117 / 239–247 MiB | 111–118 / 239–249 MiB |
+| Như trên, lần chạy `DURATION=60` | 123 / 395 MiB | 119 / 569 MiB | 123 / 595 MiB |
+
+Các lời gọi mới (lần chạy `DURATION=60`, 420 phiên): `lock-time` p50 29 ms / p95 73 ms, xin giảm giá p50 30 ms / p95 75 ms, duyệt p50 22 ms / p95 64 ms, `pending-count` p50 8 ms / p95 17 ms; không lỗi. Thanh toán p95 của (c) không cao hơn (a) và (b): chênh lệch giữa các lần chạy của cùng một kịch bản (321 – 777 ms) lớn hơn chênh lệch giữa các kịch bản. Kiểm tra `EXPLAIN ANALYZE` trên bảng `DiscountRequest` giả lập 50 nghìn dòng (~1 năm của 5 cơ sở): tìm yêu cầu chờ của một phiên dùng `DiscountRequest_orderId_idx` (0,02 ms), đếm hàng chờ dùng `DiscountRequest_branchId_status_idx` (0,06 ms), nhật ký 30 ngày dùng `DiscountRequest_branchId_createdAt_idx` (0,43 ms); truy vấn phiên đang mở của phòng vẫn dùng `Order_status_endTime_idx` như trước (0,02 ms).
+
 ## 7. Số đo sau lần rà soát 29/09/2026
 
 | Hạng mục | Trước | Sau |

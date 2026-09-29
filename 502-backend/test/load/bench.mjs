@@ -10,6 +10,10 @@
 // STAFF=n floor-staff phones (log in within LOGIN_SPREAD seconds, default 3, then refresh the
 // room map every 30 s and the room they serve every 15 s, like the app);
 // DURATION also keeps everyone working that long after the downloads end.
+// Approvals flows (needs the sales_approvals migration): 1 session in 5 asks for
+// a 5% discount as the cashier and the branch manager approves it; every
+// session locks the time before checkout; 5 manager screens (one per branch)
+// poll GET /discount-requests/pending-count every 15 s.
 const BASE = process.env.BASE ?? 'http://localhost:14100/api';
 const [mode, from, to, nDl = '10', conc = '2'] = process.argv.slice(2);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -80,7 +84,8 @@ async function download(token, branch, shift = 0) {
 
 const pick = (list) => list[Math.floor(Math.random() * list.length)];
 
-async function cashier(token, branch, rooms, products, staff, stop) {
+async function cashier(token, branch, rooms, products, staff, stop, managerToken) {
+  let sessions = 0;
   while (!stop.done) {
     const room = rooms[Math.floor(Math.random() * rooms.length)];
     record('GET /rooms', await call(token, 'GET', `/rooms?branch=${branch}`));
@@ -101,6 +106,14 @@ async function cashier(token, branch, rooms, products, staff, stop) {
     }
     record('GET order', await call(token, 'GET', `/orders/${id}`));
     record('preview', await call(token, 'GET', `/orders/${id}/preview`));
+    // 1 session in 5: a 5% discount the cashier requests and the manager approves
+    if (++sessions % 5 === 0) {
+      const adj = await call(token, 'POST', `/orders/${id}/adjustments`, { discountPercent: 5, note: 'bench' });
+      record('discount request', adj);
+      const requestId = adj.data?.discountRequests?.[0]?.id;
+      if (requestId) record('discount approve', await call(managerToken, 'POST', `/discount-requests/${requestId}/approve`, {}));
+    }
+    record('lock-time', await call(token, 'POST', `/orders/${id}/lock-time`));
     record('checkout', await call(token, 'POST', `/orders/${id}/checkout`, { paymentMethod: 'CASH' }));
     await sleep(500);
   }
@@ -133,6 +146,15 @@ async function staffPhone(username, branch, stop) {
   }
 }
 
+// A manager's screen: the sidebar badge polls the pending count every 15 s.
+async function managerScreen(token, stop) {
+  await sleep(Math.random() * 15000);
+  while (!stop.done) {
+    record('pending-count', await call(token, 'GET', '/discount-requests/pending-count'));
+    for (let waited = 0; waited < 15000 && !stop.done; waited += 500) await sleep(500);
+  }
+}
+
 if (mode === 'single') {
   const admin = await login('admin');
   for (const [label, branch] of [['cs1', 'cs1'], ['chain', null]]) {
@@ -145,14 +167,18 @@ if (mode === 'single') {
   const admin = await login('admin');
   const stop = { done: false };
   const cashiers = [];
+  const screens = [];
   for (let b = 1; b <= 5; b++) {
     const branch = 'cs' + b;
     const rooms = (await call(admin, 'GET', `/rooms?branch=${branch}`)).data.filter((r) => r.status === 'AVAILABLE').map((r) => r.id);
     const products = (await call(admin, 'GET', `/products?branch=${branch}`)).data.map((p) => p.id);
     const staff = (await call(admin, 'GET', `/users/floor-staff?branch=${branch}`)).data;
+    // the branch manager approves discounts (the chain manager if the branch has none)
+    const manager = (await login(`load_ql_cs${b}`).catch(() => null)) ?? admin;
+    screens.push(managerScreen(manager, stop));
     for (let k = 1; k <= 2; k++) {
       const token = await login(`load_tn${k}_cs${b}`);
-      cashiers.push(cashier(token, branch, rooms.slice((k - 1) * 20, k * 20), products, staff, stop));
+      cashiers.push(cashier(token, branch, rooms.slice((k - 1) * 20, k * 20), products, staff, stop, manager));
     }
   }
   // STAFF phones spread over the 5 branches (accounts load_nv1..40_csN; more
@@ -176,6 +202,6 @@ if (mode === 'single') {
   await sleep(Number(process.env.DURATION ?? (Number(nDl) === 0 ? 30 : 0)) * 1000);
   console.log(`all downloads done in ${((performance.now() - tDl) / 1000).toFixed(1)}s`);
   stop.done = true;
-  await Promise.all([...cashiers, ...phones]);
+  await Promise.all([...cashiers, ...phones, ...screens]);
   report();
 }

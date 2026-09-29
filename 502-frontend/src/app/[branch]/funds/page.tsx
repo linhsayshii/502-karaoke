@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import {
   ArrowDownLeftIcon,
   ArrowUpRightIcon,
@@ -38,7 +39,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { TableEmpty, TableSkeleton } from "@/components/data-states";
+import { ListLimitNotice, TableEmpty, TableSkeleton } from "@/components/data-states";
 import { DateRangePicker, formatDateRange, type DateRangeValue } from "@/components/date-range-picker";
 import { ExportExcelButton } from "@/components/export-excel-button";
 import { useAuth } from "@/components/auth-provider";
@@ -47,7 +48,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { ReasonDialog } from "@/components/reason-dialog";
 import { StatTile } from "@/components/stat-tile";
 import { useNotify } from "@/hooks/use-notify";
-import api from "@/lib/api";
+import api, { totalCountOf } from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
 import { exportWorkbook } from "@/lib/excel-export";
 import {
@@ -95,6 +96,8 @@ export default function FundsPage() {
   const [type, setType] = useState<FundType | typeof ALL>(ALL);
   const [method, setMethod] = useState<PaymentMethod | typeof ALL>(ALL);
   const [transactions, setTransactions] = useState<FundTransaction[] | null>(null);
+  // How many entries match in all; the list holds the newest 500.
+  const [total, setTotal] = useState<number | null>(null);
   const [summary, setSummary] = useState<FundSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<FundForm | null>(null);
@@ -117,6 +120,7 @@ export default function FundsPage() {
         api.get<FundSummary>("/funds/summary", { params: { branch, ...range } }),
       ]);
       setTransactions(listRes.data);
+      setTotal(totalCountOf(listRes));
       setSummary(summaryRes.data);
     } catch (error) {
       notify.error(error, "Không thể tải sổ quỹ");
@@ -187,6 +191,11 @@ export default function FundsPage() {
       fundSummarySheet(summary, formatDateRange(range)),
       fundEntriesSheet(transactions),
     ]);
+    if (total !== null && total > transactions.length) {
+      toast.warning(
+        `Sheet phiếu thu chi chỉ gồm ${formatNumber(transactions.length)} phiếu mới nhất trong tổng số ${formatNumber(total)}; chọn khoảng ngày ngắn hơn để có đủ. Sheet tổng hợp vẫn tính đủ.`,
+      );
+    }
   };
 
   return (
@@ -285,6 +294,15 @@ export default function FundsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className={cn("transition-opacity", loading && transactions && "opacity-60")}>
+          {transactions && (
+            <ListLimitNotice
+              shown={transactions.length}
+              total={total}
+              noun="phiếu"
+              className="mb-4"
+              hint="Các ô tổng ở trên vẫn tính đủ mọi phiếu của khoảng này. Chọn khoảng ngày ngắn hơn để xem đủ danh sách."
+            />
+          )}
           <Table>
             <TableHeader>
               <TableRow>

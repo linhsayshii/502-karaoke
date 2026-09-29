@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PaymentMethod, Prisma, TransactionType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ReportPrismaService } from '../prisma/report-prisma.service';
 import { AuthUser } from '../auth/auth-user';
 import { BranchScopeService } from '../common/branch-scope.service';
 import { businessDayRange } from '../common/dates';
@@ -39,22 +40,28 @@ const METHODS = [PaymentMethod.CASH, PaymentMethod.TRANSFER];
 export class FundsService {
   constructor(
     private prisma: PrismaService,
+    private reportDb: ReportPrismaService,
     private branchScope: BranchScopeService,
   ) {}
 
+  // The newest 500 entries, and how many match in all.
   async list(user: AuthUser, query: ListFundTransactionsQuery) {
     const branchId = await this.branchScope.resolveBranchId(user, query.branch);
-    return this.prisma.fundTransaction.findMany({
-      where: {
-        branchId,
-        type: query.type,
-        method: query.method,
-        occurredAt: businessDayRange(query.from, query.to),
-      },
-      include: fundInclude,
-      orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
-      take: 500,
-    });
+    const where: Prisma.FundTransactionWhereInput = {
+      branchId,
+      type: query.type,
+      method: query.method,
+      occurredAt: businessDayRange(query.from, query.to),
+    };
+    return Promise.all([
+      this.prisma.fundTransaction.findMany({
+        where,
+        include: fundInclude,
+        orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
+        take: 500,
+      }),
+      this.prisma.fundTransaction.count({ where }),
+    ]);
   }
 
   // Manual phiếu thu / phiếu chi, under a fixed category (fund-categories.ts).
@@ -112,26 +119,27 @@ export class FundsService {
 
   // Cash book of the period: opening balance, receipts and payments (split by
   // cash / transfer, and what came from sales and imports), closing balance.
-  // Cancelled entries are left out.
+  // Cancelled entries are left out. Summed over the whole history (opening
+  // balance), so it runs on the report pool, away from the cashiers.
   async summary(user: AuthUser, query: DateRangeQuery) {
     const branchId = await this.branchScope.resolveBranchId(user, query.branch);
     const period = businessDayRange(query.from, query.to);
     const active = { branchId, cancelledAt: null };
 
     const [inPeriod, before, linked, salesTax] = await Promise.all([
-      this.prisma.fundTransaction.groupBy({
+      this.reportDb.fundTransaction.groupBy({
         by: ['type', 'method'],
         where: { ...active, occurredAt: period },
         _sum: { amount: true },
       }),
       period.gte
-        ? this.prisma.fundTransaction.groupBy({
+        ? this.reportDb.fundTransaction.groupBy({
             by: ['type', 'method'],
             where: { ...active, occurredAt: { lt: period.gte } },
             _sum: { amount: true },
           })
         : Promise.resolve([]),
-      this.prisma.fundTransaction.groupBy({
+      this.reportDb.fundTransaction.groupBy({
         by: ['type'],
         where: {
           ...active,
@@ -141,7 +149,7 @@ export class FundsService {
         _sum: { amount: true },
       }),
       // VAT inside the sales receipts: the tax of the bills they belong to.
-      this.prisma.order.aggregate({
+      this.reportDb.order.aggregate({
         where: {
           fundTransaction: {
             is: { branchId, cancelledAt: null, occurredAt: period },

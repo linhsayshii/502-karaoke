@@ -87,17 +87,34 @@ export interface OrderItem {
   productId: number;
   quantity: number;
   price: string | number;
-  product: Product;
+  product: Pick<Product, "id" | "name" | "unit">;
 }
 
 export type OrderStatus = "PENDING" | "COMPLETED" | "CANCELLED";
+
+// GET /inventory/documents/summary: amounts (at cost) of every standing
+// document of the period, whatever the list shows.
+export interface StockDocumentsSummary {
+  importTotal: number;
+  exportTotal: number;
+}
+
+// GET /orders/summary: totals of every bill of the filters (the list itself
+// holds at most the newest 1000).
+export interface OrderSummary {
+  billCount: number;
+  paidCount: number;
+  cancelledCount: number;
+  collected: number; // paid, VAT included
+  vat: number;
+}
 
 export interface Order {
   id: number;
   branchId: number;
   status: OrderStatus;
   roomId: number | null;
-  room: Room | null;
+  room: Pick<Room, "id" | "name" | "type"> | null;
   cskhId: number | null;
   serverId: number | null;
   cskh: StaffRef | null;

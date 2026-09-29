@@ -14,6 +14,7 @@ import {
   StockMovementType,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ReportPrismaService } from '../prisma/report-prisma.service';
 import { AuthUser } from '../auth/auth-user';
 import { BranchScopeService } from '../common/branch-scope.service';
 import { businessDayRange } from '../common/dates';
@@ -21,6 +22,7 @@ import { cancelLinkedEntry, recordPurchasePayment } from '../funds/fund-ledger';
 import { costMovement, MovementCost } from './costing';
 import { CreateStockDocumentDto } from './dto/create-stock-document.dto';
 import {
+  DateRangeQuery,
   ListDocumentsQuery,
   ListMovementsQuery,
 } from './dto/inventory-queries';
@@ -72,6 +74,7 @@ function dateCode(d: Date) {
 export class InventoryService {
   constructor(
     private prisma: PrismaService,
+    private reportDb: ReportPrismaService,
     private branchScope: BranchScopeService,
   ) {}
 
@@ -364,23 +367,50 @@ export class InventoryService {
     );
   }
 
-  async listDocuments(user: AuthUser, query: ListDocumentsQuery) {
+  // Amounts (at cost) of every document of the period still standing, by
+  // type — not only of the 200 the list returns. Summed in SQL on the
+  // report pool.
+  async documentsSummary(user: AuthUser, query: DateRangeQuery) {
     const branchId = await this.branchScope.resolveBranchId(user, query.branch);
-    return this.prisma.stockDocument.findMany({
+    const groups = await this.reportDb.stockDocument.groupBy({
+      by: ['type'],
       where: {
         branchId,
-        type: query.type,
+        cancelledAt: null,
         createdAt: businessDayRange(query.from, query.to),
       },
-      include: {
-        createdBy: userRef,
-        cancelledBy: userRef,
-        fundTransaction: fundRef,
-        _count: { select: { lines: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 200,
+      _sum: { totalAmount: true },
     });
+    const total = (type: StockDocType) =>
+      Number(groups.find((g) => g.type === type)?._sum.totalAmount ?? 0);
+    return {
+      importTotal: total(StockDocType.IMPORT),
+      exportTotal: total(StockDocType.EXPORT),
+    };
+  }
+
+  // The newest 200 documents, and how many match in all.
+  async listDocuments(user: AuthUser, query: ListDocumentsQuery) {
+    const branchId = await this.branchScope.resolveBranchId(user, query.branch);
+    const where: Prisma.StockDocumentWhereInput = {
+      branchId,
+      type: query.type,
+      createdAt: businessDayRange(query.from, query.to),
+    };
+    return Promise.all([
+      this.prisma.stockDocument.findMany({
+        where,
+        include: {
+          createdBy: userRef,
+          cancelledBy: userRef,
+          fundTransaction: fundRef,
+          _count: { select: { lines: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+      }),
+      this.prisma.stockDocument.count({ where }),
+    ]);
   }
 
   async getDocument(user: AuthUser, id: number) {
@@ -393,21 +423,26 @@ export class InventoryService {
     return document;
   }
 
+  // The newest 500 movements, and how many match in all.
   async movements(user: AuthUser, query: ListMovementsQuery) {
     const branchId = await this.branchScope.resolveBranchId(user, query.branch);
-    return this.prisma.stockMovement.findMany({
-      where: {
-        branchId,
-        productId: query.productId,
-        createdAt: businessDayRange(query.from, query.to),
-      },
-      include: {
-        product: { select: { id: true, name: true, unit: true } },
-        document: { select: { id: true, code: true, type: true } },
-        createdBy: userRef,
-      },
-      orderBy: { id: 'desc' },
-      take: 500,
-    });
+    const where: Prisma.StockMovementWhereInput = {
+      branchId,
+      productId: query.productId,
+      createdAt: businessDayRange(query.from, query.to),
+    };
+    return Promise.all([
+      this.prisma.stockMovement.findMany({
+        where,
+        include: {
+          product: { select: { id: true, name: true, unit: true } },
+          document: { select: { id: true, code: true, type: true } },
+          createdBy: userRef,
+        },
+        orderBy: { id: 'desc' },
+        take: 500,
+      }),
+      this.prisma.stockMovement.count({ where }),
+    ]);
   }
 }

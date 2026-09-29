@@ -7,7 +7,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssl \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
-RUN npm ci
+# npm's download cache lives in a BuildKit cache mount: reused between builds,
+# never stored in an image layer.
+RUN --mount=type=cache,target=/root/.npm npm ci
 
 COPY . .
 RUN npx prisma generate && npm run build
@@ -19,7 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssl \
   && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
 COPY prisma ./prisma
-RUN npm ci --omit=dev && npx prisma generate && npm cache clean --force
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev && npx prisma generate
 
 # ---- runtime ----
 FROM node:22-bookworm-slim
@@ -40,6 +42,8 @@ COPY --chown=node:node prisma ./prisma
 USER node
 EXPOSE 4000
 
-# Apply pending migrations, then start. Seeding is a one-off:
+# Apply pending migrations, then start. The Prisma CLI is called directly: npx
+# would start npm on top (more RAM at every start, files written to ~/.npm).
+# Seeding is a one-off:
 #   docker compose exec backend node dist/prisma/seed.js
-CMD ["sh", "-c", "npx prisma migrate deploy && exec node dist/src/main.js"]
+CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && exec node dist/src/main.js"]

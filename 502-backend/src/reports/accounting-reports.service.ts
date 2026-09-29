@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, StockMovementType, TransactionType } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { ReportPrismaService } from '../prisma/report-prisma.service';
 import { AuthUser } from '../auth/auth-user';
 import { BranchScopeService } from '../common/branch-scope.service';
 import { businessDayRange } from '../common/dates';
@@ -105,7 +105,7 @@ const emptyFlows = (): InventoryFlows =>
 @Injectable()
 export class AccountingReportsService {
   constructor(
-    private prisma: PrismaService,
+    private prisma: ReportPrismaService,
     private branchScope: BranchScopeService,
     private reports: ReportsService,
   ) {}
@@ -305,16 +305,27 @@ export class AccountingReportsService {
   }
 
   // Each product's balance and average cost just before `moment`: those
-  // after its last movement.
+  // after its last movement. One index lookup per product
+  // (StockMovement(branchId, productId, createdAt)) instead of sorting the
+  // whole ledger: a movement carries its product's branch, and within one
+  // product createdAt follows the order of writing (Prisma stamps it after
+  // applyMovement has locked the product row), the id breaking ties.
   private balances(branchId: number | undefined, moment: Date) {
     return this.prisma.$queryRaw<
       { productId: number; quantity: number; cost: number }[]
     >`
-      SELECT DISTINCT ON (m."productId") m."productId" AS "productId",
-        m."balanceAfter" AS "quantity", m."costAfter"::float8 AS "cost"
-      FROM "StockMovement" m
-      WHERE m."createdAt" < ${utcTimestamp(moment)}
-        ${branchWhere(Prisma.sql`m."branchId"`, branchId)}
-      ORDER BY m."productId", m."id" DESC`;
+      SELECT p."id" AS "productId", m."balanceAfter" AS "quantity",
+        m."costAfter"::float8 AS "cost"
+      FROM "Product" p
+      CROSS JOIN LATERAL (
+        SELECT s."balanceAfter", s."costAfter"
+        FROM "StockMovement" s
+        WHERE s."branchId" = p."branchId"
+          AND s."productId" = p."id"
+          AND s."createdAt" < ${utcTimestamp(moment)}
+        ORDER BY s."createdAt" DESC, s."id" DESC
+        LIMIT 1
+      ) m
+      WHERE TRUE ${branchWhere(Prisma.sql`p."branchId"`, branchId)}`;
   }
 }

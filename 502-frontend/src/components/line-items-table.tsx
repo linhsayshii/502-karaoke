@@ -26,7 +26,9 @@ export function LineItemsTable({
   className?: string;
 }) {
   return (
-    <div className={cn("overflow-hidden rounded-lg border", className)}>
+    // shrink-0: inside a scrolling flex column (bill sheet, checkout, document
+    // sheet) an overflow-hidden box may otherwise shrink and cut off lines.
+    <div className={cn("shrink-0 overflow-hidden rounded-lg border", className)}>
       <Table>
         <TableHeader>
           <TableRow>

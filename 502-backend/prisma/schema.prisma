@@ -4,9 +4,10 @@
 // Schema changes go through `npx prisma migrate dev --name <change>`;
 // never `db push` against a database that holds real data.
 
+// Default "library" engine: runs inside the Node process. The "binary" engine
+// starts a separate query-engine process and costs tens of MB of RAM more.
 generator client {
-  provider   = "prisma-client-js"
-  engineType = "binary"
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -328,6 +329,8 @@ model StockMovement {
   createdAt    DateTime          @default(now())
 
   @@index([branchId, productId, createdAt])
+  // What a bill took from stock: read at every checkout, void and correction
+  @@index([orderId])
 }
 
 enum TransactionType {

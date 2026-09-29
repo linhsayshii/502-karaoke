@@ -1,7 +1,9 @@
-import type { LucideIcon } from "lucide-react";
+import { InfoIcon, type LucideIcon } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TableCell, TableRow } from "@/components/ui/table";
+import { formatNumber } from "@/lib/format";
 
 interface EmptyStateProps {
   icon: LucideIcon;
@@ -54,5 +56,32 @@ export function TableSkeleton({ rows = 5, columns }: { rows?: number; columns: n
         </TableRow>
       ))}
     </>
+  );
+}
+
+// Said above a capped list when the server matched more rows than it sent
+// (`totalCountOf`): the list holds only the newest `shown` of `total`.
+export function ListLimitNotice({
+  shown,
+  total,
+  noun,
+  hint,
+  className,
+}: {
+  shown: number;
+  total: number | null;
+  noun: string;
+  hint: React.ReactNode;
+  className?: string;
+}) {
+  if (total === null || total <= shown) return null;
+  return (
+    <Alert className={className}>
+      <InfoIcon />
+      <AlertTitle>
+        Chỉ hiển thị {formatNumber(shown)} {noun} mới nhất trong tổng số {formatNumber(total)}
+      </AlertTitle>
+      <AlertDescription>{hint}</AlertDescription>
+    </Alert>
   );
 }

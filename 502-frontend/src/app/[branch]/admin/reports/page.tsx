@@ -98,13 +98,13 @@ function ReportDownloadsView() {
     };
     setProgress({ done: 0, total: sheets.length });
     try {
-      const tables = await Promise.all(
-        sheets.map(async (sheet) => {
-          const table = await sheet.build(ctx);
-          setProgress((p) => p && { ...p, done: p.done + 1 });
-          return table;
-        }),
-      );
+      // Two reports at a time: each runs several queries, and the backend's few
+      // database connections are shared with the cashiers' checkouts.
+      const tables = await mapWithLimit(sheets, 2, async (sheet) => {
+        const table = await sheet.build(ctx);
+        setProgress((p) => p && { ...p, done: p.done + 1 });
+        return table;
+      });
       const scope = filters.chain ? "toan-chuoi" : branch;
       await exportWorkbook(reportFileName("bao-cao", scope, filters.from, filters.to), tables);
       notify.success(`Đã xuất ${tables.length} báo cáo`);
@@ -282,4 +282,19 @@ export default function ReportDownloadsPage() {
       <ReportDownloadsView />
     </Suspense>
   );
+}
+
+// Like Promise.all over `items.map(fn)`, with at most `limit` calls running
+// at once; results keep the order of `items`.
+async function mapWithLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }

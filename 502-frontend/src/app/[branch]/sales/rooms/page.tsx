@@ -14,6 +14,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { OpenRoomDialog } from "@/components/sales/open-room-dialog";
 import { useNotify } from "@/hooks/use-notify";
 import { useNow } from "@/hooks/use-now";
+import { usePolling } from "@/hooks/use-polling";
 import api from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
 import { formatMoney, formatTime, minutesBetween } from "@/lib/format";
@@ -100,31 +101,47 @@ export default function RoomsPage() {
   const [filter, setFilter] = useState<Filter>(ALL);
   const [openingRoom, setOpeningRoom] = useState<Room | null>(null);
 
-  const fetchData = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      const [roomsRes, staffRes] = await Promise.all([
-        api.get<Room[]>("/rooms", { params: { branch } }),
-        canOperate
-          ? api.get<FloorStaff[]>("/users/floor-staff", { params: { branch } })
-          : Promise.resolve({ data: [] as FloorStaff[] }),
-      ]);
-      setRooms(roomsRes.data);
-      setStaff(staffRes.data);
-    } catch (error) {
-      notify.error(error, "Không tải được sơ đồ phòng");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [branch, canOperate, notify]);
+  // The staff list changes rarely: it loads with the page, on "Làm mới", every
+  // 5 minutes and when the tab comes back, not with every room refresh.
+  const fetchData = useCallback(
+    async (withStaff = true) => {
+      setRefreshing(true);
+      try {
+        const [roomsRes, staffRes] = await Promise.all([
+          api.get<Room[]>("/rooms", { params: { branch } }),
+          withStaff && canOperate
+            ? api.get<FloorStaff[]>("/users/floor-staff", { params: { branch } })
+            : Promise.resolve(null),
+        ]);
+        setRooms(roomsRes.data);
+        if (staffRes) setStaff(staffRes.data);
+      } catch (error) {
+        notify.error(error, "Không tải được sơ đồ phòng");
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [branch, canOperate, notify],
+  );
 
   useEffect(() => {
     fetchData();
-    // Keep the map fresh when several cashiers work at the same time.
-    const timer = setInterval(fetchData, 30_000);
-    return () => clearInterval(timer);
   }, [fetchData]);
+  // Keep the map fresh when several cashiers work at the same time.
+  usePolling(() => fetchData(false), 30_000);
+  usePolling(
+    async () => {
+      try {
+        const res = await api.get<FloorStaff[]>("/users/floor-staff", { params: { branch } });
+        setStaff(res.data);
+      } catch {
+        // Kept silent: the next tick retries, and the room refresh reports errors.
+      }
+    },
+    5 * 60_000,
+    canOperate,
+  );
 
   const counts = useMemo(() => {
     const result: Record<Filter, number> = { ALL: rooms.length, AVAILABLE: 0, ACTIVE: 0, MAINTENANCE: 0 };
@@ -147,7 +164,7 @@ export default function RoomsPage() {
               : "Sơ đồ phòng của cơ sở (chỉ xem). Tự cập nhật mỗi 30 giây."
         }
         actions={
-          <Button variant="outline" onClick={fetchData} disabled={refreshing}>
+          <Button variant="outline" onClick={() => fetchData()} disabled={refreshing}>
             <RefreshCwIcon data-icon="inline-start" className={cn(refreshing && "animate-spin")} />
             Tải lại
           </Button>

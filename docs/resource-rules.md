@@ -1,0 +1,138 @@
+# Quy tắc tiết kiệm tài nguyên (RAM, SSD)
+
+Karaoke 502 chạy trên một máy chủ nhỏ (VPS vài GB RAM hoặc máy tại quán với SSD nhỏ), cả database, backend, frontend và sao lưu trên cùng một máy. **Mọi thay đổi về sau đều phải theo các quy tắc dưới đây.** Khi thật sự cần làm khác, ghi lý do bằng comment ngay tại chỗ đó.
+
+Nguyên tắc gốc: **không có gì được lớn lên mãi.** Mỗi danh sách, body, bộ nhớ đệm, log, file sao lưu hay tiến trình đều phải có giới hạn: số dòng, dung lượng, số ngày giữ, trần RAM.
+
+**Tải phải chịu được** (dùng để thiết kế và đo): 5 cơ sở, mỗi cơ sở 2 thu ngân thao tác cùng lúc, hàng chục nhân viên mỗi cơ sở mở app trên điện thoại (đã đo tới 600 điện thoại), cộng tối đa 10 người tải báo cáo cùng lúc. Dữ liệu dự kiến: mỗi cơ sở ~150 hóa đơn/ngày, tích lũy nhiều năm. Mọi request đi qua proxy Next.js (`/api`), nên khi đo phải đi qua frontend. **Bán hàng luôn được ưu tiên hơn báo cáo:** báo cáo có chậm đi cũng được, nhưng không được làm thu ngân phải chờ.
+
+## 1. Backend (NestJS + Prisma)
+
+1. **Mọi truy vấn danh sách đều có `take`** và lọc theo khoảng ngày kinh doanh. Trần hiện tại: hóa đơn 1000, sổ quỹ 500, biến động kho 500, phiếu kho 200, nhật ký xóa dữ liệu 500. Thêm endpoint danh sách mới thì đặt trần tương tự, và:
+   - Service trả `[rows, total]` (`findMany` + `count` cùng một `where`). Controller dùng `withTotalCount` (`common/total-count.ts`) để gửi tổng số dòng khớp qua header `X-Total-Count`; nội dung trả về vẫn là mảng.
+   - Màn hình đọc header bằng `totalCountOf(res)` (`lib/api.ts`) và hiện `ListLimitNotice` (`components/data-states.tsx`) khi danh sách bị cắt. Nếu có xuất Excel từ danh sách đó thì cảnh báo luôn.
+   - **Không bao giờ cộng tổng tiền hay đếm số lượng từ một danh sách có trần.** Tổng lấy từ API tổng hợp tính trong SQL với cùng điều kiện lọc: `GET /orders/summary` (trang Hóa đơn), `GET /inventory/documents/summary` (trang Phiếu kho), `GET /funds/summary` (Sổ quỹ).
+2. **Chỉ lấy cột cần dùng.** Quan hệ đi kèm dùng `select` với đúng các trường màn hình dùng, không dùng `include: { x: true }` để trả nguyên bản ghi. Ví dụ `orderInclude` (`orders.service.ts`): mỗi dòng hàng chỉ kèm `{ id, name, unit }` của mặt hàng, phòng chỉ kèm `{ id, name, type }`. Khi thu gọn thì sửa kiểu ở `502-frontend/src/lib/types.ts` bằng `Pick<...>` để TypeScript bắt chỗ dùng thiếu.
+3. **Tính tổng trong SQL**, không kéo từng dòng về Node để cộng: `aggregate`/`groupBy` của Prisma hoặc `$queryRaw` dùng các mảnh trong `reports/report-sql.ts`. Khoảng ngày của báo cáo có trần (`MAX_REPORT_RANGE_DAYS`), mỗi lần nhập Excel tối đa 1000 dòng.
+4. **Body JSON mặc định tối đa 1 MB** (`app.setup.ts`). Body được đọc hết vào RAM trước cả bước kiểm tra đăng nhập, nên chỉ route thật sự cần mới được nhận body lớn hơn, bằng một parser gắn riêng cho đường dẫn đó (như `/api/imports` nhận 5 MB). Không nâng giới hạn chung.
+5. **Không giữ dữ liệu trong RAM mà không có trần.** Mọi `Map`, mảng hay cache sống lâu phải có kích thước tối đa và cách dọn (xem `MAX_TRACKED` trong `auth/login-throttle.ts`). Không cache nguyên một bảng trong bộ nhớ. Backend chỉ có một tiến trình, và trạng thái trong RAM mất khi khởi động lại.
+6. **Prisma dùng engine mặc định "library"** (chạy trong tiến trình Node). Không đặt lại `engineType = "binary"`, vì engine đó chạy thêm một tiến trình riêng. Có **hai pool kết nối**:
+   - `PrismaService`: bán hàng, kho, quỹ và mọi thao tác ghi. Tối đa 10 kết nối (`connection_limit=10&pool_timeout=20` trong `DATABASE_URL`). Transaction chờ lấy kết nối tối đa 10 giây (`transactionOptions.maxWait`), và phải ngắn: không gọi mạng hay làm việc nặng bên trong transaction.
+   - `ReportPrismaService` (`prisma/report-prisma.service.ts`): chỉ đọc, 3 kết nối, chờ tối đa 50 giây. **Mọi truy vấn báo cáo** (`src/reports`, tổng hợp sổ quỹ) đi qua pool này. Báo cáo đông mấy cũng chỉ xếp hàng với nhau, còn pool bán hàng luôn trống. Báo cáo mới phải dùng pool này, không dùng `PrismaService`.
+   - Hết kết nối hoặc transaction quá giờ (P2024/P2028) trả 503 "Hệ thống đang bận, vui lòng thử lại sau giây lát" (`PrismaExceptionFilter`).
+   - Không đổi số kết nối khi chưa đo lại bằng `test/load` (§6).
+7. **Yêu cầu báo cáo giống hệt nhau đang chạy cùng lúc thì chỉ tính một lần** (`SharedRequestInterceptor`, gắn trên `ReportsController` và `GET /funds/summary`). Khóa gộp gồm đường dẫn, tham số và phạm vi cơ sở của người gọi. Chỉ gộp yêu cầu đang chạy dở, không lưu kết quả lại, nên số liệu không bao giờ cũ. Endpoint báo cáo mới cũng gắn interceptor này. Không thêm cache giữ kết quả khi chưa có cách vô hiệu hóa đúng lúc có hóa đơn cũ bị hủy hoặc sửa.
+8. **Truy vấn trong luồng bán hàng phải dùng chỉ mục** (mở phòng, gọi món, thanh toán, hủy, sửa hóa đơn). Kiểm tra bằng `EXPLAIN ANALYZE` trên dữ liệu của `test/load`: không được có `Seq Scan` trên bảng lớn (`Order`, `OrderItem`, `StockMovement`, `FundTransaction`), vì truy vấn đó chậm dần mỗi ngày. Ví dụ: `StockMovement(orderId)` thiếu chỉ mục làm mỗi lần thanh toán quét 2 triệu dòng (63 ms, tăng dần theo thời gian).
+9. **Báo cáo không quét lại cả lịch sử khi chỉ cần một dòng mỗi mặt hàng.** Tồn đầu/cuối kỳ lấy bằng `CROSS JOIN LATERAL (… ORDER BY … LIMIT 1)` theo từng mặt hàng (`AccountingReportsService.balances`), không dùng `DISTINCT ON` trên cả sổ kho (chậm hơn 40 lần).
+10. **Không ghi log cho từng request hay từng truy vấn** ở production (không bật `log: ['query']`, không thêm middleware log mọi request).
+11. **Index chỉ thêm khi có truy vấn dùng đến** (kiểm tra bằng `EXPLAIN`). Mỗi index tốn thêm SSD và thêm một lần ghi mỗi khi dòng thay đổi.
+12. **Công việc định kỳ** không chạy bằng `setInterval` trong backend. Dùng cron ở một service riêng, như service `backup`.
+13. **Thư viện:** gói chỉ dùng khi build hay test (`@types/*`, CLI, công cụ test) để ở `devDependencies`, vì image production cài `npm ci --omit=dev`. Trước khi thêm thư viện mới, xem dung lượng của nó và kiểm tra xem thư viện có sẵn đã làm được việc đó chưa.
+
+## 2. Frontend (Next.js)
+
+1. **Thư viện nặng chỉ tải khi cần:** `await import("xlsx")` (xem `lib/excel-import/workbook.ts`, `lib/excel-export.ts`). Biểu đồ (`recharts`) chỉ dùng trong các trang báo cáo.
+2. **Không bắn hàng loạt request nặng cùng lúc.** Trang Tải báo cáo chỉ chạy 2 báo cáo một lúc (`mapWithLimit`).
+3. **Tải lại định kỳ luôn dùng `usePolling`** (`hooks/use-polling.ts`). Hook này ngừng gọi khi tab bị ẩn và gọi lại ngay khi người dùng quay về tab. Chu kỳ tối thiểu 15 giây. Dữ liệu ít thay đổi thì tải lại thưa hơn, không phải bỏ hẳn: sơ đồ phòng tải lại danh sách phòng mỗi 30 giây, còn danh sách nhân viên mỗi 5 phút, khi quay lại tab và khi bấm "Làm mới".
+4. **Mọi `setInterval`, `setTimeout`, `addEventListener` phải được dọn** trong hàm cleanup của effect.
+5. **Không tải "tất cả" để lọc ở trình duyệt** khi server lọc được: gửi `from`/`to`/`branch`/bộ lọc lên API.
+6. `localStorage` chỉ lưu các lựa chọn nhỏ (như cách ghép cột Excel), không lưu dữ liệu nghiệp vụ.
+7. Font và tài nguyên tĩnh nằm sẵn trong bản build (Inter từ `@fontsource-variable`). Không dùng `next/font/google` hay tối ưu ảnh của Next (`next/image`): chức năng đó cần `sharp` và ghi cache ra đĩa.
+
+## 3. Database (PostgreSQL)
+
+1. Tham số đặt trong `docker-compose.yml`:
+   - `max_connections=30`.
+   - `wal_compression=on` và `checkpoint_timeout=15min`: ghi WAL ít hơn, đỡ hao SSD.
+   - `max_parallel_workers_per_gather=0`: máy chủ ít CPU, nên truy vấn song song chỉ làm tranh CPU với thu ngân. Đo được: tải báo cáo nhanh gấp đôi, thanh toán p95 1,9 s → 0,3 s, còn một người xem báo cáo lúc rảnh thì nhanh như cũ.
+   - `shm_size: 256mb`: mặc định Docker cho 64 MB `/dev/shm`, không đủ khi nhiều báo cáo chạy cùng lúc (lỗi `could not resize shared memory segment`).
+
+   **Không bao giờ** tắt `fsync`, `synchronous_commit` hay `full_page_writes` để đổi lấy tốc độ, vì đây là dữ liệu tiền. Đổi một tham số thì đo lại bằng `test/load`.
+2. Sổ cái (`Order`, `OrderItem`, `StockMovement`, `FundTransaction`) là dữ liệu nghiệp vụ, được giữ vĩnh viễn. **Bảng phụ hay bảng nhật ký mới** phải có cách dọn, hoặc ghi rõ lý do giữ mãi và mức tăng dự kiến (ví dụ `BillCounter`: mỗi cơ sở một dòng mỗi ngày).
+3. Không lưu file (ảnh, Excel, PDF) hay JSON lớn trong database.
+4. Thay đổi schema luôn đi qua migration (`prisma migrate`), không dùng `db push`.
+
+## 4. Docker và máy chủ
+
+1. **Mỗi service trong `docker-compose.yml` đều có `logging: *logging`** (log tối đa 3 file × 10 MB; mặc định Docker ghi log mãi không xoá) **và `mem_limit`** lấy từ `.env` (`*_MEM_LIMIT`). Service Node có thêm `NODE_OPTIONS=--max-old-space-size=…`, luôn nhỏ hơn `mem_limit` (hiện tại backend 320/512 MB, frontend 256/384 MB). Nếu thêm service mới thì làm giống vậy.
+2. **Dockerfile:**
+   - Build nhiều stage. Image cuối chỉ chứa mã đã build và `node_modules` production.
+   - `npm ci` chạy với `--mount=type=cache,target=/root/.npm`, để cache tải về không nằm trong layer nào. Không gọi `npm cache clean` (lệnh này xoá cache dùng chung).
+   - `CMD` gọi thẳng chương trình (`node_modules/.bin/prisma`, `node …`), không dùng `npx` hay `npm run`, vì chúng khởi động thêm npm và ghi file vào `~/.npm`.
+   - Dùng lại base image đang có (`node:22-bookworm-slim` cho Node, `postgres:17-alpine` cho công cụ Postgres) để các image dùng chung layer. Cài bằng apt thì luôn kèm `--no-install-recommends` và xoá `/var/lib/apt/lists/*`.
+   - `.dockerignore` phải loại `node_modules`, `dist`/`.next`, `.git`, `.env*`.
+3. **Healthcheck chạy tối đa mỗi 30 giây** (Docker ghi trạng thái xuống đĩa sau mỗi lần kiểm tra). Muốn service khởi động nhanh thì dùng `start_interval`.
+4. **File tự sinh phải có thời hạn giữ:** bản sao lưu (`KEEP_DAYS`, `WEBDAV_KEEP_DAYS`), `backups/backup.log` (cắt còn 1000 dòng khi vượt 2000 dòng, xem `backup/cron-job.sh`). Thêm log hay file mới thì đặt giới hạn ngay từ đầu.
+5. Sau mỗi lần cập nhật phải dọn image và cache build cũ: `docker image prune -f` và `docker builder prune -f --filter until=168h` (`DEPLOYMENT.md` §4).
+
+## 5. Kiểm tra trước khi hoàn tất một thay đổi
+
+- [ ] Truy vấn mới có `take` và chỉ `select` những cột được dùng? Danh sách có trần thì trả `X-Total-Count`, và màn hình hiện `ListLimitNotice`?
+- [ ] Không có tổng hay số đếm nào cộng từ một danh sách có trần?
+- [ ] Truy vấn mới trong luồng bán hàng dùng chỉ mục (`EXPLAIN ANALYZE`, không `Seq Scan` bảng lớn)?
+- [ ] Báo cáo mới: chạy trên `ReportPrismaService`, endpoint có `SharedRequestInterceptor`?
+- [ ] Tính tổng trong SQL, không cộng bằng vòng lặp trong Node?
+- [ ] Không nâng giới hạn body chung, không thêm `Map`/cache không có trần?
+- [ ] Tải lại định kỳ dùng `usePolling`; timer và listener đều được dọn?
+- [ ] Thư viện mới: có cần thật không, đặt đúng `dependencies`/`devDependencies`, tải khi cần nếu nặng?
+- [ ] Service/log/file mới: có `logging`, `mem_limit`, thời hạn giữ?
+- [ ] Thay đổi lớn về hạ tầng: đo trước và sau bằng `docker stats --no-stream`, `docker system df`, `du -sh data backups`.
+- [ ] Thay đổi báo cáo, luồng bán hàng, pool kết nối hay tham số database: chạy lại `test/load` (§6) và so với bảng ở đó.
+
+## 6. Đo tải (`502-backend/test/load`)
+
+Dựng database riêng giống máy chủ nhỏ (2 CPU, 1 GB RAM, cùng tham số như `docker-compose.yml`), sinh dữ liệu 2 năm rồi chạy backend giới hạn 1 CPU / 512 MB:
+
+```bash
+docker run -d --name kara-load-pg --cpus 2 -m 1g --shm-size 256m -p 5434:5432 \
+  -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=karaoke_load -e TZ=Asia/Ho_Chi_Minh postgres:17-alpine \
+  postgres -c max_connections=30 -c wal_compression=on -c checkpoint_timeout=15min -c max_parallel_workers_per_gather=0
+cd 502-backend
+DATABASE_URL=postgresql://postgres:postgres@localhost:5434/karaoke_load SEED_DEMO=1 npx prisma migrate reset --force
+docker exec -i kara-load-pg psql -U postgres -d karaoke_load < test/load/generate.sql   # ~4 phút
+docker build -t kara-load-backend . && docker run -d --name kara-load-be --cpus 1 -m 512m -p 14100:4000 \
+  -e TZ=Asia/Ho_Chi_Minh -e JWT_SECRET=a -e JWT_REFRESH_SECRET=b -e NODE_OPTIONS=--max-old-space-size=320 \
+  -e 'DATABASE_URL=postgresql://postgres:postgres@host.docker.internal:5434/karaoke_load?connection_limit=10&pool_timeout=20' \
+  kara-load-backend
+node test/load/bench.mjs load 2025-09-29 2026-09-28 10 2        # 10 thu ngân + 10 người tải báo cáo cả năm
+DISTINCT=1 node test/load/bench.mjs load 2025-09-29 2026-09-28  # 10 lượt tải khác nhau
+node test/load/bench.mjs single 2025-09-29 2026-09-28           # từng báo cáo, lúc rảnh
+docker rm -f -v kara-load-be kara-load-pg                         # xong thì xoá (~1 GB)
+```
+
+Muốn đi đúng đường production (Nginx bỏ qua) thì chạy thêm frontend trong cùng mạng Docker với backend (alias `backend`), rồi đặt `BASE=http://localhost:<cổng frontend>/api`. Thêm `STAFF=200 LOGIN_SPREAD=60` để giả lập 200 điện thoại nhân viên đăng nhập trong 60 giây, sau đó tải lại sơ đồ phòng như app.
+
+Kết quả 29/09/2026: 547 nghìn hóa đơn, 2,5 triệu dòng hàng, 2 triệu biến động kho. Có 10 thu ngân cùng thao tác, và 10 người tải toàn bộ báo cáo cùng lúc (5 người tải một cơ sở, 5 người tải toàn chuỗi, mỗi người 2 báo cáo một lúc như trang Tải báo cáo):
+
+| | Trước | Sau |
+|---|---|---|
+| Báo cáo tháng: một lượt tải / thanh toán p95 | 33 s / 4,3 s | 2,1 s / 0,4 s |
+| Báo cáo năm: một lượt tải | 72 s | 14 s (36 s khi 10 lượt tải đều khác nhau) |
+| Báo cáo năm: thanh toán p95 / tối đa | 15,9 s / 19,7 s | 0,18 s / 0,3 s |
+| Báo cáo năm: sơ đồ phòng p95 | 8,4 s | 0,05 s |
+| Lỗi 500/503 | 8 | 0 |
+| Thanh toán lúc không có báo cáo, trung vị | 102 ms | 43 ms |
+
+Thêm điện thoại nhân viên, đi qua proxy Next.js (frontend 384 MB, backend 1 CPU / 512 MB, database 2 CPU / 1 GB):
+
+| Kịch bản | Sơ đồ phòng NV p95 | Thanh toán p95 | Đăng nhập NV p95 / lâu nhất | RAM backend / frontend / db |
+|---|---|---|---|---|
+| 200 NV đăng nhập rải trong 60 s + 10 thu ngân | 0,08 s | 0,25 s | 0,7 s / 1,2 s | 75 / 68 / 411 MiB |
+| Như trên + 10 người tải báo cáo năm, mỗi người một kiểu | 0,07 s | 0,24 s | 0,4 s / 0,7 s | 80 / 66 / 517 MiB |
+| 600 NV đăng nhập rải trong 120 s + 10 thu ngân + 10 người tải báo cáo tháng | 0,06 s | 0,19 s | 0,7 s / 2,1 s | 82 / 62 / 489 MiB |
+| 200 NV đăng nhập **dồn trong 3 s** + 10 thu ngân | 0,25 s | 1,0 s | 25 s / 25 s | 74 / 65 / 410 MiB |
+
+Chỗ nghẽn duy nhất còn lại là đăng nhập dồn cùng lúc. Mỗi lần kiểm tra mật khẩu (bcrypt, cố tình tốn CPU) mất ~65 ms CPU, nên 200 lần trong 3 giây trên backend 1 CPU phải xếp hàng tới 25 giây. Máy chủ nhiều CPU thì nhanh hơn, vì backend không bị giới hạn CPU. Thực tế nhân viên đăng nhập rải trong vài phút, và mỗi phiên dùng 24 giờ.
+
+## 7. Số đo sau lần rà soát 29/09/2026
+
+| Hạng mục | Trước | Sau |
+|----------|-------|-----|
+| RAM backend sau 60 request (`docker stats`) | 94 MiB, 2 tiến trình (Node 136 MB + query-engine 20 MB RSS) | 68 MiB, 1 tiến trình (122 MB RSS) |
+| Image backend / frontend | 600 MB / 455 MB | 575 MB / 423 MB (base image `node:22-bookworm-slim` dùng chung) |
+| Body tối đa của mọi route | 5 MB | 1 MB (riêng `/api/imports`: 5 MB) |
+| Log container | không giới hạn | tối đa 30 MB mỗi service |
+| `backups/backup.log` | ghi thêm mãi | tối đa 2000 dòng |
+| Healthcheck `db` | mỗi 5 giây | mỗi 30 giây (khi khởi động: 2 giây) |
+| Kết nối database của backend | 2 × số CPU + 1 dùng chung, transaction chờ 2 giây | bán hàng 10 (transaction chờ 10 giây) + báo cáo 3 riêng; hết kết nối báo 503 tiếng Việt |
+| Tải lại sơ đồ phòng / phòng khi tab bị ẩn | vẫn gọi mỗi 30 giây / 15 giây, kèm danh sách nhân viên | ngừng gọi; danh sách nhân viên tải lại mỗi 5 phút thay vì 30 giây |

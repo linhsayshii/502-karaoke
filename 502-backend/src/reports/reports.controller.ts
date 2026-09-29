@@ -1,8 +1,9 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Query, UseInterceptors } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/auth-user';
+import { SharedRequestInterceptor } from '../common/shared-request.interceptor';
 import { READERS, ALL_BRANCH_ROLES } from '../auth/roles';
 import { ReportsService } from './reports.service';
 import { BreakdownReportsService } from './breakdown-reports.service';
@@ -18,6 +19,7 @@ import {
 @ApiTags('reports')
 @ApiBearerAuth()
 @Roles(...READERS)
+@UseInterceptors(SharedRequestInterceptor)
 @Controller('reports')
 export class ReportsController {
   constructor(

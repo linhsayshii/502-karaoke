@@ -8,7 +8,10 @@ import {
   ParseIntPipe,
   Post,
   Query,
+  Res,
+  UseInterceptors,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { FundsService } from './funds.service';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -16,6 +19,8 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/auth-user';
 import { MANAGERS, READERS } from '../auth/roles';
 import { CancelReasonDto } from '../common/dto/cancel-reason.dto';
+import { SharedRequestInterceptor } from '../common/shared-request.interceptor';
+import { withTotalCount } from '../common/total-count';
 import { DateRangeQuery } from '../inventory/dto/inventory-queries';
 import { CreateFundTransactionDto } from './dto/create-fund-transaction.dto';
 import { ListFundTransactionsQuery } from './dto/fund-queries';
@@ -27,15 +32,18 @@ import { ListFundTransactionsQuery } from './dto/fund-queries';
 export class FundsController {
   constructor(private readonly fundsService: FundsService) {}
 
+  // The newest 500; X-Total-Count says how many match.
   @Get()
   list(
     @CurrentUser() user: AuthUser,
     @Query() query: ListFundTransactionsQuery,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    return this.fundsService.list(user, query);
+    return withTotalCount(res, this.fundsService.list(user, query));
   }
 
   @Get('summary')
+  @UseInterceptors(SharedRequestInterceptor)
   summary(@CurrentUser() user: AuthUser, @Query() query: DateRangeQuery) {
     return this.fundsService.summary(user, query);
   }

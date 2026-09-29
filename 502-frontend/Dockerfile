@@ -4,7 +4,9 @@ FROM node:22-bookworm-slim AS build
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci
+# npm's download cache lives in a BuildKit cache mount: reused between builds,
+# never stored in an image layer.
+RUN --mount=type=cache,target=/root/.npm npm ci
 
 COPY . .
 # The browser calls the API on the same origin (/api); the Next server proxies it to

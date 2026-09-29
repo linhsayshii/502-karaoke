@@ -8,6 +8,7 @@ import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 import { businessDateOf } from '../src/common/dates';
+import { PrismaService } from '../src/prisma/prisma.service';
 
 // Permission matrix and the main sales / inventory / fund flows against a
 // fresh database seeded with the demo data (SEED_DEMO=1).
@@ -210,6 +211,22 @@ describe('Foundation (e2e)', () => {
       expect(res.headers['x-content-type-options']).toBe('nosniff');
       expect(res.headers['x-frame-options']).toBe('SAMEORIGIN');
       expect(res.headers).not.toHaveProperty('x-powered-by');
+    });
+
+    it('caps request bodies, allowing 5mb only to Excel imports', async () => {
+      const big = 'x'.repeat(2 * 1024 * 1024);
+      await api()
+        .post('/api/auth/login')
+        .send({ username: big, password: 'sai' })
+        .expect(413);
+      await as('admin')
+        .post('/imports/products?branch=cs3', {
+          dryRun: true,
+          onDuplicate: 'SKIP',
+          createCategories: false,
+          rows: [{ row: 2, name: 'Bia', unit: 'lon', price: 1, note: big }],
+        })
+        .expect(200);
     });
   });
 
@@ -742,6 +759,22 @@ describe('Foundation (e2e)', () => {
           .expect(200)
       ).body as Json[];
       expect(bills.map((b) => b.id)).toEqual([paidOrderId]);
+
+      // The Hóa đơn page: totals of every bill of the period, from the server.
+      const listed = await as('ql1_cs2').get(`/orders?${period}`).expect(200);
+      const all = listed.body as Json[];
+      expect(listed.headers['x-total-count']).toBe(String(all.length));
+      const totals = (
+        await as('ql1_cs2').get(`/orders/summary?${period}`).expect(200)
+      ).body as Json;
+      expect(totals).toEqual({
+        billCount: all.length,
+        paidCount: 1,
+        cancelledCount: all.filter((b) => b.status === 'CANCELLED').length,
+        collected: finalAmount,
+        vat: Number(order.taxAmount),
+      });
+      await as('tn1_cs2').get(`/orders/summary?${period}`).expect(403);
     });
 
     it('cancels only manual fund entries, with a reason', async () => {
@@ -973,6 +1006,24 @@ describe('Foundation (e2e)', () => {
         .expect(400);
       expect((res.body as Json).message).toContain('Không thể hủy phiếu');
       expect((await stockOf(waterId)).stockQuantity).toBe(water.stockQuantity);
+
+      // The Phiếu kho page: totals of every standing document, from the server.
+      const listed = await as('ql1_cs2')
+        .get('/inventory/documents')
+        .expect(200);
+      const all = listed.body as Json[];
+      expect(listed.headers['x-total-count']).toBe(String(all.length));
+      const standing = (type: string) =>
+        all
+          .filter((d) => d.type === type && !d.cancelledAt)
+          .reduce((sum, d) => sum + Number(d.totalAmount), 0);
+      expect(
+        (await as('ql1_cs2').get('/inventory/documents/summary').expect(200))
+          .body,
+      ).toEqual({
+        importTotal: standing('IMPORT'),
+        exportTotal: standing('EXPORT'),
+      });
     });
 
     it('keeps every stock balance equal to its ledger', async () => {
@@ -1302,6 +1353,33 @@ describe('Foundation (e2e)', () => {
       expect(otherBranch).toEqual([]);
 
       await as('ql1_cs1').get('/orders?billNumber=27-09').expect(400);
+    });
+  });
+
+  describe('capped lists', () => {
+    it('return the newest rows and say how many match', async () => {
+      // 505 fund entries on days no other test uses
+      const branch = await app
+        .get(PrismaService)
+        .branch.findUniqueOrThrow({ where: { code: 'cs4' } });
+      await app.get(PrismaService).fundTransaction.createMany({
+        data: Array.from({ length: 505 }, (_, i) => ({
+          branchId: branch.id,
+          type: 'EXPENSE' as const,
+          amount: 1000,
+          category: 'Khác',
+          occurredAt: new Date(Date.UTC(2020, 0, 10, 5, 0, i)),
+        })),
+      });
+      const res = await as('admin')
+        .get('/funds?branch=cs4&from=2020-01-01&to=2020-01-31')
+        .expect(200);
+      expect(res.body).toHaveLength(500);
+      expect(res.headers['x-total-count']).toBe('505');
+      // newest first: the 5 oldest are the ones left out
+      expect(
+        new Date((res.body as Json[])[499].occurredAt as string).getTime(),
+      ).toBe(Date.UTC(2020, 0, 10, 5, 0, 5));
     });
   });
 });

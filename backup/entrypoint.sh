@@ -15,8 +15,7 @@ if ! printf '%s\n' "$BACKUP_CRON" | grep -Eq '^[^[:space:]]+([[:space:]]+[^[:spa
 fi
 
 mkdir -p /etc/crontabs
-# Log ra stdout của container (docker compose logs backup) và backups/backup.log.
-echo "$BACKUP_CRON /usr/local/bin/backup.sh 2>&1 | tee -a /backups/backup.log > /proc/1/fd/1" > /etc/crontabs/root
+echo "$BACKUP_CRON /usr/local/bin/cron-job.sh" > /etc/crontabs/root
 
 echo "$(date '+%F %T %Z') Service sao lưu đã chạy, lịch: '$BACKUP_CRON' (TZ=$TZ)"
 # Báo lỗi cấu hình ngay bây giờ thay vì đợi đến giờ sao lưu; không dừng

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { ReportPrismaService } from '../prisma/report-prisma.service';
 import { AuthUser } from '../auth/auth-user';
 import { BranchScopeService } from '../common/branch-scope.service';
 import { roundCost } from '../inventory/costing';
@@ -131,7 +131,7 @@ const STAFF_COLUMNS: Record<StaffRole, Prisma.Sql> = {
 @Injectable()
 export class BreakdownReportsService {
   constructor(
-    private prisma: PrismaService,
+    private prisma: ReportPrismaService,
     private branchScope: BranchScopeService,
   ) {}
 

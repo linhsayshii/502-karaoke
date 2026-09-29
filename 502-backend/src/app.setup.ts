@@ -2,10 +2,13 @@ import { ValidationPipe } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
+import { json } from 'express';
 import helmet from 'helmet';
 import { PrismaExceptionFilter } from './common/prisma-exception.filter';
 import { validationExceptionFactory } from './common/validation';
 import { swaggerEnabled } from './config/env';
+
+const API_PREFIX = 'api';
 
 // Shared by main.ts and the e2e tests so both run the same pipeline.
 export function configureApp<T extends NestExpressApplication>(app: T): T {
@@ -16,10 +19,14 @@ export function configureApp<T extends NestExpressApplication>(app: T): T {
       contentSecurityPolicy: swaggerEnabled() ? false : undefined,
     }),
   );
-  // Excel imports send up to 1000 rows as JSON (the default limit is 100kb).
-  app.useBodyParser('json', { limit: '5mb' });
+  // A body is read whole into memory before any guard runs, even for callers
+  // without a token, so only the Excel imports (up to 1000 rows as JSON) may
+  // send 5mb; every other route 1mb. The first parser marks the request as
+  // parsed and the second one then skips it.
+  app.use(`/${API_PREFIX}/imports`, json({ limit: '5mb' }));
+  app.useBodyParser('json', { limit: '1mb' });
   app.use(cookieParser());
-  app.setGlobalPrefix('api');
+  app.setGlobalPrefix(API_PREFIX);
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

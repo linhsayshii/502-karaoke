@@ -51,6 +51,8 @@ sudo usermod -aG docker $USER   # đăng xuất rồi đăng nhập lại để 
 docker compose version          # kiểm tra
 ```
 
+Cần Docker Engine 25 trở lên (`docker version`), vì healthcheck của `db` dùng `start_interval`. Script `get.docker.com` cài bản mới nhất.
+
 Đặt múi giờ máy chủ về Việt Nam (để giờ cron sao lưu và log dễ đọc; container đã tự dùng `Asia/Ho_Chi_Minh`):
 
 ```bash
@@ -158,12 +160,14 @@ Sau khi có HTTPS: đặt `COOKIE_SECURE=true` trong `.env`, rồi `docker compo
 
 ### 3.1. Chống dò mật khẩu và bắt buộc HTTPS
 
-Backend đã tự khoá một tên đăng nhập 15 phút sau 5 lần sai mật khẩu liên tiếp. Nginx thêm giới hạn theo địa chỉ IP (chặn một máy thử hàng loạt tên đăng nhập) và ẩn phiên bản Nginx. Tạo file giới hạn (nằm ngoài khối `server`):
+Backend đã tự khoá một tên đăng nhập 15 phút sau 5 lần sai mật khẩu liên tiếp. Nginx thêm giới hạn theo địa chỉ IP (chặn một máy thử hàng loạt tên đăng nhập) và ẩn phiên bản Nginx.
+
+Nhân viên cùng một quán thường dùng chung Wi-Fi, tức chung một IP, và đăng nhập gần như cùng lúc đầu ca. Vì vậy giới hạn phải đủ rộng cho cả quán: mỗi IP được dồn 60 lần đăng nhập, sau đó 30 lần mỗi phút. Giới hạn cũ (10 lần/phút, dồn 5) làm nhân viên thứ 7 trở đi bị báo lỗi, người cuối chờ vài phút. Tạo file giới hạn (nằm ngoài khối `server`):
 
 ```bash
 sudo tee /etc/nginx/conf.d/karaoke502-limits.conf <<'CONF'
-# Mỗi IP tối đa 10 lần đăng nhập mỗi phút (cho phép dồn 5 lần)
-limit_req_zone $binary_remote_addr zone=kara_login:10m rate=10r/m;
+# Mỗi IP tối đa 30 lần đăng nhập mỗi phút, cho phép dồn 60 lần (cả quán đăng nhập đầu ca qua chung Wi-Fi)
+limit_req_zone $binary_remote_addr zone=kara_login:10m rate=30r/m;
 server_tokens off;
 CONF
 ```
@@ -176,7 +180,7 @@ Rồi trong khối `server` của `/etc/nginx/sites-available/karaoke502` (khố
     client_max_body_size 6m;
 
     location = /api/auth/login {
-        limit_req zone=kara_login burst=5 nodelay;
+        limit_req zone=kara_login burst=60 nodelay;
         limit_req_status 429;
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
@@ -212,9 +216,18 @@ git pull
 docker compose up -d --build          # backend tự chạy migration mới khi khởi động
 docker compose logs --tail=50 backend
 docker image prune -f                 # xoá image cũ
+docker builder prune -f --filter until=168h   # xoá cache build cũ hơn 7 ngày
 ```
 
 Chỉ đổi `.env` (không đổi code) thì `docker compose up -d` là đủ, không cần `--build`.
+
+**RAM và ổ đĩa:** xem `docs/resource-rules.md`. Mỗi service có trần RAM (`DB_MEM_LIMIT` 1g, `BACKEND_MEM_LIMIT` 512m, `FRONTEND_MEM_LIMIT` 384m, `BACKUP_MEM_LIMIT` 256m, đổi trong `.env`) và giữ tối đa 30 MB log. Theo dõi:
+
+```bash
+docker stats --no-stream              # RAM từng service so với trần
+docker system df                      # dung lượng image, container, cache build
+du -sh data/postgres backups          # database và bản sao lưu
+```
 
 **Vào database:**
 
@@ -251,7 +264,7 @@ Mỗi lần sao lưu:
 - Sau khi tải lên, so kích thước file trên WebDAV với bản gốc; khác nhau thì xoá bản trên WebDAV và báo lỗi. Máy chủ WebDAV không cho biết kích thước thì chỉ ghi cảnh báo vào log.
 - Lỗi WebDAV (sai mật khẩu, mất mạng...) không làm mất bản trong `backups/`: lần chạy đó báo lỗi, container chuyển sang `unhealthy` đến lần sao lưu thành công sau.
 
-**Theo dõi:** `docker compose ps` hiện `backup` là `(healthy)` khi lần sao lưu gần nhất thành công và chưa quá 26 giờ, `(unhealthy)` khi lần gần nhất lỗi hoặc đã hơn 26 giờ không sao lưu được. Chi tiết: `docker compose logs backup` hoặc `backups/backup.log`; trạng thái lần gần nhất ở `backups/.backup-status`.
+**Theo dõi:** `docker compose ps` hiện `backup` là `(healthy)` khi lần sao lưu gần nhất thành công và chưa quá 26 giờ, `(unhealthy)` khi lần gần nhất lỗi hoặc đã hơn 26 giờ không sao lưu được. Chi tiết: `docker compose logs backup` hoặc `backups/backup.log` (giữ tối đa 2000 dòng gần nhất); trạng thái lần gần nhất ở `backups/.backup-status`.
 
 **Sao lưu ngay** (ví dụ trước khi cập nhật), có tải lên WebDAV:
 
@@ -461,6 +474,17 @@ Sau khi cập nhật:
 - Hai migration chỉ thêm một giá trị enum và một bảng mới, chạy ngay.
 - Thêm service `backup` (mục 5.1). Sau khi cập nhật mã nguồn: `mkdir -p backups`, điền `WEBDAV_URL`, `WEBDAV_USERNAME`, `WEBDAV_PASSWORD` vào `.env`, rồi `docker compose up -d --build` và xem `docker compose logs backup`.
 
+### 6.13. Tiết kiệm RAM, ổ đĩa và chịu tải (migration `20260929180000_stock_movement_order_index`)
+
+- Mỗi service có trần RAM và log tối đa 3 file × 10 MB. Trước đây log container ghi mãi không xoá. `docker compose up -d --build` tạo lại container theo cấu hình mới. Log cũ nằm trong container cũ và bị xoá cùng container.
+- PostgreSQL chạy với `max_connections=30`, `wal_compression=on`, `checkpoint_timeout=15min`, `max_parallel_workers_per_gather=0` và `shm_size: 256mb`. Trước đây, nhiều báo cáo chạy cùng lúc có thể lỗi 500 (`could not resize shared memory segment`).
+- Backend dùng 10 kết nối cho bán hàng và 3 kết nối riêng cho báo cáo, nên nhiều người tải báo cáo cùng lúc không làm thu ngân phải chờ. Nhiều người tải cùng một báo cáo cùng lúc thì chỉ tính một lần. Không còn tiến trình query-engine riêng. Khi mọi kết nối đều bận quá lâu, người dùng thấy "Hệ thống đang bận, vui lòng thử lại sau giây lát" thay vì lỗi hệ thống.
+- Migration `20260929180000_stock_movement_order_index` thêm chỉ mục giúp thanh toán, hủy và sửa hóa đơn không phải quét toàn bộ sổ kho. Tạo chỉ mục mất vài giây (2 triệu dòng: dưới 2 giây, 26 MB). Trong lúc đó backend chưa nhận yêu cầu.
+- Đo với dữ liệu 2 năm, 10 thu ngân và 10 người tải báo cáo cùng lúc: thanh toán p95 từ 15,9 s còn 0,18 s, một lượt tải cả bộ báo cáo năm từ 72 s còn 14–36 s. Thêm 600 điện thoại nhân viên vẫn nhẹ (chi tiết `docs/resource-rules.md` §6).
+- **Sửa tay trên máy chủ:** nới giới hạn đăng nhập của Nginx theo mục 3.1 (`rate=30r/m`, `burst=60`), rồi `sudo nginx -t && sudo systemctl reload nginx`. Giới hạn cũ chặn nhân viên cùng quán đăng nhập đầu ca.
+- Cần Docker Engine 25 trở lên (mục 2.1). Máy chủ ít RAM có thể giảm các `*_MEM_LIMIT` trong `.env` (xem `.env.docker.example`).
+- Sau khi cập nhật, dọn một lần: `docker image prune -f && docker builder prune -f`.
+
 ## 7. Xử lý sự cố
 
 | Hiện tượng | Nguyên nhân / cách xử lý |
@@ -478,4 +502,5 @@ Sau khi cập nhật:
 | Log `backup`: `sai WEBDAV_USERNAME hoặc WEBDAV_PASSWORD (HTTP 401)` | Sai tài khoản WebDAV, hoặc mật khẩu có `$`/`#` mà chưa đặt trong dấu nháy đơn trong `.env`. Nextcloud bật xác thực hai lớp thì phải dùng mật khẩu ứng dụng. |
 | Log `backup`: `thư mục cha của WEBDAV_URL chưa tồn tại (HTTP 409)` | Tạo thư mục cha trên dịch vụ WebDAV (service chỉ tự tạo thư mục cuối của `WEBDAV_URL`). |
 | Log `backup`: `không kết nối được tới WebDAV` | Sai địa chỉ `WEBDAV_URL`, máy chủ WebDAV tắt, hoặc lỗi chứng chỉ HTTPS. Bản trong `backups/` vẫn được tạo. |
-| Hết dung lượng đĩa | `docker system df`, dọn bằng `docker image prune -f` và xoá bớt `backups/` cũ. |
+| Hết dung lượng đĩa | `docker system df`, dọn bằng `docker image prune -f` và `docker builder prune -f`, rồi xoá bớt `backups/` cũ (hoặc giảm `KEEP_DAYS`). |
+| Một service tự khởi động lại, `docker inspect <container> --format '{{.State.OOMKilled}}'` ra `true` | Service vượt trần RAM. Tăng `*_MEM_LIMIT` tương ứng trong `.env` rồi `docker compose up -d`. |

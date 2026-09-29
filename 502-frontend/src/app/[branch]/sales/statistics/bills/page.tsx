@@ -8,17 +8,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { TableEmpty, TableSkeleton } from "@/components/data-states";
+import { ListLimitNotice, TableEmpty, TableSkeleton } from "@/components/data-states";
 import { DateRangePicker, formatDateRange, type DateRangeValue } from "@/components/date-range-picker";
 import { PageHeader } from "@/components/layout/page-header";
 import { BillSheet, ORDER_STATUS_BADGE } from "@/components/sales/bill-sheet";
 import { useNotify } from "@/hooks/use-notify";
-import api from "@/lib/api";
+import api, { totalCountOf } from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
 import { billLabel, businessDate, formatDuration, formatMoney, formatNumber, formatTime, minutesBetween } from "@/lib/format";
 import { BUSINESS_DAY_HINT, ORDER_STATUS_LABELS, PAYMENT_METHOD_LABELS } from "@/lib/labels";
 import { SHOW_FROM } from "@/lib/responsive";
-import type { Order, OrderStatus } from "@/lib/types";
+import type { Order, OrderStatus, OrderSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const ALL = "ALL";
@@ -43,14 +43,23 @@ function BillsView() {
   const [status, setStatus] = useState<StatusFilter>(ALL);
   const [search, setSearch] = useState("");
   const [orders, setOrders] = useState<Order[] | null>(null);
+  // How many bills the period has in all; the list holds the newest 1000.
+  const [total, setTotal] = useState<number | null>(null);
+  const [summary, setSummary] = useState<OrderSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get<Order[]>("/orders", { params: { branch, ...range } });
+      const params = { branch, ...range };
+      const [res, totals] = await Promise.all([
+        api.get<Order[]>("/orders", { params }),
+        api.get<OrderSummary>("/orders/summary", { params }),
+      ]);
       setOrders(res.data.filter((o) => o.status !== "PENDING"));
+      setTotal(totalCountOf(res));
+      setSummary(totals.data);
     } catch (error) {
       notify.error(error, "Không thể tải danh sách hóa đơn");
     } finally {
@@ -101,11 +110,6 @@ function BillsView() {
       ),
     [listed, status, keyword, numberQuery],
   );
-  const paid = (orders ?? []).filter((o) => o.status === "COMPLETED");
-  // What was paid (VAT included) and the VAT in it; revenue is before VAT.
-  const collected = paid.reduce((sum, o) => sum + Number(o.finalAmount), 0);
-  const vat = paid.reduce((sum, o) => sum + Number(o.taxAmount), 0);
-  const cancelledCount = (orders ?? []).length - paid.length;
 
   return (
     <>
@@ -121,12 +125,16 @@ function BillsView() {
           <CardDescription>
             {numberQuery ? (
               "Kết quả tìm trên mọi ngày, không theo khoảng thời gian đã chọn"
-            ) : (
+            ) : summary ? (
+              // Summed by the server over every bill of the period, not only the listed ones.
               <>
-                {paid.length} hóa đơn đã thanh toán · doanh thu {formatMoney(collected - vat)} · VAT {formatMoney(vat)} ·
-                tổng thu {formatMoney(collected)}
-                {cancelledCount > 0 && ` · ${cancelledCount} hóa đơn đã hủy`}
+                {formatNumber(summary.paidCount)} hóa đơn đã thanh toán · doanh thu{" "}
+                {formatMoney(summary.collected - summary.vat)} · VAT {formatMoney(summary.vat)} · tổng thu{" "}
+                {formatMoney(summary.collected)}
+                {summary.cancelledCount > 0 && ` · ${formatNumber(summary.cancelledCount)} hóa đơn đã hủy`}
               </>
+            ) : (
+              "Đang tính tổng…"
             )}
           </CardDescription>
         </CardHeader>
@@ -157,6 +165,15 @@ function BillsView() {
               />
             </InputGroup>
           </div>
+
+          {!numberQuery && orders && (
+            <ListLimitNotice
+              shown={orders.length}
+              total={total}
+              noun="hóa đơn"
+              hint="Dòng tổng ở trên vẫn tính đủ mọi hóa đơn của khoảng này. Lọc trạng thái và tìm phòng chỉ tìm trong các hóa đơn đang hiển thị; chọn khoảng ngày ngắn hơn, hoặc gõ đủ số hóa đơn để tìm trên mọi ngày."
+            />
+          )}
 
           <div className={cn("transition-opacity", !numberQuery && loading && orders && "opacity-60")}>
             <Table>

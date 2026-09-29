@@ -15,6 +15,7 @@ import {
   StockMovementType,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ReportPrismaService } from '../prisma/report-prisma.service';
 import { AuthUser } from '../auth/auth-user';
 import { BranchScopeService } from '../common/branch-scope.service';
 import { businessDayRange } from '../common/dates';
@@ -34,15 +35,20 @@ import { Bill, billedHoursOf, computeBill } from './billing';
 import { billNumberPrefixRange, nextBillNumber } from './bill-number';
 
 const staffRef = { select: { id: true, fullName: true } };
+// Only what the screens show: bill lists return up to 1000 orders, so a
+// whole product or room row per line would be carried for nothing.
 const orderInclude = {
-  room: true,
+  room: { select: { id: true, name: true, type: true } },
   cskh: staffRef,
   server: staffRef,
   createdBy: staffRef,
   checkedOutBy: staffRef,
   cancelledBy: staffRef,
   editedBy: staffRef,
-  items: { include: { product: true }, orderBy: { id: 'asc' } },
+  items: {
+    include: { product: { select: { id: true, name: true, unit: true } } },
+    orderBy: { id: 'asc' },
+  },
   fundTransaction: {
     select: { id: true, method: true, amount: true, cancelledAt: true },
   },
@@ -119,6 +125,7 @@ function unitCostOf(taken?: { quantity: number; value: number }): number {
 export class OrdersService {
   constructor(
     private prisma: PrismaService,
+    private reportDb: ReportPrismaService,
     private branchScope: BranchScopeService,
     private inventory: InventoryService,
   ) {}
@@ -228,9 +235,48 @@ export class OrdersService {
     });
   }
 
-  // Managers: bills of a period (by payment / cancel time, business days).
+  // Managers: bills of a period (by payment / cancel time, business days),
+  // the newest 1000, and how many match in all.
   // Staff: the open sessions they serve.
   async findAll(user: AuthUser, query: ListOrdersQuery) {
+    const where = await this.listWhere(user, query);
+    return Promise.all([
+      this.prisma.order.findMany({
+        where,
+        include: orderInclude,
+        orderBy: [{ endTime: 'desc' }, { startTime: 'desc' }],
+        take: 1000,
+      }),
+      this.prisma.order.count({ where }),
+    ]);
+  }
+
+  // Totals of every bill the list filters select, not only of the 1000 it
+  // returns: paid (collected, VAT included, and that VAT) and cancelled.
+  // Summed in SQL on the report pool.
+  async summary(user: AuthUser, query: ListOrdersQuery) {
+    const groups = await this.reportDb.order.groupBy({
+      by: ['status'],
+      where: await this.listWhere(user, query),
+      _count: { _all: true },
+      _sum: { finalAmount: true, taxAmount: true },
+    });
+    const paid = groups.find((g) => g.status === OrderStatus.COMPLETED);
+    return {
+      billCount: groups.reduce((sum, g) => sum + g._count._all, 0),
+      paidCount: paid?._count._all ?? 0,
+      cancelledCount:
+        groups.find((g) => g.status === OrderStatus.CANCELLED)?._count._all ??
+        0,
+      collected: Number(paid?._sum.finalAmount ?? 0),
+      vat: Number(paid?._sum.taxAmount ?? 0),
+    };
+  }
+
+  private async listWhere(
+    user: AuthUser,
+    query: ListOrdersQuery,
+  ): Promise<Prisma.OrderWhereInput> {
     const branchId = await this.branchScope.resolveBranchId(user, query.branch);
     const where: Prisma.OrderWhereInput = { branchId, status: query.status };
 
@@ -249,13 +295,7 @@ export class OrdersService {
       where.billNumber = undefined;
       where.OR = [{ serverId: user.id }, { cskhId: user.id }];
     }
-
-    return this.prisma.order.findMany({
-      where,
-      include: orderInclude,
-      orderBy: [{ endTime: 'desc' }, { startTime: 'desc' }],
-      take: 1000,
-    });
+    return where;
   }
 
   async findOne(user: AuthUser, id: number) {

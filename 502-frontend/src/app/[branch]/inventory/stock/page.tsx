@@ -13,14 +13,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { TableEmpty, TableSkeleton } from "@/components/data-states";
+import { ListLimitNotice, TableEmpty, TableSkeleton } from "@/components/data-states";
 import { ExportExcelButton } from "@/components/export-excel-button";
 import { useAuth } from "@/components/auth-provider";
 import { can } from "@/lib/permissions";
 import { PageHeader } from "@/components/layout/page-header";
 import { useApiData } from "@/hooks/use-api-data";
 import { useNotify } from "@/hooks/use-notify";
-import api from "@/lib/api";
+import api, { totalCountOf } from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
 import { exportWorkbook, toSheet, type ExportColumn } from "@/lib/excel-export";
 import { businessDate, formatAmount, formatDateTime, formatMoney, formatNumber } from "@/lib/format";
@@ -315,11 +315,16 @@ export default function StockPage() {
 function MovementHistory({ branch, productId }: { branch: string; productId: number }) {
   const notify = useNotify();
   const [movements, setMovements] = useState<StockMovement[] | null>(null);
+  // How many movements the product has in all; the list holds the newest 500.
+  const [total, setTotal] = useState<number | null>(null);
 
   useEffect(() => {
     api
       .get<StockMovement[]>("/inventory/movements", { params: { branch, productId } })
-      .then((res) => setMovements(res.data))
+      .then((res) => {
+        setMovements(res.data);
+        setTotal(totalCountOf(res));
+      })
       .catch((error) => {
         notify.error(error, "Không thể tải sổ kho");
         setMovements([]);
@@ -330,40 +335,51 @@ function MovementHistory({ branch, productId }: { branch: string; productId: num
     m.document ? `${DOC_TYPE_LABELS[m.document.type]} ${m.document.code}` : m.orderId ? `Hóa đơn #${m.orderId}` : "—";
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Thời gian</TableHead>
-          <TableHead>Loại</TableHead>
-          <TableHead className="hidden sm:table-cell">Chứng từ</TableHead>
-          <TableHead className="text-right">Số lượng</TableHead>
-          <TableHead className="text-right">Tồn sau</TableHead>
-          <TableHead className="hidden sm:table-cell">Người thực hiện</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {!movements ? (
-          <TableSkeleton columns={["", "", "hidden sm:table-cell", "", "", "hidden sm:table-cell"]} rows={4} />
-        ) : movements.length === 0 ? (
-          <TableEmpty colSpan={6} icon={HistoryIcon} title="Chưa có biến động kho" />
-        ) : (
-          movements.map((m) => (
-            <TableRow key={m.id}>
-              <TableCell className="whitespace-normal tabular-nums">{formatDateTime(m.createdAt)}</TableCell>
-              <TableCell>
-                <Badge variant={MOVEMENT_BADGE[m.type]}>{MOVEMENT_LABELS[m.type]}</Badge>
-              </TableCell>
-              <TableCell className="hidden max-w-44 truncate sm:table-cell">{source(m)}</TableCell>
-              <TableCell className={cn("text-right font-medium tabular-nums", m.quantity < 0 && "text-destructive")}>
-                {m.quantity > 0 ? "+" : ""}
-                {formatNumber(m.quantity)}
-              </TableCell>
-              <TableCell className="text-right tabular-nums">{formatNumber(m.balanceAfter)}</TableCell>
-              <TableCell className="hidden sm:table-cell">{m.createdBy?.fullName ?? "—"}</TableCell>
-            </TableRow>
-          ))
-        )}
-      </TableBody>
-    </Table>
+    <>
+      {movements && (
+        <ListLimitNotice
+          shown={movements.length}
+          total={total}
+          noun="lần thay đổi"
+          className="mb-4"
+          hint="Các lần cũ hơn vẫn nằm trong sổ kho; xem theo kỳ ở báo cáo Nhập – xuất – tồn."
+        />
+      )}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Thời gian</TableHead>
+            <TableHead>Loại</TableHead>
+            <TableHead className="hidden sm:table-cell">Chứng từ</TableHead>
+            <TableHead className="text-right">Số lượng</TableHead>
+            <TableHead className="text-right">Tồn sau</TableHead>
+            <TableHead className="hidden sm:table-cell">Người thực hiện</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {!movements ? (
+            <TableSkeleton columns={["", "", "hidden sm:table-cell", "", "", "hidden sm:table-cell"]} rows={4} />
+          ) : movements.length === 0 ? (
+            <TableEmpty colSpan={6} icon={HistoryIcon} title="Chưa có biến động kho" />
+          ) : (
+            movements.map((m) => (
+              <TableRow key={m.id}>
+                <TableCell className="whitespace-normal tabular-nums">{formatDateTime(m.createdAt)}</TableCell>
+                <TableCell>
+                  <Badge variant={MOVEMENT_BADGE[m.type]}>{MOVEMENT_LABELS[m.type]}</Badge>
+                </TableCell>
+                <TableCell className="hidden max-w-44 truncate sm:table-cell">{source(m)}</TableCell>
+                <TableCell className={cn("text-right font-medium tabular-nums", m.quantity < 0 && "text-destructive")}>
+                  {m.quantity > 0 ? "+" : ""}
+                  {formatNumber(m.quantity)}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">{formatNumber(m.balanceAfter)}</TableCell>
+                <TableCell className="hidden sm:table-cell">{m.createdBy?.fullName ?? "—"}</TableCell>
+              </TableRow>
+            ))
+          )}
+        </TableBody>
+      </Table>
+    </>
   );
 }

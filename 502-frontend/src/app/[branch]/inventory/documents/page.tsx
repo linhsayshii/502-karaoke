@@ -10,7 +10,7 @@ import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetT
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { TableEmpty, TableSkeleton } from "@/components/data-states";
+import { ListLimitNotice, TableEmpty, TableSkeleton } from "@/components/data-states";
 import { DateRangePicker, formatDateRange, type DateRangeValue } from "@/components/date-range-picker";
 import { useAuth } from "@/components/auth-provider";
 import { can } from "@/lib/permissions";
@@ -18,12 +18,12 @@ import { PageHeader } from "@/components/layout/page-header";
 import { LineItemsTable } from "@/components/line-items-table";
 import { ReasonDialog } from "@/components/reason-dialog";
 import { useNotify } from "@/hooks/use-notify";
-import api from "@/lib/api";
+import api, { totalCountOf } from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
 import { businessDate, firstDayOfMonth, formatDateTime, formatMoney, formatNumber } from "@/lib/format";
 import { BUSINESS_DAY_HINT, DOC_TYPE_LABELS, PAYMENT_METHOD_LABELS } from "@/lib/labels";
 import { ONLY_NARROW, SHOW_FROM } from "@/lib/responsive";
-import type { StockDocType, StockDocument } from "@/lib/types";
+import type { StockDocType, StockDocument, StockDocumentsSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const ALL = "ALL";
@@ -40,16 +40,24 @@ export default function StockDocumentsPage() {
   const [range, setRange] = useState<DateRangeValue>(() => ({ from: firstDayOfMonth(), to: businessDate() }));
   const [type, setType] = useState<StockDocType | typeof ALL>(ALL);
   const [documents, setDocuments] = useState<StockDocument[] | null>(null);
+  // How many documents match in all; the list holds the newest 200.
+  const [total, setTotal] = useState<number | null>(null);
+  const [summary, setSummary] = useState<StockDocumentsSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get<StockDocument[]>("/inventory/documents", {
-        params: { branch, ...range, type: type === ALL ? undefined : type },
-      });
+      const [res, totals] = await Promise.all([
+        api.get<StockDocument[]>("/inventory/documents", {
+          params: { branch, ...range, type: type === ALL ? undefined : type },
+        }),
+        api.get<StockDocumentsSummary>("/inventory/documents/summary", { params: { branch, ...range } }),
+      ]);
       setDocuments(res.data);
+      setTotal(totalCountOf(res));
+      setSummary(totals.data);
     } catch (error) {
       notify.error(error, "Không thể tải danh sách phiếu kho");
     } finally {
@@ -61,9 +69,6 @@ export default function StockDocumentsPage() {
     load();
   }, [load]);
 
-  const active = (documents ?? []).filter((d) => !d.cancelledAt);
-  const importTotal = active.filter((d) => d.type === "IMPORT").reduce((s, d) => s + Number(d.totalAmount), 0);
-  const exportTotal = active.filter((d) => d.type === "EXPORT").reduce((s, d) => s + Number(d.totalAmount), 0);
 
   return (
     <>
@@ -77,7 +82,10 @@ export default function StockDocumentsPage() {
         <CardHeader>
           <CardTitle>{formatDateRange(range)}</CardTitle>
           <CardDescription>
-            Nhập {formatMoney(importTotal)} · xuất {formatMoney(exportTotal)} (theo giá vốn, không tính phiếu đã hủy)
+            {/* Summed by the server over every document of the period, not only the listed ones. */}
+            {summary
+              ? `Nhập ${formatMoney(summary.importTotal)} · xuất ${formatMoney(summary.exportTotal)} (theo giá vốn, không tính phiếu đã hủy)`
+              : "Đang tính tổng…"}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
@@ -93,6 +101,15 @@ export default function StockDocumentsPage() {
             <ToggleGroupItem value="IMPORT">{DOC_TYPE_LABELS.IMPORT}</ToggleGroupItem>
             <ToggleGroupItem value="EXPORT">{DOC_TYPE_LABELS.EXPORT}</ToggleGroupItem>
           </ToggleGroup>
+
+          {documents && (
+            <ListLimitNotice
+              shown={documents.length}
+              total={total}
+              noun="phiếu"
+              hint="Tổng nhập, xuất ở trên vẫn tính đủ mọi phiếu của khoảng này. Chọn khoảng ngày ngắn hơn để xem đủ danh sách."
+            />
+          )}
 
           <div className={cn("transition-opacity", loading && documents && "opacity-60")}>
             <Table>

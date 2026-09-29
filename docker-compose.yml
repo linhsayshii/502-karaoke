@@ -5,10 +5,38 @@
 
 name: karaoke502
 
+# Tài nguyên (docs/resource-rules.md): log của mỗi container tối đa 3 file × 10 MB
+# (mặc định Docker ghi mãi không xoá), mỗi service có trần RAM để một service
+# lỗi không kéo cả máy chủ (và database) theo. Đổi trần RAM trong .env.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   db:
     image: postgres:17-alpine
     restart: unless-stopped
+    logging: *logging
+    mem_limit: ${DB_MEM_LIMIT:-1g}
+    # Truy vấn song song của PostgreSQL dùng /dev/shm; mặc định Docker chỉ cho 64 MB, nhiều
+    # báo cáo chạy cùng lúc thì lỗi "could not resize shared memory segment". Tính vào mem_limit.
+    shm_size: 256mb
+    # Database nhỏ, ít kết nối (backend: 10 cho bán hàng + 3 cho báo cáo): ít tiến trình Postgres hơn.
+    # wal_compression + checkpoint 15 phút: ghi WAL ít hơn, đỡ hao SSD.
+    # Không chạy song song trong một truy vấn: máy chủ ít CPU, nhiều báo cáo cùng lúc thì song
+    # song chỉ làm tranh CPU với thu ngân (đo: tải báo cáo nhanh gấp đôi, thanh toán p95 1,9 s → 0,3 s).
+    command:
+      - postgres
+      - -c
+      - max_connections=30
+      - -c
+      - wal_compression=on
+      - -c
+      - checkpoint_timeout=15min
+      - -c
+      - max_parallel_workers_per_gather=0
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-karaoke_db}
       POSTGRES_USER: ${POSTGRES_USER:-karaoke_user}
@@ -19,23 +47,31 @@ services:
     healthcheck:
       # Qua TCP: lúc khởi tạo lần đầu Postgres chạy server tạm chỉ nghe socket, chưa tạo xong DB
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 5s
+      # Docker ghi trạng thái healthcheck xuống đĩa mỗi lần kiểm tra: 30 giây một lần
+      # khi đã chạy, 2 giây một lần trong lúc khởi động (start_interval, Docker ≥ 25).
+      interval: 30s
       timeout: 5s
-      retries: 10
+      retries: 5
+      start_period: 60s
+      start_interval: 2s
 
   backend:
     build: ./502-backend
     restart: unless-stopped
+    logging: *logging
+    mem_limit: ${BACKEND_MEM_LIMIT:-512m}
     depends_on:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-karaoke_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-karaoke_db}?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-karaoke_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-karaoke_db}?schema=public&connection_limit=10&pool_timeout=20
       JWT_SECRET: ${JWT_SECRET:?Đặt JWT_SECRET trong .env}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Đặt JWT_REFRESH_SECRET trong .env}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
+      # Trần heap của Node, luôn nhỏ hơn mem_limit (phần còn lại cho mã và bộ đệm ngoài heap)
+      NODE_OPTIONS: --max-old-space-size=320
       TZ: Asia/Ho_Chi_Minh
     # Không mở cổng ra ngoài: trình duyệt gọi /api qua frontend.
     # Cần gọi trực tiếp (Swagger, debug) thì bỏ comment:
@@ -47,6 +83,8 @@ services:
   backup:
     build: ./backup
     restart: unless-stopped
+    logging: *logging
+    mem_limit: ${BACKUP_MEM_LIMIT:-256m}
     depends_on:
       db:
         condition: service_healthy
@@ -72,7 +110,12 @@ services:
         NEXT_PUBLIC_API_URL: /api
         API_PROXY_TARGET: http://backend:4000
     restart: unless-stopped
+    logging: *logging
+    mem_limit: ${FRONTEND_MEM_LIMIT:-384m}
     depends_on:
       - backend
+    environment:
+      # Trần heap của Node, luôn nhỏ hơn mem_limit
+      NODE_OPTIONS: --max-old-space-size=256
     ports:
       - "${APP_PORT:-3000}:3000"

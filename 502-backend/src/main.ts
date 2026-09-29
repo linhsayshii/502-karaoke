@@ -4,13 +4,19 @@ import { AppModule } from './app.module';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { configureApp } from './app.setup';
 import { corsOrigins, swaggerEnabled } from './config/env';
+import { TOTAL_COUNT_HEADER } from './common/total-count';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   configureApp(app);
 
   // Only the listed origins may call the API with the refresh cookie (see corsOrigins).
-  app.enableCors({ origin: corsOrigins(), credentials: true });
+  // X-Total-Count (capped lists) must be readable across origins in development.
+  app.enableCors({
+    origin: corsOrigins(),
+    credentials: true,
+    exposedHeaders: [TOTAL_COUNT_HEADER],
+  });
 
   if (swaggerEnabled()) setupSwagger(app);
 

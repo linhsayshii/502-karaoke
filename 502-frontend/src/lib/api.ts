@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { type AxiosResponse } from 'axios';
 
 let accessToken: string | null = null;
 // When the login expires (ms): the server makes every session end 24 hours after login.
@@ -105,6 +105,14 @@ export function apiErrorMessage(error: unknown, fallback: string): string {
     if (message) return message;
   }
   return fallback;
+}
+
+// How many rows a capped list matched in all (X-Total-Count; the body holds
+// only the newest ones), or null when the server did not say.
+export function totalCountOf(res: AxiosResponse): number | null {
+  const header = res.headers['x-total-count'];
+  const total = Number(header);
+  return header == null || !Number.isFinite(total) ? null : total;
 }
 
 export default api;

@@ -9,7 +9,10 @@ import {
   Query,
   HttpCode,
   HttpStatus,
+  Res,
+  UseInterceptors,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { OrdersService } from './orders.service';
@@ -24,6 +27,8 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/auth-user';
 import { MANAGERS, SALES, READERS } from '../auth/roles';
+import { withTotalCount } from '../common/total-count';
+import { SharedRequestInterceptor } from '../common/shared-request.interceptor';
 
 @ApiTags('orders')
 @ApiBearerAuth()
@@ -39,10 +44,23 @@ export class OrdersController {
   }
 
   // Bill history is a report (managers); staff get their open sessions.
+  // The newest 1000; X-Total-Count says how many match.
   @Get()
   @Roles(...READERS, Role.STAFF)
-  findAll(@CurrentUser() user: AuthUser, @Query() query: ListOrdersQuery) {
-    return this.ordersService.findAll(user, query);
+  findAll(
+    @CurrentUser() user: AuthUser,
+    @Query() query: ListOrdersQuery,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    return withTotalCount(res, this.ordersService.findAll(user, query));
+  }
+
+  // Totals of every bill the same filters select (the Hóa đơn page).
+  @Get('summary')
+  @Roles(...READERS)
+  @UseInterceptors(SharedRequestInterceptor)
+  summary(@CurrentUser() user: AuthUser, @Query() query: ListOrdersQuery) {
+    return this.ordersService.summary(user, query);
   }
 
   @Get(':id')

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { OrderStatus, Prisma } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { ReportPrismaService } from '../prisma/report-prisma.service';
 import { AuthUser } from '../auth/auth-user';
 import { BranchScopeService } from '../common/branch-scope.service';
 import {
@@ -84,7 +84,7 @@ interface BranchRecord {
 @Injectable()
 export class ReportsService {
   constructor(
-    private prisma: PrismaService,
+    private prisma: ReportPrismaService,
     private branchScope: BranchScopeService,
   ) {}
 

@@ -59,6 +59,7 @@ import { BillSummary } from "@/components/sales/bill-summary";
 import { CheckoutDialog } from "@/components/sales/checkout-dialog";
 import { useNotify } from "@/hooks/use-notify";
 import { useNow } from "@/hooks/use-now";
+import { usePolling } from "@/hooks/use-polling";
 import api from "@/lib/api";
 import { computeBill } from "@/lib/billing";
 import { useBranchCode } from "@/lib/branch";
@@ -175,13 +176,12 @@ export default function RoomDetailPage() {
   }, [roomId, branch, canOperate, applyOrder, notify]);
 
   // Pick up changes made on another device (and notice a closed session).
-  useEffect(() => {
-    if (!order) return;
-    const orderId = order.id;
-    const timer = setInterval(async () => {
-      if (pendingRef.current > 0) return;
+  const activeOrderId = order?.id;
+  usePolling(
+    async () => {
+      if (activeOrderId === undefined || pendingRef.current > 0) return;
       try {
-        const res = await api.get<Order>(`/orders/${orderId}`);
+        const res = await api.get<Order>(`/orders/${activeOrderId}`);
         if (pendingRef.current > 0) return;
         if (res.data.status !== "PENDING") {
           notify.success(`Phòng ${room?.name ?? ""} đã được đóng trên máy khác`);
@@ -195,9 +195,10 @@ export default function RoomDetailPage() {
       } catch {
         // Next tick retries; errors of user actions are reported where they happen.
       }
-    }, 15_000);
-    return () => clearInterval(timer);
-  }, [order?.id, room?.name, applyOrder, notify, router, roomsPath]); // eslint-disable-line react-hooks/exhaustive-deps
+    },
+    15_000,
+    activeOrderId !== undefined,
+  );
 
   const saveOrder = useCallback(
     (buildPatch: (current: Order) => Record<string, unknown>) => {

@@ -5,6 +5,7 @@ import {
   ExceptionFilter,
   HttpException,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
 import { Prisma } from '@prisma/client';
@@ -28,6 +29,14 @@ export class PrismaExceptionFilter
         break;
       case 'P2025':
         mapped = new NotFoundException('Không tìm thấy dữ liệu');
+        break;
+      // No free database connection in time (P2024), or a transaction that
+      // could not start or ran out of time (P2028).
+      case 'P2024':
+      case 'P2028':
+        mapped = new ServiceUnavailableException(
+          'Hệ thống đang bận, vui lòng thử lại sau giây lát',
+        );
         break;
     }
     super.catch(mapped ?? exception, host);

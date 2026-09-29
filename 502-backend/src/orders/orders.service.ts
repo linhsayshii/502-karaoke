@@ -6,7 +6,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
-  Order,
   OrderStatus,
   PaymentMethod,
   Prisma,
@@ -35,45 +34,9 @@ import { Bill, billedHoursOf, computeBill } from './billing';
 import { billNumberPrefixRange, nextBillNumber } from './bill-number';
 import { orderDetailInclude, orderInclude } from './order-include';
 import { closeOpenPrSessions, lockOrderRow } from './order-lock';
+import { adjustmentsOf, billOf } from './bill-of';
 
 type Db = Prisma.TransactionClient;
-type BillableOrder = Pick<
-  Order,
-  | 'startTime'
-  | 'pricePerHour'
-  | 'discountPercent'
-  | 'discountAmount'
-  | 'hourlyDiscountPercent'
-  | 'hourlyDiscountAmount'
-  | 'taxPercent'
-> & { items: { price: Prisma.Decimal; quantity: number }[] };
-
-// The bill of a session ending at `endTime`, from what is stored on it.
-function billOf(order: BillableOrder, endTime: Date): Bill {
-  if (!order.startTime) {
-    throw new BadRequestException('Hóa đơn chưa bắt đầu tính giờ');
-  }
-  return computeBill({
-    startTime: order.startTime,
-    endTime,
-    pricePerHour: Number(order.pricePerHour),
-    items: order.items.map((i) => ({
-      price: Number(i.price),
-      quantity: i.quantity,
-    })),
-    ...adjustmentsOf(order),
-  });
-}
-
-function adjustmentsOf(order: BillableOrder) {
-  return {
-    discountPercent: order.discountPercent,
-    discountAmount: Number(order.discountAmount),
-    hourlyDiscountPercent: order.hourlyDiscountPercent,
-    hourlyDiscountAmount: Number(order.hourlyDiscountAmount),
-    taxPercent: order.taxPercent,
-  };
-}
 
 // DTO fields that were not sent are own `undefined` properties; drop them
 // so they do not overwrite stored values.

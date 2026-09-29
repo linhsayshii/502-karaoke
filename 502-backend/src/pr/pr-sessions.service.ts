@@ -107,6 +107,9 @@ export class PrSessionsService {
     this.assertAssign(user);
     return this.prisma.$transaction(async (tx) => {
       const order = await this.lockOpenOrder(tx, user, dto.orderId);
+      if (order.timeLockedAt) {
+        throw new ConflictException('Phòng đã chốt giờ, không thêm PR được');
+      }
       const staff = await this.lockStaff(tx, dto.prStaffId);
       if (staff.branchId !== order.branchId) {
         throw new BadRequestException('PR/KTV không thuộc cơ sở này');
@@ -117,7 +120,7 @@ export class PrSessionsService {
       await this.assertNotElsewhere(tx, staff);
       const now = new Date();
       const startAt = dto.startAt ? new Date(dto.startAt) : now;
-      this.assertTimes(order.startTime, startAt, null, now);
+      this.assertTimes(order.startTime, startAt, null, now, order.timeLockedAt);
       await this.assertNoOverlap(tx, staff, startAt, null);
       await tx.prSession.create({
         data: {
@@ -179,7 +182,13 @@ export class PrSessionsService {
         }
         await this.assertNotElsewhere(tx, staff, id);
       }
-      this.assertTimes(order.startTime, startAt, endAt, new Date());
+      this.assertTimes(
+        order.startTime,
+        startAt,
+        endAt,
+        new Date(),
+        order.timeLockedAt,
+      );
       await this.assertNoOverlap(tx, staff, startAt, endAt, id);
       await tx.prSession.update({ where: { id }, data: { startAt, endAt } });
       return this.detail(tx, order.id);
@@ -263,7 +272,13 @@ export class PrSessionsService {
   private async lockOpenOrder(tx: Db, user: AuthUser, orderId: number) {
     const order = await tx.order.findUnique({
       where: { id: orderId },
-      select: { id: true, branchId: true, startTime: true },
+      select: {
+        id: true,
+        branchId: true,
+        startTime: true,
+        serverId: true,
+        timeLockedAt: true,
+      },
     });
     if (!order) throw new NotFoundException('Không tìm thấy phòng đang hát');
     this.branchScope.assertBranchAccess(user, order.branchId);
@@ -343,8 +358,15 @@ export class PrSessionsService {
     startAt: Date,
     endAt: Date | null,
     now: Date,
+    lockedAt: Date | null,
   ) {
-    const error = checkSessionTimes({ orderStart, startAt, endAt, now });
+    const error = checkSessionTimes({
+      orderStart,
+      startAt,
+      endAt,
+      now,
+      lockedAt,
+    });
     if (error) throw new BadRequestException(error);
   }
 

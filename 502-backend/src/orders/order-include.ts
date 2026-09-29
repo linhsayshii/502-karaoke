@@ -12,6 +12,7 @@ export const orderInclude = {
   checkedOutBy: staffRef,
   cancelledBy: staffRef,
   editedBy: staffRef,
+  timeLockedBy: staffRef,
   items: {
     include: { product: { select: { id: true, name: true, unit: true } } },
     orderBy: { id: 'asc' },

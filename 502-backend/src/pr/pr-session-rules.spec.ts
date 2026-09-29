@@ -6,6 +6,7 @@ const base = {
   startAt: at('20:30'),
   endAt: null,
   now: at('22:00'),
+  lockedAt: null,
 };
 
 describe('checkSessionTimes', () => {
@@ -57,5 +58,45 @@ describe('sessionMinutes', () => {
 
   it('never goes below zero', () => {
     expect(sessionMinutes(at('20:00'), at('19:00'), at('23:00'))).toBe(0);
+  });
+});
+
+describe('checkSessionTimes after the time is locked', () => {
+  const orderStart = new Date('2026-09-30T13:00:00Z');
+  const lockedAt = new Date('2026-09-30T15:00:00Z');
+  const now = new Date('2026-09-30T15:30:00Z');
+
+  it('keeps visits inside the locked time', () => {
+    expect(
+      checkSessionTimes({
+        orderStart,
+        startAt: new Date('2026-09-30T14:00:00Z'),
+        endAt: new Date('2026-09-30T15:10:00Z'),
+        now,
+        lockedAt,
+      }),
+    ).toBe('Giờ ra không được sau lúc chốt giờ');
+  });
+  it('needs an end time', () => {
+    expect(
+      checkSessionTimes({
+        orderStart,
+        startAt: new Date('2026-09-30T14:00:00Z'),
+        endAt: null,
+        now,
+        lockedAt,
+      }),
+    ).toBe('Phòng đã chốt giờ, PR phải có giờ ra');
+  });
+  it('accepts a visit ending at the lock', () => {
+    expect(
+      checkSessionTimes({
+        orderStart,
+        startAt: new Date('2026-09-30T14:00:00Z'),
+        endAt: lockedAt,
+        now,
+        lockedAt,
+      }),
+    ).toBeNull();
   });
 });

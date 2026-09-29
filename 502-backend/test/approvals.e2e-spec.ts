@@ -98,12 +98,14 @@ describe('Sales approvals (e2e)', () => {
     it('only the chain manager corrects or voids a paid bill', async () => {
       const order = await openRoom(roomIds[0]);
       await as('tn1_cs1')
-        .patch(`/orders/${order.id}`, {
+        .patch(`/orders/${order.id as number}`, {
           items: [{ productId: productIds[0], quantity: 1 }],
         })
         .expect(200);
       await as('tn1_cs1')
-        .post(`/orders/${order.id}/checkout`, { paymentMethod: 'CASH' })
+        .post(`/orders/${order.id as number}/checkout`, {
+          paymentMethod: 'CASH',
+        })
         .expect(200);
       paidId = order.id as number;
 
@@ -122,7 +124,70 @@ describe('Sales approvals (e2e)', () => {
 
     it('a branch manager still cancels an open session', async () => {
       const order = await openRoom(roomIds[1]);
-      await as('ql1_cs1').post(`/orders/${order.id}/cancel`).expect(200);
+      await as('ql1_cs1')
+        .post(`/orders/${order.id as number}/cancel`)
+        .expect(200);
+    });
+  });
+
+  describe('time lock', () => {
+    let orderId: number;
+    let prId: number;
+
+    it('locks the time: the fee stops and open PR visits end', async () => {
+      const order = await openRoom(roomIds[2], {
+        serverId: userIds.pv1_cs1,
+        cskhId: userIds.cskh1_cs1,
+      });
+      orderId = order.id as number;
+      prId = (
+        (await as('ql1_cs1').post('/pr/staff', { name: 'Lan' }).expect(201))
+          .body as Json
+      ).id as number;
+      await as('tn1_cs1')
+        .post('/pr/sessions', { orderId, prStaffId: prId })
+        .expect(201);
+
+      // CSKH only looks; the server locks.
+      await as('cskh1_cs1').post(`/orders/${orderId}/lock-time`).expect(403);
+      const locked = (
+        await as('pv1_cs1').post(`/orders/${orderId}/lock-time`).expect(201)
+      ).body as Json;
+      expect(locked.timeLockedAt).toBeTruthy();
+      const visits = locked.prSessions as Json[];
+      expect(visits[0].endAt).toBe(locked.timeLockedAt);
+      await as('pv1_cs1').post(`/orders/${orderId}/lock-time`).expect(409);
+
+      // No PR after the lock.
+      await as('tn1_cs1')
+        .post('/pr/sessions', { orderId, prStaffId: prId })
+        .expect(409);
+
+      // The room map shows it.
+      const room = (await as('tn1_cs1').get(`/rooms/${roomIds[2]}`).expect(200))
+        .body as Json;
+      expect((room.activeOrder as Json).timeLockedAt).toBe(locked.timeLockedAt);
+    });
+
+    it('only cashiers and managers unlock, and it is logged', async () => {
+      await as('pv1_cs1').post(`/orders/${orderId}/unlock-time`).expect(403);
+      const unlocked = (
+        await as('tn1_cs1').post(`/orders/${orderId}/unlock-time`).expect(201)
+      ).body as Json;
+      expect(unlocked.timeLockedAt).toBeNull();
+      await as('tn1_cs1').post(`/orders/${orderId}/unlock-time`).expect(409);
+    });
+
+    it('checkout ends the bill at the locked time', async () => {
+      const locked = (
+        await as('tn1_cs1').post(`/orders/${orderId}/lock-time`).expect(201)
+      ).body as Json;
+      const paid = (
+        await as('tn1_cs1')
+          .post(`/orders/${orderId}/checkout`, { paymentMethod: 'CASH' })
+          .expect(200)
+      ).body as Json;
+      expect(paid.endTime).toBe(locked.timeLockedAt);
     });
   });
 });

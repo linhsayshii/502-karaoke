@@ -6,6 +6,7 @@ export interface SessionTimes {
   startAt: Date;
   endAt: Date | null; // null: still in the room
   now: Date;
+  lockedAt: Date | null; // the room's time was locked (chốt giờ)
 }
 
 // The Vietnamese error of impossible times, or null when they are fine.
@@ -14,12 +15,17 @@ export function checkSessionTimes({
   startAt,
   endAt,
   now,
+  lockedAt,
 }: SessionTimes): string | null {
+  // After the lock nobody is in the room any more: every visit ends by then.
+  const limit = lockedAt ?? now;
+  const limitName = lockedAt ? 'lúc chốt giờ' : 'hiện tại';
   if (startAt < orderStart) return 'Giờ vào phải sau giờ mở phòng';
-  if (startAt > now) return 'Giờ vào không được sau hiện tại';
+  if (startAt > limit) return `Giờ vào không được sau ${limitName}`;
+  if (!endAt && lockedAt) return 'Phòng đã chốt giờ, PR phải có giờ ra';
   if (endAt) {
     if (endAt < startAt) return 'Giờ ra phải sau giờ vào';
-    if (endAt > now) return 'Giờ ra không được sau hiện tại';
+    if (endAt > limit) return `Giờ ra không được sau ${limitName}`;
   }
   return null;
 }

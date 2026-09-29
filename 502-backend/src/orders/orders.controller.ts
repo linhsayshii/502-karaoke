@@ -100,6 +100,25 @@ export class OrdersController {
     return this.ordersService.checkout(user, id, dto.paymentMethod);
   }
 
+  // Chốt giờ: sales roles and the server of the room (checked in the service).
+  @Post(':id/lock-time')
+  @Roles(...SALES, Role.STAFF)
+  lockTime(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.ordersService.lockTime(user, id);
+  }
+
+  @Post(':id/unlock-time')
+  @Roles(...SALES)
+  unlockTime(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.ordersService.unlockTime(user, id);
+  }
+
   // Drops an open session without billing it.
   @Post(':id/cancel')
   @HttpCode(HttpStatus.OK)

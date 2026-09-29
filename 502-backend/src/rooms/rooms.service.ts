@@ -19,6 +19,7 @@ const roomInclude = {
     select: {
       id: true,
       startTime: true,
+      timeLockedAt: true,
       cskhId: true,
       serverId: true,
       cskh: staffRef,

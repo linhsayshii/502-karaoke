@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  OrderEventType,
   OrderStatus,
   PaymentMethod,
   Prisma,
@@ -34,7 +35,8 @@ import { Bill, billedHoursOf, computeBill } from './billing';
 import { billNumberPrefixRange, nextBillNumber } from './bill-number';
 import { orderDetailInclude, orderInclude } from './order-include';
 import { closeOpenPrSessions, lockOrderRow } from './order-lock';
-import { adjustmentsOf, billOf } from './bill-of';
+import { adjustmentsOf, billedEndOf, billOf } from './bill-of';
+import { isServerOf, SERVE_FORBIDDEN } from './order-access';
 
 type Db = Prisma.TransactionClient;
 
@@ -345,7 +347,7 @@ export class OrdersService {
         finalAmount: Number(order.finalAmount),
       };
     }
-    const endTime = new Date();
+    const endTime = billedEndOf(order, new Date());
     return { ...order, endTime, ...billOf(order, endTime) };
   }
 
@@ -363,7 +365,9 @@ export class OrdersService {
           'Hóa đơn đã được thanh toán hoặc đã hủy',
         );
 
-        const endTime = new Date();
+        // A locked session ends when it was locked: the bill's duration, its
+        // business day, number and fund receipt all use that moment.
+        const endTime = billedEndOf(order, new Date());
         const bill = billOf(order, endTime);
         const number = await nextBillNumber(
           tx,
@@ -474,6 +478,70 @@ export class OrdersService {
           data: { status: RoomStatus.AVAILABLE },
         });
       }
+      return tx.order.findUniqueOrThrow({
+        where: { id },
+        include: orderDetailInclude,
+      });
+    });
+  }
+
+  // Chốt giờ: the room fee stops now; PR/KTV still in the room leave now.
+  // Sales roles, and the server assigned to the session.
+  lockTime(user: AuthUser, id: number) {
+    return this.prisma.$transaction(async (tx) => {
+      const order = await this.lockOrder(
+        tx,
+        user,
+        id,
+        OrderStatus.PENDING,
+        'Phòng đã đóng',
+      );
+      if (user.role === Role.STAFF && !isServerOf(user, order)) {
+        throw new ForbiddenException(SERVE_FORBIDDEN);
+      }
+      if (order.timeLockedAt) {
+        throw new ConflictException('Phòng đã chốt giờ');
+      }
+      const now = new Date();
+      await tx.order.update({
+        where: { id },
+        data: { timeLockedAt: now, timeLockedById: user.id },
+      });
+      await closeOpenPrSessions(tx, id, now);
+      return tx.order.findUniqueOrThrow({
+        where: { id },
+        include: orderDetailInclude,
+      });
+    });
+  }
+
+  // The clock runs again from the start time (the locked gap is billed).
+  // Logged: who unlocked, when, and when it had been locked.
+  unlockTime(user: AuthUser, id: number) {
+    return this.prisma.$transaction(async (tx) => {
+      const order = await this.lockOrder(
+        tx,
+        user,
+        id,
+        OrderStatus.PENDING,
+        'Phòng đã đóng',
+      );
+      if (!order.timeLockedAt) {
+        throw new ConflictException('Phòng chưa chốt giờ');
+      }
+      await tx.order.update({
+        where: { id },
+        data: { timeLockedAt: null, timeLockedById: null },
+      });
+      await tx.orderEvent.create({
+        data: {
+          branchId: order.branchId,
+          orderId: id,
+          type: OrderEventType.TIME_UNLOCK,
+          lockedAt: order.timeLockedAt,
+          createdById: user.id,
+        },
+      });
       return tx.order.findUniqueOrThrow({
         where: { id },
         include: orderDetailInclude,

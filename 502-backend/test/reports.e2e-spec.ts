@@ -271,6 +271,7 @@ describe('Reports (e2e)', () => {
         'cs2',
         'cs3',
         'cs4',
+        'cs5',
       ]);
       expect(chain.byBranch!.reduce((s, b) => s + b.collected, 0)).toBe(
         chain.totals.collected,
@@ -386,6 +387,7 @@ describe('Reports (e2e)', () => {
         'cs2',
         'cs3',
         'cs4',
+        'cs5',
       ]);
       for (const branch of res.branches) {
         const same = chain.byBranch!.find((b) => b.code === branch.code)!;

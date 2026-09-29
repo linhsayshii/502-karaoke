@@ -43,7 +43,8 @@ function reportUrls(branch, groupBy = 'month', shift = 0) {
     `/reports/products?${r}&by=product`, `/reports/products?${r}&by=category`,
     `/reports/hours?${r}`, `/reports/profit?${r}&groupBy=${groupBy}`, `/reports/inventory?${r}`,
   ];
-  if (branch) urls.push(`/funds/summary?${r}`, `/funds?${r}`);
+  // Sổ quỹ and Hóa đơn: branch-only lists of Tải báo cáo (the sales pool).
+  if (branch) urls.push(`/funds/summary?${r}`, `/funds?${r}`, `/orders?${r}`);
   else urls.push(`/reports/branches?from=${from}&to=${to}&groupBy=${groupBy}`);
   return urls;
 }

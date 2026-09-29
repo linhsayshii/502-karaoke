@@ -807,19 +807,23 @@ describe('Foundation (e2e)', () => {
       await as('tn1_cs2')
         .post(`/orders/${paidOrderId}/void`, { reason: 'Nhập nhầm' })
         .expect(403);
-      await as('ql1_cs2').post(`/orders/${paidOrderId}/void`, {}).expect(400);
-      const res = await as('ql1_cs2')
+      // Only the chain manager voids a paid bill: not even the branch's own manager.
+      await as('ql1_cs2')
+        .post(`/orders/${paidOrderId}/void`, { reason: 'Nhập nhầm phòng' })
+        .expect(403);
+      await as('admin').post(`/orders/${paidOrderId}/void`, {}).expect(400);
+      const res = await as('admin')
         .post(`/orders/${paidOrderId}/void`, { reason: 'Nhập nhầm phòng' })
         .expect(200);
       expect(res.body).toMatchObject({
         status: 'CANCELLED',
         cancelReason: 'Nhập nhầm phòng',
-        cancelledBy: { fullName: 'Quản lý CS2' },
+        cancelledBy: { fullName: 'Quản lý hệ thống' },
       });
       expect((res.body as Json).fundTransaction).not.toMatchObject({
         cancelledAt: null,
       });
-      await as('ql1_cs2')
+      await as('admin')
         .post(`/orders/${paidOrderId}/void`, { reason: 'lần nữa' })
         .expect(409);
 
@@ -838,7 +842,7 @@ describe('Foundation (e2e)', () => {
       expect((await summary()).salesIncome).toBe(0);
     });
 
-    it('lets managers correct a paid bill: stock, fund and revenue follow', async () => {
+    it('lets the chain manager correct a paid bill: stock, fund and revenue follow', async () => {
       const id = await openSession([{ productId: beerId, quantity: 2 }]);
       const paid = (
         await as('tn1_cs2')
@@ -849,9 +853,12 @@ describe('Foundation (e2e)', () => {
       expect((await stockOf(beerId)).stockQuantity).toBe(18);
 
       const edit = (body: Json) =>
-        as('ql1_cs2').patch(`/orders/${id}/paid`, body);
+        as('admin').patch(`/orders/${id}/paid`, body);
       const items = [{ productId: beerId, quantity: 5 }];
       await as('tn1_cs2')
+        .patch(`/orders/${id}/paid`, { reason: 'x', items })
+        .expect(403);
+      await as('ql1_cs2')
         .patch(`/orders/${id}/paid`, { reason: 'x', items })
         .expect(403);
       await edit({ items }).expect(400);
@@ -873,7 +880,7 @@ describe('Foundation (e2e)', () => {
         status: 'COMPLETED',
         paymentMethod: 'TRANSFER',
         editReason: 'Khách gọi thêm',
-        editedBy: { fullName: 'Quản lý CS2' },
+        editedBy: { fullName: 'Quản lý hệ thống' },
         fundTransaction: { method: 'TRANSFER', cancelledAt: null },
       });
       // The room fee charged at checkout is kept.
@@ -920,7 +927,7 @@ describe('Foundation (e2e)', () => {
       });
 
       // Voiding puts back what the bill holds after the corrections.
-      await as('ql1_cs2')
+      await as('admin')
         .post(`/orders/${id}/void`, { reason: 'Khách không ở' })
         .expect(200);
       await edit({ reason: 'x' }).expect(409);
@@ -1305,7 +1312,7 @@ describe('Foundation (e2e)', () => {
 
       // Voiding keeps the number; the next bill still counts up.
       const voided = (
-        await as('ql1_cs1')
+        await as('admin')
           .post(`/orders/${paid.id as number}/void`, { reason: 'Nhầm' })
           .expect(200)
       ).body as Json;

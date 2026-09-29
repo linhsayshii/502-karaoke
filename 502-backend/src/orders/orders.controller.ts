@@ -26,7 +26,7 @@ import { CancelReasonDto } from '../common/dto/cancel-reason.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/auth-user';
-import { MANAGERS, SALES, READERS } from '../auth/roles';
+import { CHAIN_ONLY, MANAGERS, SALES, READERS } from '../auth/roles';
 import { withTotalCount } from '../common/total-count';
 import { SharedRequestInterceptor } from '../common/shared-request.interceptor';
 
@@ -112,9 +112,10 @@ export class OrdersController {
     return this.ordersService.cancel(user, id, dto.reason);
   }
 
-  // Corrects a paid bill: stock and the fund receipt follow the new amounts.
+  // Chain manager only: corrects a paid bill; stock and the fund receipt
+  // follow the new amounts.
   @Patch(':id/paid')
-  @Roles(...MANAGERS)
+  @Roles(...CHAIN_ONLY)
   editPaid(
     @CurrentUser() user: AuthUser,
     @Param('id', ParseIntPipe) id: number,
@@ -123,10 +124,11 @@ export class OrdersController {
     return this.ordersService.editPaid(user, id, dto);
   }
 
-  // Voids a paid bill: stock goes back, the fund receipt is cancelled.
+  // Chain manager only: voids a paid bill; stock goes back, the fund receipt
+  // is cancelled.
   @Post(':id/void')
   @HttpCode(HttpStatus.OK)
-  @Roles(...MANAGERS)
+  @Roles(...CHAIN_ONLY)
   voidPaid(
     @CurrentUser() user: AuthUser,
     @Param('id', ParseIntPipe) id: number,

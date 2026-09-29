@@ -481,7 +481,7 @@ export class OrdersService {
     });
   }
 
-  // Managers only: void a paid bill. The sold goods go back to stock and the
+  // Chain manager only: void a paid bill. The sold goods go back to stock and the
   // fund receipt is cancelled, so revenue, stock and fund stay in step. The
   // bill keeps its number.
   voidPaid(user: AuthUser, id: number, reason: string) {
@@ -538,7 +538,7 @@ export class OrdersService {
     );
   }
 
-  // Managers only: correct a paid bill (items, adjustments, staff, times,
+  // Chain manager only: correct a paid bill (items, adjustments, staff, times,
   // price, payment method). The bill is recomputed; stock follows the new
   // quantities and the fund receipt the new total, method and payment time,
   // so revenue, stock and fund stay in step. The room fee that was charged

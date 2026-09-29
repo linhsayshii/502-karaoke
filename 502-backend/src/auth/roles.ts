@@ -13,3 +13,6 @@ export const SALES_READERS: Role[] = [...SALES, Role.BOARD];
 export const EVERY_ROLE: Role[] = [...ALL_ROLES, Role.BOARD];
 // Accounts that look at every branch (no branch of their own).
 export const ALL_BRANCH_ROLES: Role[] = [Role.CHAIN_MANAGER, Role.BOARD];
+// Corrects or voids a paid bill (spec 2026-09-30): neither the branch manager
+// nor the cashier may touch a bill once it is paid.
+export const CHAIN_ONLY: Role[] = [Role.CHAIN_MANAGER];

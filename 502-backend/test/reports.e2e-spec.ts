@@ -346,7 +346,11 @@ describe('Reports (e2e)', () => {
     it('leaves voided bills out of every total', async () => {
       const bill = await payBill('tn1_cs1', 'P102', {}, 'CASH');
       const before = await report('ql1_cs1');
+      // Only the chain manager voids a paid bill.
       await as('ql1_cs1')
+        .post(`/orders/${bill.id as number}/void`, { reason: 'nhập nhầm' })
+        .expect(403);
+      await as('admin')
         .post(`/orders/${bill.id as number}/void`, { reason: 'nhập nhầm' })
         .expect(200);
       const after = await report('ql1_cs1');
@@ -627,7 +631,7 @@ describe('Reports (e2e)', () => {
         .body as Json[];
       const idOfProduct = (name: string) =>
         products.find((p) => p.name === name)!.id;
-      await as('ql1_cs1')
+      await as('admin')
         .patch(`/orders/${bill.id as number}/paid`, {
           reason: 'thêm món',
           items: [

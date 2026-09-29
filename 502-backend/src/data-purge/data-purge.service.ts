@@ -17,9 +17,10 @@ const LOG_LIMIT = 500;
 
 // Wipes the business data of one branch or of the whole system. Branches and
 // accounts stay (so nobody is locked out); everything the branches recorded
-// or set up goes: bills, stock, fund, catalog, rooms and the PR/KTV list with
-// its roll call. Every purge, and
-// every attempt refused for a wrong password, is written to DataPurgeLog.
+// or set up goes: bills (with their discount requests and time-unlock log),
+// stock, fund, catalog, rooms and the PR/KTV list with its roll call. Every
+// purge, and every attempt refused for a wrong password, is written to
+// DataPurgeLog.
 @Injectable()
 export class DataPurgeService {
   private throttle = new LoginThrottle();
@@ -83,6 +84,11 @@ export class DataPurgeService {
           ).count,
           stockMovements: (await tx.stockMovement.deleteMany({ where: own }))
             .count,
+          // Before orders: both point at an order.
+          discountRequests: (
+            await tx.discountRequest.deleteMany({ where: own })
+          ).count,
+          orderEvents: (await tx.orderEvent.deleteMany({ where: own })).count,
           orderItems: (await tx.orderItem.deleteMany({ where: viaOrder }))
             .count,
           // Before orders: a visit points at an order and a PR.

@@ -8,7 +8,7 @@ Nguyên tắc gốc: **không có gì được lớn lên mãi.** Mỗi danh sá
 
 ## 1. Backend (NestJS + Prisma)
 
-1. **Mọi truy vấn danh sách đều có `take`** và lọc theo khoảng ngày kinh doanh. Trần hiện tại: hóa đơn 1000, sổ quỹ 500, biến động kho 500, phiếu kho 200, nhật ký xóa dữ liệu 500, danh sách PR/KTV 500, điểm danh PR/KTV 500 (một ngày). Thêm endpoint danh sách mới thì đặt trần tương tự, và:
+1. **Mọi truy vấn danh sách đều có `take`** và lọc theo khoảng ngày kinh doanh. Trần hiện tại: hóa đơn 1000, sổ quỹ 500, biến động kho 500, phiếu kho 200, nhật ký xóa dữ liệu 500, hàng chờ duyệt giảm giá 200, nhật ký giảm giá 500, danh sách PR/KTV 500, điểm danh PR/KTV 500 (một ngày). Thêm endpoint danh sách mới thì đặt trần tương tự, và:
    - Service trả `[rows, total]` (`findMany` + `count` cùng một `where`). Controller dùng `withTotalCount` (`common/total-count.ts`) để gửi tổng số dòng khớp qua header `X-Total-Count`; nội dung trả về vẫn là mảng.
    - Màn hình đọc header bằng `totalCountOf(res)` (`lib/api.ts`) và hiện `ListLimitNotice` (`components/data-states.tsx`) khi danh sách bị cắt. Nếu có xuất Excel từ danh sách đó thì cảnh báo luôn.
    - **Không bao giờ cộng tổng tiền hay đếm số lượng từ một danh sách có trần.** Tổng lấy từ API tổng hợp tính trong SQL với cùng điều kiện lọc: `GET /orders/summary` (trang Hóa đơn), `GET /inventory/documents/summary` (trang Phiếu kho), `GET /funds/summary` (Sổ quỹ).
@@ -34,7 +34,7 @@ Nguyên tắc gốc: **không có gì được lớn lên mãi.** Mỗi danh sá
 
 1. **Thư viện nặng chỉ tải khi cần:** `await import("xlsx")` (xem `lib/excel-import/workbook.ts`, `lib/excel-export.ts`). Biểu đồ (`recharts`) chỉ dùng trong các trang báo cáo.
 2. **Không bắn hàng loạt request nặng cùng lúc.** Trang Tải báo cáo chỉ chạy 2 báo cáo một lúc (`mapWithLimit`).
-3. **Tải lại định kỳ luôn dùng `usePolling`** (`hooks/use-polling.ts`). Hook này ngừng gọi khi tab bị ẩn và gọi lại ngay khi người dùng quay về tab. Chu kỳ tối thiểu 15 giây. Dữ liệu ít thay đổi thì tải lại thưa hơn, không phải bỏ hẳn: sơ đồ phòng tải lại danh sách phòng mỗi 30 giây, còn danh sách nhân viên mỗi 5 phút, khi quay lại tab và khi bấm "Làm mới".
+3. **Tải lại định kỳ luôn dùng `usePolling`** (`hooks/use-polling.ts`). Hook này ngừng gọi khi tab bị ẩn và gọi lại ngay khi người dùng quay về tab. Chu kỳ tối thiểu 15 giây. Dữ liệu ít thay đổi thì tải lại thưa hơn, không phải bỏ hẳn: sơ đồ phòng tải lại danh sách phòng mỗi 30 giây, còn danh sách nhân viên mỗi 5 phút, khi quay lại tab và khi bấm "Làm mới". Badge Duyệt giảm giá (`GET /discount-requests/pending-count`) tải lại mỗi 15 giây, chỉ trên máy quản lý.
 4. **Mọi `setInterval`, `setTimeout`, `addEventListener` phải được dọn** trong hàm cleanup của effect.
 5. **Không tải "tất cả" để lọc ở trình duyệt** khi server lọc được: gửi `from`/`to`/`branch`/bộ lọc lên API.
 6. `localStorage` chỉ lưu các lựa chọn nhỏ (như cách ghép cột Excel), không lưu dữ liệu nghiệp vụ.
@@ -49,7 +49,7 @@ Nguyên tắc gốc: **không có gì được lớn lên mãi.** Mỗi danh sá
    - `shm_size: 256mb`: mặc định Docker cho 64 MB `/dev/shm`, không đủ khi nhiều báo cáo chạy cùng lúc (lỗi `could not resize shared memory segment`).
 
    **Không bao giờ** tắt `fsync`, `synchronous_commit` hay `full_page_writes` để đổi lấy tốc độ, vì đây là dữ liệu tiền. Đổi một tham số thì đo lại bằng `test/load`.
-2. Sổ cái (`Order`, `OrderItem`, `StockMovement`, `FundTransaction`) là dữ liệu nghiệp vụ, được giữ vĩnh viễn. **Bảng phụ hay bảng nhật ký mới** phải có cách dọn, hoặc ghi rõ lý do giữ mãi và mức tăng dự kiến (ví dụ `BillCounter`: mỗi cơ sở một dòng mỗi ngày; `PrAttendance`: mỗi PR/KTV một dòng mỗi ngày đi làm, ~90 nghìn dòng/năm cho 5 cơ sở × 50 người, giữ như sổ sách và bị xóa cùng "Xóa dữ liệu").
+2. Sổ cái (`Order`, `OrderItem`, `StockMovement`, `FundTransaction`) là dữ liệu nghiệp vụ, được giữ vĩnh viễn. **Bảng phụ hay bảng nhật ký mới** phải có cách dọn, hoặc ghi rõ lý do giữ mãi và mức tăng dự kiến (ví dụ `BillCounter`: mỗi cơ sở một dòng mỗi ngày; `PrAttendance`: mỗi PR/KTV một dòng mỗi ngày đi làm, ~90 nghìn dòng/năm cho 5 cơ sở × 50 người, giữ như sổ sách và bị xóa cùng "Xóa dữ liệu"; `DiscountRequest`: ~30 dòng/cơ sở/ngày, ~55 nghìn dòng/năm cho 5 cơ sở; `OrderEvent`: chỉ ghi khi có người mở khóa giờ; cả hai giữ như sổ sách và bị xóa cùng "Xóa dữ liệu").
 3. Không lưu file (ảnh, Excel, PDF) hay JSON lớn trong database.
 4. Thay đổi schema luôn đi qua migration (`prisma migrate`), không dùng `db push`.
 

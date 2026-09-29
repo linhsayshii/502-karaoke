@@ -517,6 +517,14 @@ Sau khi cập nhật:
 - Thu ngân, quản lý và tài khoản "Quản lý PR/KTV" gán được; HĐQT và nhân viên thường chỉ xem.
 - Trang *Danh sách PR/KTV* đổi tên thành **Thống kê PR**: chọn khoảng ngày để xem số giờ trong phòng, số lượt và số phòng của từng PR.
 
+### 6.16. Phân quyền bán hàng, chốt giờ và duyệt giảm giá (migration `20261002000000_sales_approvals`)
+
+- Migration chỉ thêm cột (`Order.timeLockedAt`, `Order.timeLockedById`) và hai bảng mới (`OrderEvent`, `DiscountRequest`) cùng các chỉ mục. Không đổi dữ liệu cũ, chạy trong tích tắc.
+- Từ bản này, chỉ **quản lý hệ thống** sửa hoặc hủy được hóa đơn đã thanh toán; quản lý cơ sở và thu ngân thì không (quản lý cơ sở vẫn hủy được phiên đang mở).
+- Thu ngân muốn tăng giảm giá hoặc hạ VAT của một hóa đơn thì gửi yêu cầu kèm lý do, quản lý cơ sở hoặc quản lý hệ thống duyệt; chưa duyệt thì không thanh toán được. Mỗi cơ sở cần **ít nhất một quản lý cơ sở có mật khẩu** để có người duyệt.
+- Nhân viên được gán làm **phục vụ** của phòng gọi món, gán PR/KTV và chốt giờ cho phòng đó. Nhân viên sàn chỉ đăng nhập được khi có mật khẩu, nên sau khi cập nhật hãy đặt mật khẩu cho các tài khoản phục vụ muốn dùng chức năng này (Quản trị → Tài khoản).
+- "Xóa dữ liệu" của HĐQT giờ xóa cả yêu cầu giảm giá và nhật ký mở khóa giờ của phạm vi đã chọn.
+
 ## 7. Xử lý sự cố
 
 | Hiện tượng | Nguyên nhân / cách xử lý |

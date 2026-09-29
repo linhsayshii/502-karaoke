@@ -179,6 +179,8 @@ describe('Board role (e2e)', () => {
     expect(deleted.stockDocuments).toBe(1);
     expect(deleted.fundTransactions).toBe(2);
     expect(deleted.stockMovements).toBe(2);
+    expect(deleted.discountRequests).toBe(0);
+    expect(deleted.orderEvents).toBe(0);
     expect(
       (
         (await as('admin').get('/products?branch=cs2').expect(200))

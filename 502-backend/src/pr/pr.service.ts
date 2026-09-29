@@ -26,9 +26,12 @@ import {
 const STAFF_LIMIT = 500;
 const ATTENDANCE_LIMIT = 500;
 
-// Branch/chain managers, and any account marked "Quản lý PR/KTV".
+// Branch/chain managers, and any account marked "Quản lý PR/KTV". HĐQT is
+// view only, even when the flag is set on its account.
 export function canManagePr(user: AuthUser): boolean {
-  return MANAGERS.includes(user.role) || user.managesPr;
+  return (
+    user.role !== Role.BOARD && (MANAGERS.includes(user.role) || user.managesPr)
+  );
 }
 
 // HĐQT sees the lists, read only.
@@ -37,9 +40,11 @@ export function canViewPr(user: AuthUser): boolean {
 }
 
 // Who may put PR/KTV into a room: anyone who sells (cashiers, managers) and
-// any account marked "Quản lý PR/KTV".
+// any account marked "Quản lý PR/KTV". Never HĐQT (view only).
 export function canAssignPr(user: AuthUser): boolean {
-  return SALES.includes(user.role) || user.managesPr;
+  return (
+    user.role !== Role.BOARD && (SALES.includes(user.role) || user.managesPr)
+  );
 }
 
 const staffSelect = {

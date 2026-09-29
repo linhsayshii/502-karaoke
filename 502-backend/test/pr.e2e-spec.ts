@@ -356,6 +356,23 @@ describe('PR/KTV (e2e)', () => {
       await as('pv1_cs1')
         .post(`/pr/sessions/${visit.id as number}/end`)
         .expect(200);
+      // HĐQT stays view only, even with the flag on its account.
+      const users = (await as('admin').get('/users').expect(200))
+        .body as Json[];
+      const boardId = users.find((u) => u.username === 'hdqt_pr')!.id as number;
+      await as('admin')
+        .patch(`/users/${boardId}`, { managesPr: true })
+        .expect(200);
+      await as('hdqt_pr')
+        .post('/pr/sessions', { orderId: orderA, prStaffId: cucId })
+        .expect(403);
+      await as('hdqt_pr')
+        .post('/pr/staff?branch=cs1', { name: 'X' })
+        .expect(403);
+      await as('hdqt_pr').get('/pr/staff?branch=cs1').expect(200);
+      await as('admin')
+        .patch(`/users/${boardId}`, { managesPr: false })
+        .expect(200);
     });
 
     it('closes open visits at checkout and freezes them', async () => {

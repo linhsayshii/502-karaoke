@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -12,6 +13,18 @@ import { AuthUser } from '../auth/auth-user';
 import { BranchScopeService } from '../common/branch-scope.service';
 
 const include = { category: true };
+
+// Floor staff only need the menu (name, price, unit, stock, category): the
+// cost price is business data they never see (resource-rules §1.2).
+function forViewer<T extends { costPrice: unknown }>(
+  user: AuthUser,
+  product: T,
+): T | Omit<T, 'costPrice'> {
+  if (user.role !== Role.STAFF) return product;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { costPrice, ...menu } = product;
+  return menu;
+}
 
 @Injectable()
 export class ProductsService {
@@ -66,15 +79,18 @@ export class ProductsService {
       }),
       this.inventory.pendingQuantities(branchId),
     ]);
-    return products.map((p) => ({
-      ...p,
-      pendingQuantity: pending.get(p.id) ?? 0,
-    }));
+    return products.map((p) =>
+      forViewer(user, { ...p, pendingQuantity: pending.get(p.id) ?? 0 }),
+    );
   }
 
   async findOne(user: AuthUser, id: number) {
     await this.getProduct(user, id);
-    return this.prisma.product.findUnique({ where: { id }, include });
+    const product = await this.prisma.product.findUniqueOrThrow({
+      where: { id },
+      include,
+    });
+    return forViewer(user, product);
   }
 
   async update(user: AuthUser, id: number, dto: UpdateProductDto) {

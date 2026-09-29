@@ -270,6 +270,20 @@ describe('Sales approvals (e2e)', () => {
         .expect(403);
     });
 
+    it('floor staff get the menu without cost prices', async () => {
+      const products = (await as('pv1_cs1').get('/products').expect(200))
+        .body as Json[];
+      expect(products.length).toBeGreaterThan(0);
+      for (const p of products) expect(p).not.toHaveProperty('costPrice');
+      const one = (
+        await as('pv1_cs1').get(`/products/${productIds[0]}`).expect(200)
+      ).body as Json;
+      expect(one).not.toHaveProperty('costPrice');
+      // Managers still see it.
+      const full = (await as('ql1_cs1').get('/products').expect(200))
+        .body as Json[];
+      expect(full[0]).toHaveProperty('costPrice');
+    });
   });
 
   describe('discounts', () => {

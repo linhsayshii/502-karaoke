@@ -160,18 +160,35 @@ export class DiscountsService {
     });
   }
 
+  // The branch filter of the queue and the log. Every DiscountRequest index
+  // starts with branchId, so "every branch" is spelled out as the list of
+  // branch ids (5 rows) rather than left open, which no index would serve.
+  private async branchFilter(
+    branchId: number | undefined,
+  ): Promise<number | Prisma.IntFilter> {
+    if (branchId !== undefined) return branchId;
+    const branches = await this.prisma.branch.findMany({
+      select: { id: true },
+    });
+    return { in: branches.map((b) => b.id) };
+  }
+
   // Branch managers see their branch, the chain manager every branch
   // (whatever branch the screen is on).
-  private queueWhere(user: AuthUser): Prisma.DiscountRequestWhereInput {
+  private async queueWhere(
+    user: AuthUser,
+  ): Promise<Prisma.DiscountRequestWhereInput> {
     return {
       status: DiscountRequestStatus.PENDING,
-      branchId: user.role === Role.CHAIN_MANAGER ? undefined : user.branchId!,
+      branchId: await this.branchFilter(
+        user.role === Role.CHAIN_MANAGER ? undefined : user.branchId!,
+      ),
     };
   }
 
   // Oldest first. DiscountRequest(branchId, status) index.
-  pending(user: AuthUser) {
-    const where = this.queueWhere(user);
+  async pending(user: AuthUser) {
+    const where = await this.queueWhere(user);
     return Promise.all([
       this.prisma.discountRequest.findMany({
         where,
@@ -186,7 +203,7 @@ export class DiscountsService {
   async pendingCount(user: AuthUser) {
     return {
       count: await this.prisma.discountRequest.count({
-        where: this.queueWhere(user),
+        where: await this.queueWhere(user),
       }),
     };
   }
@@ -200,7 +217,7 @@ export class DiscountsService {
       query.branch,
     );
     const where: Prisma.DiscountRequestWhereInput = {
-      branchId,
+      branchId: await this.branchFilter(branchId),
       status: query.status,
       createdAt: businessDayRange(query.from, query.to),
     };
@@ -243,7 +260,8 @@ export class DiscountsService {
   // Whoever acts first wins: the order is locked first (as by every writer
   // of an order), then the request only moves while still PENDING. A stale
   // request (the bill's discounts changed meanwhile) expires instead of
-  // overwriting a newer value; that is committed before the 409 is thrown.
+  // overwriting a newer value, as does a request left on a closed session;
+  // either is committed before the 409 is thrown.
   private async decide(
     user: AuthUser,
     id: number,
@@ -276,9 +294,17 @@ export class DiscountsService {
       if (current.status !== DiscountRequestStatus.PENDING) {
         throw new ConflictException(decidedMessage(current));
       }
-      if (open === 0) throw new ConflictException(CLOSED_MESSAGE);
-
       const now = new Date();
+      // Closing a session expires its request; one left waiting on a closed
+      // session is expired here (committed) before the 409.
+      if (open === 0) {
+        await tx.discountRequest.update({
+          where: { id },
+          data: { status: DiscountRequestStatus.EXPIRED, decidedAt: now },
+        });
+        return 'closed' as const;
+      }
+
       if (status === DiscountRequestStatus.APPROVED) {
         const order = await tx.order.findUniqueOrThrow({
           where: { id: request.orderId },
@@ -290,7 +316,7 @@ export class DiscountsService {
             where: { id },
             data: { status: DiscountRequestStatus.EXPIRED, decidedAt: now },
           });
-          return { stale: true as const };
+          return 'stale' as const;
         }
         await tx.order.update({
           where: { id: request.orderId },
@@ -306,9 +332,10 @@ export class DiscountsService {
           decisionNote: note?.trim() || null,
         },
       });
-      return { stale: false as const };
+      return 'done' as const;
     });
-    if (outcome.stale) {
+    if (outcome === 'closed') throw new ConflictException(CLOSED_MESSAGE);
+    if (outcome === 'stale') {
       throw new ConflictException(
         'Giảm giá của hóa đơn đã thay đổi, thu ngân cần gửi lại yêu cầu',
       );

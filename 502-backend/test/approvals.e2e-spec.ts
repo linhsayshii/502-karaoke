@@ -374,7 +374,7 @@ describe('Sales approvals (e2e)', () => {
       expect((late.body as Json).message).toMatch(/hết hạn/);
     });
 
-    it('keeps a log the board can read', async () => {
+    it('managers and the chain manager read the log; a cashier cannot', async () => {
       const today = new Date();
       const d = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
       const res = await as('ql1_cs1')

@@ -14,6 +14,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth-user';
 import { MANAGERS } from '../auth/roles';
+import { LiveEventsService } from '../live/live-events.service';
 import { BranchScopeService } from '../common/branch-scope.service';
 import { businessDatesBetween, businessDayRange } from '../common/dates';
 import { adjustmentsOf, billOf, billedEndOf } from '../orders/bill-of';
@@ -73,6 +74,7 @@ export class DiscountsService {
   constructor(
     private prisma: PrismaService,
     private branchScope: BranchScopeService,
+    private live: LiveEventsService,
   ) {}
 
   // Loads an open session the user may act on and locks its row (every
@@ -94,8 +96,8 @@ export class DiscountsService {
   // A manager's change, or one that makes nothing cheaper, applies at once
   // (and is logged); a cashier's discount becomes a request for the managers
   // of the branch.
-  adjust(user: AuthUser, orderId: number, dto: AdjustOrderDto) {
-    return this.prisma.$transaction(async (tx) => {
+  async adjust(user: AuthUser, orderId: number, dto: AdjustOrderDto) {
+    const result = await this.prisma.$transaction(async (tx) => {
       const order = await this.lockPendingOrder(tx, user, orderId);
       const before = adjustmentsOf(order);
       // Stored (and requested) without an amount behind a percent > 0.
@@ -115,6 +117,7 @@ export class DiscountsService {
       const direct =
         MANAGERS.includes(user.role) || !needsApproval(before, after);
       let branchManagers: number | undefined;
+      let requestId: number | undefined;
 
       if (direct) {
         await tx.order.update({ where: { id: order.id }, data: after });
@@ -132,7 +135,7 @@ export class DiscountsService {
       } else {
         const note = dto.note?.trim();
         if (!note) throw new BadRequestException('Nhập lý do giảm giá');
-        await tx.discountRequest.create({
+        const created = await tx.discountRequest.create({
           data: {
             branchId: order.branchId,
             orderId: order.id,
@@ -146,6 +149,7 @@ export class DiscountsService {
             requestedById: user.id,
           },
         });
+        requestId = created.id;
         // Whom it reaches: the branch managers who can sign in (the chain
         // managers always can). The screen warns when there is none.
         branchManagers = await tx.user.count({
@@ -161,8 +165,14 @@ export class DiscountsService {
         where: { id: order.id },
         include: orderDetailInclude,
       });
-      return { ...saved, branchManagers };
+      return { order: saved, branchManagers, requestId };
     });
+    // Live events go out only after $transaction resolved (spec §7).
+    this.live.orderChanged(result.order.branchId, result.order.id);
+    if (result.requestId !== undefined) {
+      this.live.discountRequested(result.order.branchId, result.requestId);
+    }
+    return { ...result.order, branchManagers: result.branchManagers };
   }
 
   // The branch filter of the queue and the log. Every DiscountRequest index
@@ -273,7 +283,7 @@ export class DiscountsService {
     status: DiscountRequestStatus,
     note?: string,
   ) {
-    const outcome = await this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const request = await tx.discountRequest.findUnique({
         where: { id },
         select: { orderId: true, branchId: true },
@@ -307,7 +317,11 @@ export class DiscountsService {
           where: { id },
           data: { status: DiscountRequestStatus.EXPIRED, decidedAt: now },
         });
-        return 'closed' as const;
+        return {
+          outcome: 'closed' as const,
+          orderId: request.orderId,
+          branchId: request.branchId,
+        };
       }
 
       if (status === DiscountRequestStatus.APPROVED) {
@@ -321,7 +335,11 @@ export class DiscountsService {
             where: { id },
             data: { status: DiscountRequestStatus.EXPIRED, decidedAt: now },
           });
-          return 'stale' as const;
+          return {
+            outcome: 'stale' as const,
+            orderId: request.orderId,
+            branchId: request.branchId,
+          };
         }
         await tx.order.update({
           where: { id: request.orderId },
@@ -337,10 +355,21 @@ export class DiscountsService {
           decisionNote: note?.trim() || null,
         },
       });
-      return 'done' as const;
+      return {
+        outcome: 'done' as const,
+        orderId: request.orderId,
+        branchId: request.branchId,
+      };
     });
-    if (outcome === 'closed') throw new ConflictException(CLOSED_MESSAGE);
-    if (outcome === 'stale') {
+    // Also for 'closed' / 'stale': the request became EXPIRED (committed)
+    // before the 409 below, and the screens must drop "Chờ duyệt".
+    const finalStatus =
+      result.outcome === 'done' ? status : DiscountRequestStatus.EXPIRED;
+    this.live.discountDecided(result.branchId, result.orderId, id, finalStatus);
+    this.live.orderChanged(result.branchId, result.orderId);
+    if (result.outcome === 'closed')
+      throw new ConflictException(CLOSED_MESSAGE);
+    if (result.outcome === 'stale') {
       throw new ConflictException(
         'Giảm giá của hóa đơn đã thay đổi, thu ngân cần gửi lại yêu cầu',
       );

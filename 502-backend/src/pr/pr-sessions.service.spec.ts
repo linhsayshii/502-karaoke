@@ -2,6 +2,7 @@ import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { Role, StaffPosition } from '@prisma/client';
 import { AuthUser } from '../auth/auth-user';
 import { BranchScopeService } from '../common/branch-scope.service';
+import { LiveEventsService } from '../live/live-events.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReportPrismaService } from '../prisma/report-prisma.service';
 import { PrSessionsService } from './pr-sessions.service';
@@ -49,7 +50,15 @@ function serviceWith(beforeLock: object, afterLock: object) {
   const branchScope = {
     assertBranchAccess: jest.fn(),
   } as unknown as BranchScopeService;
-  return new PrSessionsService(prisma, {} as ReportPrismaService, branchScope);
+  const live = {
+    orderChanged: jest.fn(),
+  } as unknown as LiveEventsService;
+  return new PrSessionsService(
+    prisma,
+    {} as ReportPrismaService,
+    branchScope,
+    live,
+  );
 }
 
 describe('PrSessionsService reads the order under its lock', () => {

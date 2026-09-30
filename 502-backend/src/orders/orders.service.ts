@@ -18,6 +18,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { ReportPrismaService } from '../prisma/report-prisma.service';
 import { AuthUser } from '../auth/auth-user';
+import { LiveEventsService } from '../live/live-events.service';
 import { BranchScopeService } from '../common/branch-scope.service';
 import { businessDayRange } from '../common/dates';
 import { InventoryService } from '../inventory/inventory.service';
@@ -82,6 +83,7 @@ export class OrdersService {
     private reportDb: ReportPrismaService,
     private branchScope: BranchScopeService,
     private inventory: InventoryService,
+    private live: LiveEventsService,
   ) {}
 
   // CSKH / phục vụ must be active employees of the order's branch.
@@ -149,8 +151,8 @@ export class OrdersService {
 
   // Opens a room session: room must belong to the branch and be free. The
   // room's hourly price is fixed for the session.
-  create(user: AuthUser, dto: CreateOrderDto) {
-    return this.prisma.$transaction(async (tx) => {
+  async create(user: AuthUser, dto: CreateOrderDto) {
+    const order = await this.prisma.$transaction(async (tx) => {
       const room = await tx.room.findUnique({ where: { id: dto.roomId } });
       if (!room) throw new NotFoundException('Không tìm thấy phòng');
       this.branchScope.assertBranchAccess(user, room.branchId);
@@ -181,6 +183,11 @@ export class OrdersService {
         include: orderDetailInclude,
       });
     });
+    // Live events go out only after $transaction resolved (spec §7).
+    // The room map of the branch shows the room busy.
+    if (order.roomId !== null)
+      this.live.roomChanged(order.branchId, order.roomId);
+    return order;
   }
 
   // Managers: bills of a period (by payment / cancel time, business days),
@@ -257,7 +264,7 @@ export class OrdersService {
   }
 
   async update(user: AuthUser, id: number, dto: UpdateOrderDto) {
-    return this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const order = await this.lockOrder(
         tx,
         user,
@@ -301,6 +308,8 @@ export class OrdersService {
         include: orderDetailInclude,
       });
     });
+    this.live.orderChanged(updated.branchId, updated.id);
+    return updated;
   }
 
   // New item lines of an order: duplicates merged, each product keeps the
@@ -373,9 +382,9 @@ export class OrdersService {
 
   // Closes the bill, frees the room, deducts sold items from stock and writes
   // the fund receipt — all or nothing.
-  checkout(user: AuthUser, id: number, paymentMethod?: PaymentMethod) {
+  async checkout(user: AuthUser, id: number, paymentMethod?: PaymentMethod) {
     const method = paymentMethod ?? PaymentMethod.CASH;
-    return this.prisma.$transaction(
+    const closed = await this.prisma.$transaction(
       async (tx) => {
         const order = await this.lockOrder(
           tx,
@@ -461,12 +470,25 @@ export class OrdersService {
       },
       { timeout: 15000 },
     );
+    this.emitClosed(closed);
+    return closed;
+  }
+
+  // The room frees up and the open room page sees the session closed.
+  private emitClosed(order: {
+    id: number;
+    branchId: number;
+    roomId: number | null;
+  }) {
+    if (order.roomId !== null)
+      this.live.roomChanged(order.branchId, order.roomId);
+    this.live.orderChanged(order.branchId, order.id);
   }
 
   // Managers only: drop an open session without billing it. It still takes
   // the next bill number, so the day's numbers show every closed session.
-  cancel(user: AuthUser, id: number, reason?: string) {
-    return this.prisma.$transaction(async (tx) => {
+  async cancel(user: AuthUser, id: number, reason?: string) {
+    const cancelled = await this.prisma.$transaction(async (tx) => {
       const order = await this.lockOrder(
         tx,
         user,
@@ -505,12 +527,14 @@ export class OrdersService {
         include: orderDetailInclude,
       });
     });
+    this.emitClosed(cancelled);
+    return cancelled;
   }
 
   // Chốt giờ: the room fee stops now; PR/KTV still in the room leave now.
   // Sales roles, and the server assigned to the session.
-  lockTime(user: AuthUser, id: number) {
-    return this.prisma.$transaction(async (tx) => {
+  async lockTime(user: AuthUser, id: number) {
+    const locked = await this.prisma.$transaction(async (tx) => {
       const order = await this.lockOrder(
         tx,
         user,
@@ -535,12 +559,14 @@ export class OrdersService {
         include: orderDetailInclude,
       });
     });
+    this.emitClosed(locked);
+    return locked;
   }
 
   // The clock runs again from the start time (the locked gap is billed).
   // Logged: who unlocked, when, and when it had been locked.
-  unlockTime(user: AuthUser, id: number) {
-    return this.prisma.$transaction(async (tx) => {
+  async unlockTime(user: AuthUser, id: number) {
+    const unlocked = await this.prisma.$transaction(async (tx) => {
       const order = await this.lockOrder(
         tx,
         user,
@@ -569,6 +595,8 @@ export class OrdersService {
         include: orderDetailInclude,
       });
     });
+    this.emitClosed(unlocked);
+    return unlocked;
   }
 
   // Chain manager only: void a paid bill. The sold goods go back to stock and the

@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ReportPrismaService } from '../prisma/report-prisma.service';
 import { AuthUser } from '../auth/auth-user';
 import { BranchScopeService } from '../common/branch-scope.service';
+import { LiveEventsService } from '../live/live-events.service';
 import { businessDateOf, businessDatesBetween } from '../common/dates';
 import { periodWhere, utcTimestamp } from '../reports/report-sql';
 import { orderDetailInclude } from '../orders/order-include';
@@ -46,6 +47,7 @@ export class PrSessionsService {
     private prisma: PrismaService,
     private reportDb: ReportPrismaService,
     private branchScope: BranchScopeService,
+    private live: LiveEventsService,
   ) {}
 
   // Active PR/KTV of the branch for the room page: who is on today's roll
@@ -107,8 +109,8 @@ export class PrSessionsService {
   }
 
   // Puts a PR/KTV into an open room from `startAt` (default now).
-  add(user: AuthUser, dto: AddPrSessionDto) {
-    return this.prisma.$transaction(async (tx) => {
+  async add(user: AuthUser, dto: AddPrSessionDto) {
+    const order = await this.prisma.$transaction(async (tx) => {
       const order = await this.lockOpenOrder(tx, user, dto.orderId);
       this.assertAssignFor(user, order);
       if (order.timeLockedAt) {
@@ -137,11 +139,14 @@ export class PrSessionsService {
       });
       return this.detail(tx, order.id);
     });
+    // Live events go out only after $transaction resolved (spec §7).
+    this.live.orderChanged(order.branchId, order.id);
+    return order;
   }
 
   // "Ra": the visit ends now.
-  end(user: AuthUser, id: number) {
-    return this.prisma.$transaction(async (tx) => {
+  async end(user: AuthUser, id: number) {
+    const order = await this.prisma.$transaction(async (tx) => {
       const visit = await this.getVisit(tx, user, id);
       const order = await this.lockOpenOrder(tx, user, visit.orderId);
       this.assertAssignFor(user, order);
@@ -158,11 +163,14 @@ export class PrSessionsService {
       });
       return this.detail(tx, order.id);
     });
+    // Live events go out only after $transaction resolved (spec §7).
+    this.live.orderChanged(order.branchId, order.id);
+    return order;
   }
 
   // Corrects the times of a visit; endAt null puts the PR back in the room.
-  update(user: AuthUser, id: number, dto: UpdatePrSessionDto) {
-    return this.prisma.$transaction(async (tx) => {
+  async update(user: AuthUser, id: number, dto: UpdatePrSessionDto) {
+    const order = await this.prisma.$transaction(async (tx) => {
       const visit = await this.getVisit(tx, user, id);
       const order = await this.lockOpenOrder(tx, user, visit.orderId);
       this.assertAssignFor(user, order);
@@ -197,17 +205,23 @@ export class PrSessionsService {
       await tx.prSession.update({ where: { id }, data: { startAt, endAt } });
       return this.detail(tx, order.id);
     });
+    // Live events go out only after $transaction resolved (spec §7).
+    this.live.orderChanged(order.branchId, order.id);
+    return order;
   }
 
   // Removes a visit entered by mistake (only while the room is open).
-  remove(user: AuthUser, id: number) {
-    return this.prisma.$transaction(async (tx) => {
+  async remove(user: AuthUser, id: number) {
+    const order = await this.prisma.$transaction(async (tx) => {
       const visit = await this.getVisit(tx, user, id);
       const order = await this.lockOpenOrder(tx, user, visit.orderId);
       this.assertAssignFor(user, order);
       await tx.prSession.delete({ where: { id } });
       return this.detail(tx, order.id);
     });
+    // Live events go out only after $transaction resolved (spec §7).
+    this.live.orderChanged(order.branchId, order.id);
+    return order;
   }
 
   // ---- rules ---------------------------------------------------------------

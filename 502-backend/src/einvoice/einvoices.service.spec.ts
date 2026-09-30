@@ -4,7 +4,7 @@ import type { AuthUser } from '../auth/auth-user';
 import { toDateString, toDbDate } from '../common/dates';
 import type { IssueConfig } from './einvoice-config.service';
 import type { SendOutcome } from './einvoice-sender';
-import { EinvoicesService } from './einvoices.service';
+import { EinvoicesService, STALE_SENDING_MS } from './einvoices.service';
 import type { MarkerSearch } from './minvoice/minvoice-client';
 
 const yy = String(new Date().getFullYear() % 100).padStart(2, '0');
@@ -218,12 +218,15 @@ describe('EinvoicesService.issue of an uncertain invoice', () => {
 
   const sentSymbol = `1C${yy}OLD`;
   const sentDate = `${new Date().getFullYear()}-01-02`;
+  // When the lost send started: long enough ago for a resend by default.
+  const lostAt = new Date(Date.now() - STALE_SENDING_MS - 60_000);
   const sent = {
     status: 'UNCERTAIN',
     sellerTaxCode: ready.taxCode,
     symbolCode: sentSymbol,
     registerInvoiceId: 'range-0',
     invoiceDate: toDbDate(sentDate),
+    sendingAt: lostAt,
   };
   const uncertain = (fields: Record<string, unknown> = {}) => {
     const context = setup(issued);
@@ -261,6 +264,7 @@ describe('EinvoicesService.issue of an uncertain invoice', () => {
       'status',
     ]);
     expect(lock.data.status).toBe('SENDING');
+    expect(lock.data.sendingAt).not.toEqual(lostAt);
     expect(config.findByMarker).toHaveBeenCalledWith(1, ready.taxCode, {
       symbolCode: sentSymbol,
       invoiceDate: sentDate,
@@ -309,9 +313,11 @@ describe('EinvoicesService.issue of an uncertain invoice', () => {
       expect(sender.send).not.toHaveBeenCalled();
       const [write] = writes(einvoice);
       expect(writes(einvoice)).toHaveLength(1);
+      // Back to the time of the lost send, not of this search.
       expect(write).toEqual({
         status: 'UNCERTAIN',
         lastError: expect.stringMatching(message) as unknown,
+        sendingAt: lostAt,
       });
       expect(write.lastError).toContain(MANUAL);
     },
@@ -334,9 +340,42 @@ describe('EinvoicesService.issue of an uncertain invoice', () => {
       {
         status: 'UNCERTAIN',
         lastError: expect.stringMatching(message) as unknown,
+        sendingAt: lostAt,
       },
     ]);
   });
+
+  // Minvoice may still be saving a send whose answer was lost: an empty list
+  // proves nothing until that send is well past (STALE_SENDING_MS).
+  it.each<[string, Date | null, RegExp]>([
+    [
+      'started moments ago',
+      new Date(Date.now() - 10_000),
+      /^Chưa tìm thấy hóa đơn K502-12 trên Minvoice nhưng lần gửi trước còn quá mới; kiểm tra lại sau vài phút/,
+    ],
+    [
+      'of unknown time',
+      null,
+      /^Chưa tìm thấy hóa đơn K502-12 trên Minvoice và không rõ lúc gửi trước; /,
+    ],
+  ])(
+    'does not send again after a lost send %s, even when trusted',
+    async (_, sendingAt, message) => {
+      const { service, einvoice, sender, config } = uncertain({ sendingAt });
+      service.markerSearchConfirmed = true;
+      config.findByMarker.mockResolvedValue({ kind: 'none' });
+      await service.issue(user, 12, dto);
+      expect(sender.send).not.toHaveBeenCalled();
+      const [write] = writes(einvoice);
+      expect(writes(einvoice)).toHaveLength(1);
+      expect(write).toEqual({
+        status: 'UNCERTAIN',
+        lastError: expect.stringMatching(message) as unknown,
+        sendingAt,
+      });
+      expect(write.lastError).toContain(MANUAL);
+    },
+  );
 
   it('sends once more when nothing is found and the search is confirmed', async () => {
     const { service, einvoice, sender, config } = uncertain();

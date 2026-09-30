@@ -698,6 +698,31 @@ describe('E-invoices (e2e)', () => {
         );
         const posts = fake.posts;
         service.markerSearchConfirmed = true;
+        // Minvoice may still be saving a send lost moments ago: not resent.
+        const prisma = app.get(PrismaService);
+        const lostAt = async () =>
+          (
+            await prisma.einvoice.findUniqueOrThrow({
+              where: { id },
+              select: { sendingAt: true },
+            })
+          ).sendingAt;
+        const sentAt = await lostAt();
+        const early = (await issue(id).expect(200)).body as Json;
+        expect(early.status).toBe('UNCERTAIN');
+        expect(early.lastError).toMatch(
+          new RegExp(
+            `^Chưa tìm thấy hóa đơn K502-${id} trên Minvoice nhưng lần gửi trước còn quá mới; kiểm tra lại sau vài phút`,
+          ),
+        );
+        expect(fake.posts).toBe(posts);
+        // Checking again keeps the time of the lost send.
+        expect(await lostAt()).toEqual(sentAt);
+        // Well past it, an empty list is trusted: sent once more.
+        await prisma.einvoice.update({
+          where: { id },
+          data: { sendingAt: new Date(Date.now() - STALE_SENDING_MS - 1000) },
+        });
         const body = (await issue(id).expect(200)).body as Json;
         const created = fake.invoices.at(-1)!;
         expect(created.orderNumber).toBe(`K502-${id}`);

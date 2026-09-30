@@ -137,6 +137,14 @@ const messageOf = (error: unknown) =>
 // Our reference on Minvoice (spec §6.2).
 const markerOf = (id: number) => `K502-${id}`;
 
+// What a recheck adds to an outcome: the date Minvoice shows for an invoice
+// found by our reference, or the start of the lost send to keep on a row
+// left uncertain.
+interface OutcomeExtra {
+  foundDate?: string;
+  sendingAt?: Date | null;
+}
+
 // The header of a send, written at the lock (global constraints, decision 5).
 function sentHeader(ready: IssueConfig, dto: IssueEinvoiceDto) {
   return {
@@ -464,6 +472,8 @@ export class EinvoicesService implements OnApplicationBootstrap {
         symbolCode: true,
         registerInvoiceId: true,
         invoiceDate: true,
+        // When that send started: read before the lock overwrites it.
+        sendingAt: true,
         order: { select: { status: true } },
       },
     });
@@ -515,9 +525,10 @@ export class EinvoicesService implements OnApplicationBootstrap {
   // Spec §9.2: a send whose answer was lost is looked up by our reference
   // before anything goes out again, as a duplicate tax invoice must never be
   // made. Only a sure answer moves it on: found -> issued with Minvoice's
-  // number; nothing found -> sent again, and only once MARKER_SEARCH_CONFIRMED
-  // shows Minvoice filters by the reference. Anything else leaves it
-  // uncertain for a manual check.
+  // number; nothing found -> sent again, but only once MARKER_SEARCH_CONFIRMED
+  // shows Minvoice filters by the reference and the lost send started at
+  // least STALE_SENDING_MS ago. Anything else leaves it uncertain for a
+  // manual check.
   private async recheck(
     user: AuthUser,
     id: number,
@@ -530,13 +541,23 @@ export class EinvoicesService implements OnApplicationBootstrap {
       symbolCode: string | null;
       registerInvoiceId: string | null;
       invoiceDate: Date | null;
+      sendingAt: Date | null;
     },
     draft: EinvoiceDraft,
     dto: IssueEinvoiceDto,
   ) {
     const marker = markerOf(id);
+    // Left uncertain with the time of the lost send, not of this search, so
+    // checking again does not push back the moment a resend may be trusted.
     const uncertain = (message: string) =>
-      this.record(user, id, ready, draft.lines, { kind: 'uncertain', message });
+      this.record(
+        user,
+        id,
+        ready,
+        draft.lines,
+        { kind: 'uncertain', message },
+        { sendingAt: row.sendingAt },
+      );
     const { sellerTaxCode, symbolCode, registerInvoiceId, invoiceDate } = row;
     if (!sellerTaxCode || !symbolCode || !registerInvoiceId || !invoiceDate) {
       return uncertain(
@@ -579,7 +600,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
             registerInvoiceId,
           },
         },
-        result.invoiceDate,
+        { foundDate: result.invoiceDate },
       );
     }
     if (result.kind === 'ambiguous') {
@@ -590,6 +611,18 @@ export class EinvoicesService implements OnApplicationBootstrap {
     if (!this.markerSearchConfirmed) {
       return uncertain(
         `Chưa tìm thấy hóa đơn ${marker} trên Minvoice; ${MANUAL_CHECK}`,
+      );
+    }
+    // Minvoice may still be saving the lost send (our timeout is not its
+    // own): an empty list proves nothing until that send is well past.
+    if (!row.sendingAt) {
+      return uncertain(
+        `Chưa tìm thấy hóa đơn ${marker} trên Minvoice và không rõ lúc gửi trước; ${MANUAL_CHECK}`,
+      );
+    }
+    if (Date.now() - row.sendingAt.getTime() < STALE_SENDING_MS) {
+      return uncertain(
+        `Chưa tìm thấy hóa đơn ${marker} trên Minvoice nhưng lần gửi trước còn quá mới; kiểm tra lại sau vài phút, hoặc ${MANUAL_CHECK}`,
       );
     }
     // Nothing carries our reference: sent as a draft would be (spec §8), with
@@ -811,11 +844,10 @@ export class EinvoicesService implements OnApplicationBootstrap {
     ready: IssueConfig,
     lines: EinvoiceLine[],
     outcome: SendOutcome,
-    // The date Minvoice shows for an invoice found by our reference.
-    foundDate?: string,
+    extra: OutcomeExtra = {},
   ) {
     try {
-      await this.writeOutcome(user, id, ready, lines, outcome, foundDate);
+      await this.writeOutcome(user, id, ready, lines, outcome, extra);
     } catch (error) {
       const answer =
         outcome.kind === 'issued'
@@ -834,7 +866,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
     ready: IssueConfig,
     lines: EinvoiceLine[],
     outcome: SendOutcome,
-    foundDate?: string,
+    extra: OutcomeExtra,
   ) {
     if (outcome.kind === 'failed') {
       await this.prisma.einvoice.update({
@@ -861,6 +893,9 @@ export class EinvoicesService implements OnApplicationBootstrap {
         data: {
           status: EinvoiceStatus.UNCERTAIN,
           lastError: errorText(outcome.message),
+          ...(extra.sendingAt === undefined
+            ? {}
+            : { sendingAt: extra.sendingAt }),
         },
       });
       return;
@@ -872,7 +907,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
       sellerTaxCode: outcome.config.taxCode,
       symbolCode: outcome.config.symbolCode,
       registerInvoiceId: outcome.config.registerInvoiceId,
-      ...(foundDate ? { invoiceDate: toDbDate(foundDate) } : {}),
+      ...(extra.foundDate ? { invoiceDate: toDbDate(extra.foundDate) } : {}),
       vatAmount: totalsOf(lines).vatAmount,
       draft: Prisma.DbNull,
       issuedById: user.id,

@@ -168,7 +168,27 @@ describe('LiveGateway', () => {
     expect(s.closedWith).toBe(CLOSE_AUTH);
   });
 
-  it('closes a signed-in socket with 4001 at its 3rd refused auth', async () => {
+  it('closes a signed-in socket at once when the account lookup refuses it', async () => {
+    for (const refused of [null, { ...cashier, role: Role.STAFF }]) {
+      const s = connect();
+      s.message({ type: 'auth', token: 'a' });
+      await flush();
+      expect(s.sent).toHaveLength(1); // ready
+      expect(
+        events.registry.entry(s as unknown as WebSocket)?.user,
+      ).toBeTruthy();
+      findAuthUser.mockResolvedValue(refused);
+      s.message({ type: 'auth', token: 'renewed' });
+      await flush();
+      expect(s.closedWith).toBe(CLOSE_AUTH);
+      // the transport close follows: the placement leaves the registry
+      gateway.handleDisconnect(s as unknown as WebSocket);
+      expect(events.registry.entry(s as unknown as WebSocket)).toBeUndefined();
+      findAuthUser.mockResolvedValue(cashier);
+    }
+  });
+
+  it('keeps a signed-in socket through badly signed tokens and closes it with 4001 at the 3rd', async () => {
     const s = connect();
     s.message({ type: 'auth', token: 'a' });
     await flush();

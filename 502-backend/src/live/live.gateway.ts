@@ -135,7 +135,10 @@ export class LiveGateway
     }
     const user = await this.users.findAuthUser(payload.sub);
     if (!user || !SALES.includes(user.role)) {
-      this.refuse(socket, 'Tài khoản không dùng được kênh này');
+      // The account no longer belongs on this channel (locked, deleted, role
+      // changed): close at once, signed in or not. handleDisconnect drops its
+      // placement from the registry.
+      socket.close(CLOSE_AUTH, 'Tài khoản không dùng được kênh này');
       return;
     }
     const result = this.events.registry.authenticate(
@@ -153,9 +156,12 @@ export class LiveGateway
     socket.send(JSON.stringify({ type: 'ready', userId: user.id }));
   }
 
-  // A refused `auth`. A socket that never authenticated is closed at once
-  // (nothing to keep; the client reconnects). One that is signed in may try a
-  // renewed token again, but is closed at the MAX_FAILED_AUTHS-th failure.
+  // An `auth` whose token failed jwt.verify (costs no database read). A socket
+  // that never authenticated is closed at once (nothing to keep; the client
+  // reconnects). One that is signed in may try a renewed token again, but is
+  // closed at the MAX_FAILED_AUTHS-th failure. A token that verifies but whose
+  // account lookup refuses it is not counted here: authenticate() closes it
+  // at once.
   private refuse(socket: WebSocket, reason: string) {
     const entry = this.events.registry.entry(socket);
     if (entry) entry.failedAuths += 1;

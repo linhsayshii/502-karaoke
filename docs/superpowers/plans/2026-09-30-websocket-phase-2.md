@@ -167,7 +167,7 @@ Trong §3.2, thêm mục 7:
 
 Sửa đoạn văn cho đúng kết quả Step 4 (nếu Next không giữ được: viết luật `ingress` là bắt buộc, không phải phương án dự phòng). Ghi `**Kết quả spike:** …` (một câu, ngày, số echo/pong) ngay dưới dòng này trong file kế hoạch.
 
-**Kết quả spike:** _(điền sau Step 4)_
+**Kết quả spike:** 30/09/2026: request upgrade `/api/ws` đi qua image frontend production (`next start` standalone, rewrite `/api/:path*` → `http://backend:4000`) tới backend giả, giữ được 10 phút với ping 30 giây (client: 9 echo, socket còn mở; server: 19 pong, không đóng sớm; `x-forwarded-host` tới được backend), và 3 client song song giữ 1 phút đều còn mở — Next chuyển tiếp được upgrade, không cần luật `ingress` riêng (chỉ là phương án dự phòng nếu Cloudflare thật không chuyển được, ghi ở DEPLOYMENT §3.2 mục 7).
 
 - [ ] **Step 7: Commit**
 

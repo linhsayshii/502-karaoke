@@ -2,12 +2,19 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
+  OnApplicationBootstrap,
 } from '@nestjs/common';
 import { EinvoiceStatus, OrderStatus, Prisma } from '@prisma/client';
 import type { AuthUser } from '../auth/auth-user';
 import { BranchScopeService } from '../common/branch-scope.service';
-import { businessDateOf, fromDbDate, toDbDate } from '../common/dates';
+import {
+  businessDateOf,
+  fromDbDate,
+  toDateString,
+  toDbDate,
+} from '../common/dates';
 import { billNumberPrefixRange } from '../orders/bill-number';
 import { billedHoursOf } from '../orders/billing';
 import { PrismaService } from '../prisma/prisma.service';
@@ -17,27 +24,47 @@ import {
   EinvoiceBillsQuery,
   EinvoiceDraftDto,
   EinvoiceListQuery,
+  EinvoiceNumberDto,
+  IssueEinvoiceDto,
+  ResolveEinvoiceDto,
 } from './dto/einvoice.dto';
-import { totalsOf } from './einvoice-math';
+import {
+  EinvoiceConfigService,
+  type IssueConfig,
+} from './einvoice-config.service';
+import { parseDraft } from './einvoice-draft';
+import { issueProblem, totalsOf } from './einvoice-math';
 import {
   einvoiceDetailSelect,
   einvoiceListSelect,
   toEinvoiceRow,
 } from './einvoice-select';
+import { EinvoiceSender, type SendOutcome } from './einvoice-sender';
 import type { EinvoiceDraft, EinvoiceLine } from './einvoice-types';
+import { buildMinvoicePayload } from './minvoice/minvoice-payload';
 
 const clean = (value: string | null | undefined) => value?.trim() || null;
 
-// The columns a saved draft writes (spec §4.1): the details go in `draft`.
+// The columns a saved draft writes (spec §4.1): the details go in `draft`,
+// only in a shape parseDraft reads back (a blank name is refused, a null
+// vatAmount is left out).
 function draftData(dto: EinvoiceDraftDto) {
-  const lines: EinvoiceLine[] = dto.lines.map((line) => ({
-    name: line.name.trim(),
-    unit: line.unit.trim(),
-    quantity: line.quantity,
-    unitPrice: line.unitPrice,
-    vatRate: line.vatRate,
-    ...(line.vatAmount === undefined ? {} : { vatAmount: line.vatAmount }),
-  }));
+  const lines: EinvoiceLine[] = dto.lines.map((line, index) => {
+    const name = line.name.trim();
+    if (!name) {
+      throw new BadRequestException(
+        `Dòng ${index + 1}: tên hàng không được để trống`,
+      );
+    }
+    return {
+      name,
+      unit: line.unit.trim(),
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      vatRate: line.vatRate,
+      ...(line.vatAmount == null ? {} : { vatAmount: line.vatAmount }),
+    };
+  });
   const draft: EinvoiceDraft = {
     buyerAddress: clean(dto.buyerAddress),
     buyerEmail: clean(dto.buyerEmail),
@@ -55,10 +82,13 @@ function draftData(dto: EinvoiceDraftDto) {
 // A YYYY-MM-DD as a @db.Date value. The DTO only checks the shape: a day that
 // does not exist (2026-13-01 fails in Prisma, 2026-02-30 rolls into March) is
 // refused here.
-function dbDay(value: string): Date {
+function dbDay(
+  value: string,
+  message = 'Ngày không hợp lệ (định dạng YYYY-MM-DD)',
+): Date {
   const date = toDbDate(value);
   if (isNaN(date.getTime()) || fromDbDate(date) !== value) {
-    throw new BadRequestException('Ngày không hợp lệ (định dạng YYYY-MM-DD)');
+    throw new BadRequestException(message);
   }
   return date;
 }
@@ -77,13 +107,48 @@ function dateRange(
   };
 }
 
+const dmy = (ymd: string) => ymd.split('-').reverse().join('/');
+
+// 1C26MTT: characters 3–4 are the year (Thông tư 78/2021).
+function symbolYearOf(symbolCode: string): number | null {
+  const yy = Number(symbolCode.slice(2, 4));
+  return Number.isInteger(yy) ? 2000 + yy : null;
+}
+
+const isUniqueViolation = (error: unknown) =>
+  error instanceof Prisma.PrismaClientKnownRequestError &&
+  error.code === 'P2002';
+
+// Einvoice.lastError holds at most 300 characters (spec §4).
+const errorText = (message: string) => message.slice(0, 300);
+
+const NOT_UNCERTAIN = 'Hóa đơn không ở trạng thái "Không rõ"';
+
 @Injectable()
-export class EinvoicesService {
+export class EinvoicesService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(EinvoicesService.name);
+
   constructor(
     private prisma: PrismaService,
     private reportDb: ReportPrismaService,
     private scope: BranchScopeService,
+    private config: EinvoiceConfigService,
+    private sender: EinvoiceSender,
   ) {}
+
+  // One backend process: at start-up no send is still running, so a row left
+  // SENDING was cut off (spec §8). Runs once per start on a small table.
+  async onApplicationBootstrap() {
+    await this.prisma.einvoice.updateMany({
+      where: { status: EinvoiceStatus.SENDING },
+      data: {
+        status: EinvoiceStatus.UNCERTAIN,
+        lastError: errorText(
+          'Server khởi động lại khi đang gửi; hãy đối chiếu trên Minvoice',
+        ),
+      },
+    });
+  }
 
   // Newest bills first, the newest 500 (spec §7.3).
   async list(user: AuthUser, query: EinvoiceListQuery) {
@@ -320,6 +385,318 @@ export class EinvoicesService {
     return { id };
   }
 
+  // Spec §8. Answers 200 with the row once it is locked: the outcome is its
+  // status (ISSUED, DRAFT with lastError, UNCERTAIN); checks before the lock
+  // answer 400 / 409.
+  async issue(user: AuthUser, id: number, dto: IssueEinvoiceDto) {
+    const row = await this.prisma.einvoice.findUnique({
+      where: { id },
+      select: {
+        branchId: true,
+        status: true,
+        amount: true,
+        buyerTaxCode: true,
+        buyerName: true,
+        draft: true,
+        updatedAt: true,
+        order: { select: { status: true } },
+      },
+    });
+    if (!row) throw new NotFoundException('Không tìm thấy hóa đơn điện tử');
+    this.scope.assertBranchAccess(user, row.branchId);
+    if (row.status !== EinvoiceStatus.DRAFT) {
+      throw new ConflictException(
+        row.status === EinvoiceStatus.ISSUED
+          ? 'Hóa đơn đã xuất'
+          : 'Hóa đơn đang được gửi hoặc chưa rõ kết quả; đối chiếu trên Minvoice trước khi gửi lại',
+      );
+    }
+    if (row.order.status !== OrderStatus.COMPLETED) {
+      throw new BadRequestException('Bill đã hủy, không xuất được hóa đơn');
+    }
+    const draft = parseDraft(row.draft);
+    const problem = issueProblem(Number(row.amount), draft.lines);
+    if (problem) throw new BadRequestException(problem);
+    const ready = await this.config.readyForIssue(row.branchId);
+    await this.assertInvoiceDate(ready, dto);
+
+    // Locked only as it was read: a draft saved meanwhile would otherwise
+    // go out with the lines checked above but keep the amount saved since.
+    const { count } = await this.prisma.einvoice.updateMany({
+      where: { id, status: EinvoiceStatus.DRAFT, updatedAt: row.updatedAt },
+      data: {
+        status: EinvoiceStatus.SENDING,
+        sendingAt: new Date(),
+        lastError: null,
+        sellerTaxCode: ready.taxCode,
+        symbolCode: ready.symbolCode,
+        registerInvoiceId: ready.registerInvoiceId,
+        invoiceDate: toDbDate(dto.invoiceDate),
+      },
+    });
+    if (count === 0) throw await this.notLocked(id);
+
+    let outcome: SendOutcome;
+    try {
+      outcome = await this.sender.send(ready, (config) =>
+        buildMinvoicePayload({
+          taxCode: config.taxCode,
+          symbolCode: config.symbolCode,
+          registerInvoiceId: config.registerInvoiceId,
+          currencyId: config.currencyId,
+          seller: config.seller,
+          invoiceDate: dto.invoiceDate,
+          buyer: {
+            taxCode: row.buyerTaxCode,
+            name: row.buyerName,
+            address: draft.buyerAddress,
+            email: draft.buyerEmail,
+          },
+          lines: draft.lines,
+          marker: `K502-${id}`,
+        }),
+      );
+    } catch (error) {
+      // A bug after the request may have left: never guess, check on Minvoice.
+      outcome = {
+        kind: 'uncertain',
+        message:
+          error instanceof Error ? error.message : 'Lỗi không xác định khi gửi',
+      };
+    }
+    await this.record(user, id, ready, draft.lines, outcome);
+    return this.findOne(user, id);
+  }
+
+  // Spec §9.2 (without a search): the chain manager looked on Minvoice.
+  async resolve(user: AuthUser, id: number, dto: ResolveEinvoiceDto) {
+    const row = await this.prisma.einvoice.findUnique({
+      where: { id },
+      select: {
+        branchId: true,
+        status: true,
+        draft: true,
+        sellerTaxCode: true,
+        symbolCode: true,
+      },
+    });
+    if (!row) throw new NotFoundException('Không tìm thấy hóa đơn điện tử');
+    this.scope.assertBranchAccess(user, row.branchId);
+    // Before the draft is read: an issued row has none.
+    if (row.status !== EinvoiceStatus.UNCERTAIN) {
+      throw new ConflictException(NOT_UNCERTAIN);
+    }
+    const data: Prisma.EinvoiceUncheckedUpdateManyInput = dto.found
+      ? {
+          status: EinvoiceStatus.ISSUED,
+          invoiceNumber: dto.invoiceNumber,
+          vatAmount: totalsOf(parseDraft(row.draft).lines).vatAmount,
+          draft: Prisma.DbNull,
+          issuedById: user.id,
+          issuedAt: new Date(),
+          lastError: null,
+          sendingAt: null,
+        }
+      : {
+          status: EinvoiceStatus.DRAFT,
+          lastError: null,
+          sendingAt: null,
+          sellerTaxCode: null,
+          symbolCode: null,
+          registerInvoiceId: null,
+          invoiceDate: null,
+        };
+    let count: number;
+    try {
+      // The status condition settles a race with another resolve.
+      ({ count } = await this.prisma.einvoice.updateMany({
+        where: { id, status: EinvoiceStatus.UNCERTAIN },
+        data,
+      }));
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw await this.numberTaken(row, dto.invoiceNumber!);
+      }
+      throw error;
+    }
+    if (count === 0) throw new ConflictException(NOT_UNCERTAIN);
+    return this.findOne(user, id);
+  }
+
+  async editNumber(user: AuthUser, id: number, dto: EinvoiceNumberDto) {
+    const row = await this.prisma.einvoice.findUnique({
+      where: { id },
+      select: { branchId: true, sellerTaxCode: true, symbolCode: true },
+    });
+    if (!row) throw new NotFoundException('Không tìm thấy hóa đơn điện tử');
+    this.scope.assertBranchAccess(user, row.branchId);
+    let count: number;
+    try {
+      ({ count } = await this.prisma.einvoice.updateMany({
+        where: { id, status: EinvoiceStatus.ISSUED },
+        data: {
+          invoiceNumber: dto.invoiceNumber,
+          lastError: null,
+          numberEditedById: user.id,
+          numberEditedAt: new Date(),
+        },
+      }));
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw await this.numberTaken(row, dto.invoiceNumber);
+      }
+      throw error;
+    }
+    if (count === 0)
+      throw new ConflictException('Chỉ sửa số của hóa đơn đã xuất');
+    return this.findOne(user, id);
+  }
+
+  // Spec §9.3: not before the newest invoice of the symbol, a future date
+  // confirmed, and in the year of the symbol.
+  private async assertInvoiceDate(ready: IssueConfig, dto: IssueEinvoiceDto) {
+    dbDay(dto.invoiceDate, 'Ngày hóa đơn không hợp lệ');
+    const latest = await this.config.latestIssued(
+      ready.taxCode,
+      ready.symbolCode,
+    );
+    if (latest && dto.invoiceDate < latest.invoiceDate) {
+      throw new BadRequestException(
+        `Ngày hóa đơn phải từ ${dmy(latest.invoiceDate)} trở đi (hóa đơn số ${latest.invoiceNumber ?? '?'} cùng ký hiệu ${ready.symbolCode} mang ngày này)`,
+      );
+    }
+    if (dto.invoiceDate > toDateString(new Date()) && !dto.confirmFutureDate) {
+      throw new BadRequestException(
+        'Ngày hóa đơn sau hôm nay: cần xác nhận trước khi xuất',
+      );
+    }
+    const year = symbolYearOf(ready.symbolCode);
+    if (year !== null && Number(dto.invoiceDate.slice(0, 4)) !== year) {
+      throw new BadRequestException(
+        `Ký hiệu ${ready.symbolCode} là của năm ${year}, ngày hóa đơn là ${dmy(dto.invoiceDate)}`,
+      );
+    }
+  }
+
+  // Why the lock found nothing to take: another issue got there first, or
+  // the draft was saved after it was checked.
+  private async notLocked(id: number) {
+    const now = await this.prisma.einvoice.findUnique({
+      where: { id },
+      select: { status: true },
+    });
+    return new ConflictException(
+      now?.status === EinvoiceStatus.DRAFT
+        ? 'Hóa đơn vừa được sửa, kiểm tra lại rồi xuất'
+        : 'Hóa đơn đang được gửi hoặc đã xuất',
+    );
+  }
+
+  private async record(
+    user: AuthUser,
+    id: number,
+    ready: IssueConfig,
+    lines: EinvoiceLine[],
+    outcome: SendOutcome,
+  ) {
+    if (outcome.kind === 'failed') {
+      await this.prisma.einvoice.update({
+        where: { id },
+        data: {
+          status: EinvoiceStatus.DRAFT,
+          lastError: errorText(
+            outcome.dateOrder
+              ? `Minvoice từ chối ngày hóa đơn: phải từ ngày của hóa đơn mới nhất cùng ký hiệu ${ready.symbolCode} trở đi. ${outcome.message}`
+              : outcome.message,
+          ),
+          sendingAt: null,
+          sellerTaxCode: null,
+          symbolCode: null,
+          registerInvoiceId: null,
+          invoiceDate: null,
+        },
+      });
+      return;
+    }
+    if (outcome.kind === 'uncertain') {
+      await this.prisma.einvoice.update({
+        where: { id },
+        data: {
+          status: EinvoiceStatus.UNCERTAIN,
+          lastError: errorText(outcome.message),
+        },
+      });
+      return;
+    }
+    // Issued: the header stays, the details go (spec §4).
+    const header = {
+      status: EinvoiceStatus.ISSUED,
+      minvoiceId: outcome.minvoiceId,
+      sellerTaxCode: outcome.config.taxCode,
+      symbolCode: outcome.config.symbolCode,
+      registerInvoiceId: outcome.config.registerInvoiceId,
+      vatAmount: totalsOf(lines).vatAmount,
+      draft: Prisma.DbNull,
+      issuedById: user.id,
+      issuedAt: new Date(),
+      sendingAt: null,
+    };
+    try {
+      await this.prisma.einvoice.update({
+        where: { id },
+        data: {
+          ...header,
+          invoiceNumber: outcome.invoiceNumber,
+          lastError: null,
+        },
+      });
+    } catch (error) {
+      if (!isUniqueViolation(error)) {
+        // The row stays SENDING and becomes UNCERTAIN at the next start-up.
+        this.logger.error(
+          `Einvoice ${id}: Minvoice issued number ${outcome.invoiceNumber} (id ${outcome.minvoiceId}) but saving it failed`,
+          error instanceof Error ? error.stack : undefined,
+        );
+        throw error;
+      }
+      const holder = await this.prisma.einvoice.findFirst({
+        where: {
+          sellerTaxCode: outcome.config.taxCode,
+          symbolCode: outcome.config.symbolCode,
+          invoiceNumber: outcome.invoiceNumber,
+        },
+        select: { id: true },
+      });
+      await this.prisma.einvoice.update({
+        where: { id },
+        data: {
+          ...header,
+          invoiceNumber: null,
+          lastError: errorText(
+            `Số ${outcome.invoiceNumber} trùng hóa đơn #${holder?.id ?? '?'}, kiểm tra và sửa số`,
+          ),
+        },
+      });
+    }
+  }
+
+  private async numberTaken(
+    row: { sellerTaxCode: string | null; symbolCode: string | null },
+    invoiceNumber: number,
+  ) {
+    const holder = await this.prisma.einvoice.findFirst({
+      where: {
+        sellerTaxCode: row.sellerTaxCode,
+        symbolCode: row.symbolCode,
+        invoiceNumber,
+      },
+      select: { id: true },
+    });
+    return new ConflictException(
+      `Số ${invoiceNumber} đã có ở hóa đơn #${holder?.id ?? '?'}`,
+    );
+  }
+
   private async listWhere(
     user: AuthUser,
     query: EinvoiceListQuery,
@@ -338,8 +715,9 @@ export class EinvoicesService {
     // Pending work (drafts, errors, uncertain) is listed whatever its day.
     const dated = !query.status || query.status === 'ISSUED';
     if (query.billNumber) {
+      // (branchId, billNumber) index of Order.
       where.order = {
-        is: { billNumber: billNumberPrefixRange(query.billNumber) },
+        is: { branchId, billNumber: billNumberPrefixRange(query.billNumber) },
       };
     } else if (dated) {
       where.businessDate = dateRange(query.from, query.to);

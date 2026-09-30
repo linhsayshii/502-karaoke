@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Param,
   ParseIntPipe,
   Patch,
@@ -16,7 +17,7 @@ import type { Response } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import type { AuthUser } from '../auth/auth-user';
-import { EINVOICE_READERS, EINVOICE_WRITERS } from '../auth/roles';
+import { CHAIN_ONLY, EINVOICE_READERS, EINVOICE_WRITERS } from '../auth/roles';
 import { SharedRequestInterceptor } from '../common/shared-request.interceptor';
 import { withTotalCount } from '../common/total-count';
 import {
@@ -24,6 +25,9 @@ import {
   EinvoiceBillsQuery,
   EinvoiceDraftDto,
   EinvoiceListQuery,
+  EinvoiceNumberDto,
+  IssueEinvoiceDto,
+  ResolveEinvoiceDto,
 } from './dto/einvoice.dto';
 import { EinvoicesService } from './einvoices.service';
 
@@ -101,5 +105,39 @@ export class EinvoicesController {
   @Roles(...EINVOICE_WRITERS)
   remove(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number) {
     return this.einvoices.remove(user, id);
+  }
+
+  // Issuing, resolving and numbers are the chain manager's (spec §3). Each
+  // answers 200 with the row: the outcome of a send is its status.
+  @Post(':id/issue')
+  @HttpCode(200)
+  @Roles(...CHAIN_ONLY)
+  issue(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: IssueEinvoiceDto,
+  ) {
+    return this.einvoices.issue(user, id, dto);
+  }
+
+  @Post(':id/resolve')
+  @HttpCode(200)
+  @Roles(...CHAIN_ONLY)
+  resolve(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ResolveEinvoiceDto,
+  ) {
+    return this.einvoices.resolve(user, id, dto);
+  }
+
+  @Patch(':id/number')
+  @Roles(...CHAIN_ONLY)
+  editNumber(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: EinvoiceNumberDto,
+  ) {
+    return this.einvoices.editNumber(user, id, dto);
   }
 }

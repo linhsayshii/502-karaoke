@@ -7,6 +7,9 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
+import { EinvoiceConfigService } from '../src/einvoice/einvoice-config.service';
+import { EinvoicesService } from '../src/einvoice/einvoices.service';
+import { PrismaService } from '../src/prisma/prisma.service';
 import { FakeMinvoice } from './fake-minvoice';
 
 // Hóa đơn điện tử (spec 2026-10-01) against a fake Minvoice
@@ -365,6 +368,41 @@ describe('E-invoices (e2e)', () => {
         .expect(400);
     });
 
+    it('store only what an issue can read back', async () => {
+      const res = await as('tn1_cs1')
+        .post('/einvoices', {
+          orderId,
+          amount: 1000,
+          lines: [{ ...beer, name: '  Bia  ', vatAmount: null }],
+        })
+        .expect(201);
+      const created = res.body as Json;
+      const line = (created.draft as { lines: Json[] }).lines[0];
+      expect(line.name).toBe('Bia');
+      expect(line).not.toHaveProperty('vatAmount');
+      const blank = await as('tn1_cs1')
+        .patch(`/einvoices/${created.id as number}`, {
+          amount: 1000,
+          lines: [beer, { ...beer, name: '   ' }],
+        })
+        .expect(400);
+      expect((blank.body as Json).message).toBe(
+        'Dòng 2: tên hàng không được để trống',
+      );
+      const order = (await as('admin').get(`/orders/${orderId}`).expect(200))
+        .body as Json;
+      const prefix = (order.billNumber as string).slice(0, 6);
+      const found = (
+        await as('tn1_cs1')
+          .get(`/einvoices?status=DRAFT&billNumber=${prefix}`)
+          .expect(200)
+      ).body as Json[];
+      expect(found.map((e) => e.id)).toContain(created.id);
+      await as('tn1_cs1')
+        .delete(`/einvoices/${created.id as number}`)
+        .expect(200);
+    });
+
     it('deletes a draft', async () => {
       const extra = (
         await as('tn1_cs1')
@@ -400,6 +438,300 @@ describe('E-invoices (e2e)', () => {
       ).body as Json;
       expect(open._count).toEqual({ einvoices: 0 });
       expect(open.einvoices).toEqual([]);
+    });
+  });
+  describe('issuing', () => {
+    const today = () => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+    const buyer = {
+      buyerTaxCode: '0107068321',
+      buyerName: 'CÔNG TY HOÀNG GIA',
+      buyerAddress: null,
+      buyerEmail: null,
+    };
+    const filler = (unitPrice: number) => ({
+      name: 'Dịch vụ karaoke',
+      unit: 'Lần',
+      quantity: 1,
+      unitPrice,
+      vatRate: 10,
+    });
+    const newDraft = async (unitPrice = 909091) =>
+      (
+        (
+          await as('tn1_cs1')
+            .post('/einvoices', {
+              orderId,
+              amount: 1000000,
+              ...buyer,
+              lines: [filler(unitPrice)],
+            })
+            .expect(201)
+        ).body as Json
+      ).id as number;
+    const issue = (id: number, body: Json = { invoiceDate: today() }) =>
+      as('admin').post(`/einvoices/${id}/issue`, body);
+    let laterId: number;
+
+    it('is for the chain manager only', async () => {
+      for (const name of ['tn1_cs1', 'ql1_cs1', 'hdqt_hddt']) {
+        await as(name)
+          .post(`/einvoices/${draftId}/issue`, { invoiceDate: today() })
+          .expect(403);
+      }
+    });
+
+    it('refuses a draft whose lines do not add up', async () => {
+      const id = await newDraft(900000);
+      expect(((await issue(id).expect(400)).body as Json).message).toBe(
+        'Còn thiếu 10.000 đồng',
+      );
+      await as('tn1_cs1').delete(`/einvoices/${id}`).expect(200);
+    });
+
+    it('issues: Minvoice number kept, details deleted', async () => {
+      const body = (await issue(draftId).expect(200)).body as Json;
+      expect(body).toMatchObject({
+        status: 'ISSUED',
+        invoiceNumber: 1001,
+        symbolCode: fake.symbolCode(),
+        sellerTaxCode: TAX_CODE,
+        invoiceDate: today(),
+        draft: null,
+        lastError: null,
+      });
+      noSecrets(body);
+      expect(fake.invoices.at(-1)).toMatchObject({
+        paymentMethod: 'TM/CK',
+        invoiceSerial: fake.symbolCode(),
+        registerInvoiceId: 'range-1',
+        currencyId: 'vnd-id',
+        buyerTaxCode: '0107068321',
+        buyerAddress: 'Số 26, phố Nhổn',
+        totalAmount: 1000000,
+        totalAmountToWord: 'Một triệu đồng',
+      });
+      await issue(draftId).expect(409);
+      await as('tn1_cs1')
+        .patch(`/einvoices/${draftId}`, { amount: 1, lines: [] })
+        .expect(409);
+      const config = (
+        await as('admin').get('/einvoice/config?branch=cs1').expect(200)
+      ).body as Json;
+      expect(config).toMatchObject({
+        minInvoiceDate: today(),
+        latestInvoiceNumber: 1001,
+      });
+    });
+
+    it('keeps invoice dates in order and in the year of the symbol', async () => {
+      laterId = await newDraft();
+      expect(
+        (
+          (await issue(laterId, { invoiceDate: '2020-01-01' }).expect(400))
+            .body as Json
+        ).message,
+      ).toMatch(/phải từ/);
+      const nextYear = `${new Date().getFullYear() + 1}-01-01`;
+      expect(
+        (
+          (await issue(laterId, { invoiceDate: nextYear }).expect(400))
+            .body as Json
+        ).message,
+      ).toMatch(/xác nhận/);
+      expect(
+        (
+          (
+            await issue(laterId, {
+              invoiceDate: nextYear,
+              confirmFutureDate: true,
+            }).expect(400)
+          ).body as Json
+        ).message,
+      ).toMatch(/năm/);
+      await issue(laterId, { invoiceDate: '2026-02-30' }).expect(400);
+    });
+
+    it('logs in again and takes the new range when Minvoice refuses', async () => {
+      fake.expireSessions();
+      fake.rangeId = 'range-2';
+      const logins = fake.logins;
+      const posts = fake.posts;
+      const body = (await issue(laterId).expect(200)).body as Json;
+      expect(body.status).toBe('ISSUED');
+      expect(fake.posts).toBe(posts + 2);
+      expect(fake.logins).toBe(logins + 1);
+      expect(fake.invoices.at(-1)!.registerInvoiceId).toBe('range-2');
+      expect(
+        (
+          (await as('admin').get('/einvoice/config?branch=cs1').expect(200))
+            .body as Json
+        ).registerInvoiceId,
+      ).toBe('range-2');
+    });
+
+    it('gives up after a second refusal and keeps the draft', async () => {
+      const id = await newDraft();
+      fake.behaviours = ['reject', 'reject'];
+      const posts = fake.posts;
+      const body = (await issue(id).expect(200)).body as Json;
+      expect(body).toMatchObject({
+        status: 'DRAFT',
+        symbolCode: null,
+        invoiceDate: null,
+      });
+      expect(body.lastError).toMatch(/ModelState/);
+      expect((body.draft as Json).lines).toHaveLength(1);
+      expect(fake.posts).toBe(posts + 2);
+      const errors = (
+        await as('tn1_cs1').get('/einvoices?status=ERROR').expect(200)
+      ).body as Json[];
+      expect(errors.map((e) => e.id)).toContain(id);
+      await as('tn1_cs1').delete(`/einvoices/${id}`).expect(200);
+    });
+
+    it('does not resend a date Minvoice refuses', async () => {
+      const id = await newDraft();
+      fake.behaviours = ['date-order'];
+      const posts = fake.posts;
+      const body = (await issue(id).expect(200)).body as Json;
+      expect(body.status).toBe('DRAFT');
+      expect(body.lastError).toMatch(/^Minvoice từ chối ngày hóa đơn/);
+      expect(body.lastError).toContain('quy luật tăng dần');
+      expect(fake.posts).toBe(posts + 1);
+      await as('tn1_cs1').delete(`/einvoices/${id}`).expect(200);
+    });
+
+    it('marks a send without an answer as uncertain, then resolves it', async () => {
+      const id = await newDraft();
+      fake.behaviours = ['drop'];
+      const posts = fake.posts;
+      expect(((await issue(id).expect(200)).body as Json).status).toBe(
+        'UNCERTAIN',
+      );
+      expect(fake.posts).toBe(posts + 1);
+      await issue(id).expect(409);
+      await as('tn1_cs1')
+        .post(`/einvoices/${id}/resolve`, { found: false })
+        .expect(403);
+      const back = (
+        await as('admin')
+          .post(`/einvoices/${id}/resolve`, { found: false })
+          .expect(200)
+      ).body as Json;
+      expect(back).toMatchObject({
+        status: 'DRAFT',
+        symbolCode: null,
+        invoiceDate: null,
+      });
+      fake.behaviours = ['drop'];
+      await issue(id).expect(200);
+      const found = (
+        await as('admin')
+          .post(`/einvoices/${id}/resolve`, {
+            found: true,
+            invoiceNumber: 1500,
+          })
+          .expect(200)
+      ).body as Json;
+      expect(found).toMatchObject({
+        status: 'ISSUED',
+        invoiceNumber: 1500,
+        draft: null,
+        invoiceDate: today(),
+      });
+    });
+
+    it('resolves only an uncertain invoice', async () => {
+      for (const body of [
+        { found: true, invoiceNumber: 1600 },
+        { found: false },
+      ]) {
+        const res = await as('admin')
+          .post(`/einvoices/${draftId}/resolve`, body)
+          .expect(409);
+        expect((res.body as Json).message).toBe(
+          'Hóa đơn không ở trạng thái "Không rõ"',
+        );
+      }
+    });
+
+    it('lets one of two simultaneous issues win', async () => {
+      const id = await newDraft();
+      fake.delayMs = 300;
+      const posts = fake.posts;
+      const [a, b] = await Promise.all([issue(id), issue(id)]);
+      fake.delayMs = 0;
+      expect([a.status, b.status].sort()).toEqual([200, 409]);
+      expect(fake.posts).toBe(posts + 1);
+    });
+
+    it('does not send a draft saved after it was checked', async () => {
+      const id = await newDraft();
+      const config = app.get(EinvoiceConfigService);
+      const ready = config.readyForIssue.bind(config);
+      // A save lands between the checks and the lock.
+      jest
+        .spyOn(config, 'readyForIssue')
+        .mockImplementationOnce(async (branchId: number) => {
+          await app
+            .get(PrismaService)
+            .einvoice.update({ where: { id }, data: { amount: 2000000 } });
+          return ready(branchId);
+        });
+      const posts = fake.posts;
+      const res = await issue(id).expect(409);
+      expect((res.body as Json).message).toBe(
+        'Hóa đơn vừa được sửa, kiểm tra lại rồi xuất',
+      );
+      expect(fake.posts).toBe(posts);
+      const row = (await as('admin').get(`/einvoices/${id}`).expect(200))
+        .body as Json;
+      expect(row).toMatchObject({ status: 'DRAFT', amount: '2000000' });
+      await as('tn1_cs1').delete(`/einvoices/${id}`).expect(200);
+    });
+
+    it('edits the number of an issued invoice, never to a taken one', async () => {
+      await as('tn1_cs1')
+        .patch(`/einvoices/${draftId}/number`, { invoiceNumber: 2001 })
+        .expect(403);
+      await as('admin')
+        .patch(`/einvoices/${draftId}/number`, { invoiceNumber: 1500 })
+        .expect(409);
+      const edited = (
+        await as('admin')
+          .patch(`/einvoices/${draftId}/number`, { invoiceNumber: 2001 })
+          .expect(200)
+      ).body as Json;
+      expect(edited.invoiceNumber).toBe(2001);
+      expect(edited.numberEditedAt).not.toBeNull();
+    });
+
+    it('turns a send cut off by a restart into uncertain', async () => {
+      const id = await newDraft();
+      await app
+        .get(PrismaService)
+        .einvoice.update({ where: { id }, data: { status: 'SENDING' } });
+      await app.get(EinvoicesService).onApplicationBootstrap();
+      expect(
+        ((await as('admin').get(`/einvoices/${id}`).expect(200)).body as Json)
+          .status,
+      ).toBe('UNCERTAIN');
+    });
+
+    it('is wiped with the data of its branch', async () => {
+      const res = await as('hdqt_hddt')
+        .post('/admin/purge', {
+          scope: 'branch',
+          branch: 'cs1',
+          password: '12345678',
+        })
+        .expect(200);
+      expect(
+        ((res.body as Json).deleted as Record<string, number>).einvoices,
+      ).toBeGreaterThan(0);
     });
   });
 });

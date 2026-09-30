@@ -25,7 +25,7 @@ describe('EinvoiceConfigService.relogin', () => {
   beforeEach(() => {
     logins = [];
     // Every login waits for the test to settle it.
-    login = jest.fn(
+    login = jest.fn<Promise<MinvoiceSession>, [string, string, string]>(
       () =>
         new Promise<MinvoiceSession>((resolve, reject) => {
           logins.push((result) =>

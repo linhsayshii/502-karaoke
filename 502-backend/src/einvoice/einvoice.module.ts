@@ -1,6 +1,7 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { EinvoiceConfigController } from './einvoice-config.controller';
 import { EinvoiceConfigService } from './einvoice-config.service';
+import { EinvoiceSender } from './einvoice-sender';
 import { EinvoicesController } from './einvoices.controller';
 import { EinvoicesService } from './einvoices.service';
 import { assertEinvoiceSecret } from './einvoice-secret';
@@ -14,6 +15,7 @@ import { TaxPayerService } from './tax-payer.service';
     MinvoiceClient,
     TaxPayerService,
     EinvoiceConfigService,
+    EinvoiceSender,
     EinvoicesService,
   ],
 })

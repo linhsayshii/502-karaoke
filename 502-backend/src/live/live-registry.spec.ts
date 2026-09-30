@@ -133,4 +133,44 @@ describe('LiveRegistry', () => {
     expect([...reg.sockets()]).toEqual([]);
     reg.close(s); // closing twice is harmless
   });
+
+  it('removes old placement when same user re-authenticates with different branch or role', () => {
+    const reg = new LiveRegistry<object>();
+    const s = sock();
+    reg.open(s);
+    // Authenticate as cashier of branch 1
+    expect(reg.authenticate(s, cashier(7, 1), 100)).toBe('ok');
+    expect(
+      reg.recipients({ type: 'room.changed', branchId: 1, roomId: 1 }),
+    ).toEqual([s]);
+    expect(
+      reg.recipients({ type: 'room.changed', branchId: 2, roomId: 1 }),
+    ).toEqual([]);
+    // Re-authenticate as same user but branchId: 2
+    expect(reg.authenticate(s, cashier(7, 2), 200)).toBe('ok');
+    expect(
+      reg.recipients({ type: 'room.changed', branchId: 1, roomId: 1 }),
+    ).toEqual([]);
+    expect(
+      reg.recipients({ type: 'room.changed', branchId: 2, roomId: 1 }),
+    ).toEqual([s]);
+    // Re-authenticate as same user but role: CHAIN_MANAGER
+    expect(reg.authenticate(s, chain(7), 300)).toBe('ok');
+    // Chain manager should be in recipients for any branch exactly once
+    expect(
+      reg.recipients({ type: 'room.changed', branchId: 1, roomId: 1 }),
+    ).toEqual([s]);
+    expect(
+      reg.recipients({ type: 'room.changed', branchId: 2, roomId: 1 }),
+    ).toEqual([s]);
+    // Close and verify cleanup
+    reg.close(s);
+    expect(reg.size).toBe(0);
+    expect(
+      reg.recipients({ type: 'room.changed', branchId: 1, roomId: 1 }),
+    ).toEqual([]);
+    expect(
+      reg.recipients({ type: 'room.changed', branchId: 2, roomId: 1 }),
+    ).toEqual([]);
+  });
 });

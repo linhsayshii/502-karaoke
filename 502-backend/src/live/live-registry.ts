@@ -54,6 +54,9 @@ export class LiveRegistry<S extends object> {
     const entry = this.entries.get(socket);
     if (!entry) return 'unknown';
     if (entry.user?.id === user.id) {
+      // Same user re-authenticating: remove old placement (branch/role may have changed),
+      // then place in new location. perUser count stays 1 for this socket.
+      this.removePlacement(socket, entry.user);
       entry.exp = exp;
       entry.user = user;
       this.place(socket, user);
@@ -119,13 +122,19 @@ export class LiveRegistry<S extends object> {
     set.add(socket);
   }
 
-  private unplace(socket: S, user: LiveUser) {
+  // Removes socket from its placement sets (byBranch / chainManagers), but not
+  // from perUser. Called when role or branch changes between authentications.
+  private removePlacement(socket: S, user: LiveUser) {
     this.chainManagers.delete(socket);
     if (user.branchId !== null) {
       const set = this.byBranch.get(user.branchId);
       set?.delete(socket);
       if (set && set.size === 0) this.byBranch.delete(user.branchId);
     }
+  }
+
+  private unplace(socket: S, user: LiveUser) {
+    this.removePlacement(socket, user);
     const left = (this.perUser.get(user.id) ?? 1) - 1;
     if (left <= 0) this.perUser.delete(user.id);
     else this.perUser.set(user.id, left);

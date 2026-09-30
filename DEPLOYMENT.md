@@ -79,6 +79,7 @@ nano .env
 | `POSTGRES_DB`, `POSTGRES_USER` | Tên database và user (giữ mặc định được). |
 | `POSTGRES_PASSWORD` | Mật khẩu database. Chỉ dùng chữ và số vì nó nằm trong `DATABASE_URL`. |
 | `JWT_SECRET`, `JWT_REFRESH_SECRET` | Hai chuỗi bí mật khác nhau để ký token đăng nhập. Đổi chúng sẽ đăng xuất mọi người. |
+| `EINVOICE_SECRET` | Khóa mã hóa mật khẩu Minvoice (hóa đơn điện tử), 32 byte mã hóa base64: `openssl rand -base64 32`. **Bắt buộc**, thiếu thì `docker compose up` báo lỗi. **Không đổi sau khi đã dùng** (xem mục 6.18). |
 | `COOKIE_SECURE` | `true` khi truy cập qua HTTPS, `false` khi dùng HTTP (mạng nội bộ). Sai giá trị này là bị đăng xuất mỗi khi tải lại trang. |
 | `CORS_ORIGINS` | Không cần đặt (để trống): trình duyệt gọi `/api` trên cùng tên miền. Chỉ đặt khi một trang ở tên miền khác phải gọi API, dạng `https://a.example.com,https://b.example.com`. |
 | `SWAGGER_ENABLED` | `false` (mặc định): tắt trang tài liệu API `/api/docs` để không lộ danh sách API ra Internet. `true` khi cần xem tạm. |
@@ -536,13 +537,44 @@ Sau khi cập nhật:
 - Màn hình thu ngân và quản lý mở một kết nối WebSocket tới `/api/ws` (cùng tên miền) để biết ngay khi phòng, hóa đơn hay yêu cầu giảm giá đổi; điện thoại nhân viên không dùng. Không có kết nối này app vẫn chạy như trước (tự tải lại định kỳ), chỉ chậm hơn vài chục giây.
 - Không cần đổi `.env` hay `docker-compose.yml`. Kiểm tra sau khi cập nhật theo [mục 3.2](#32-cloudflare-tunnel-không-dùng-nginx) điểm 7 (Cloudflare) hoặc [mục 3](#3-tên-miền-nginx-và-https) (Nginx: hai dòng `Upgrade`/`Connection` đã có trong mẫu cấu hình).
 
+### 6.18. Hóa đơn điện tử (migration `20261003000000_einvoices`)
+
+1. **Trước khi cập nhật**, thêm khóa mã hóa vào `.env` gốc (cạnh `docker-compose.yml`):
+
+   ```bash
+   echo "EINVOICE_SECRET=$(openssl rand -base64 32)" >> .env
+   ```
+
+   (Nếu `.env` đã có dòng `EINVOICE_SECRET=` để trống, vì sao chép từ `.env.docker.example` mới, thì điền giá trị vào dòng đó thay vì thêm dòng.)
+
+   Thiếu biến này thì `docker compose up` báo lỗi và dừng; backend production cũng không khởi động nếu khóa không phải 32 byte mã hóa base64 (`docker compose logs backend`). Khóa dùng để mã hóa mật khẩu và phiên Minvoice lưu trong database.
+   - **Không đổi khóa sau này.** Đổi khóa thì mọi cơ sở phải đăng nhập Minvoice lại (hóa đơn đã xuất không mất).
+   - Sao lưu khóa cùng chỗ với các bí mật khác (`JWT_SECRET`, `POSTGRES_PASSWORD`…). Bản sao lưu database mà không có khóa thì không đọc được mật khẩu Minvoice, phải đăng nhập lại.
+2. **Migration** tự chạy khi backend khởi động: thêm cột `Branch.taxCode` và hai bảng `EinvoiceConfig`, `Einvoice` cùng các chỉ mục. Không đụng dữ liệu cũ, chạy trong tích tắc.
+3. **Máy chủ phải gọi ra được** (HTTPS ra ngoài; Cloudflare Tunnel không ảnh hưởng chiều ra) ba địa chỉ:
+   - `https://<MST>.minvoice.net`: tạo hóa đơn. Mỗi cơ sở một tên miền con theo MST của nó.
+   - `https://hoadondientu.gdt.gov.vn`: tra MST người mua (cổng thuế, hay chặn máy chủ nước ngoài hoặc máy ảo).
+   - `https://api.xinvoice.vn`: tra MST người mua khi cổng thuế không trả lời. Chỉ nhận MST người mua (thông tin công khai).
+
+   Không gọi được Minvoice thì trang Hóa đơn điện tử báo "Không kết nối được Minvoice" (HTTP 424) và nháp vẫn còn nguyên. Không tra được MST thì vẫn nhập tay tên và địa chỉ người mua.
+4. **Sau khi cập nhật:**
+   - Quản lý hệ thống nhập **Mã số thuế** của từng cơ sở ở **Quản trị → Cơ sở** (10 số, hoặc 10 số kèm `-` và 3 số cho chi nhánh).
+   - Vào **Bán hàng → Hóa đơn điện tử**, chọn cơ sở, đăng nhập tài khoản Minvoice của cơ sở đó rồi chọn **ký hiệu** hóa đơn. Nên dùng tài khoản Minvoice chỉ có quyền tạo hóa đơn, vì mật khẩu của nó nằm trên máy chủ này (đã mã hóa).
+   - Thu ngân và quản lý cơ sở tạo và lưu nháp; chỉ **quản lý hệ thống** xuất lên Minvoice, đối chiếu hóa đơn "Không rõ" và sửa số. HĐQT chỉ xem.
+5. **Vận hành:**
+   - Hóa đơn điện tử đi qua API không chính thức của web Minvoice. Nếu Minvoice đổi giao diện web, việc xuất có thể hỏng: lỗi hiện trên hóa đơn (trạng thái "Lỗi") và nháp không mất.
+   - Hóa đơn "Không rõ" nghĩa là không biết Minvoice đã tạo hay chưa (mất kết nối sau khi gửi, hoặc backend khởi động lại khi đang gửi). Hệ thống không bao giờ tự gửi lại: quản lý hệ thống mở Minvoice xem rồi chọn **Đã có — nhập số** hoặc **Chưa có — gửi lại**. Nút **Kiểm tra lại** tìm hóa đơn theo mã đối chiếu `K502-<số>` trên Minvoice: chỉ tự ghi số khi chính dòng hóa đơn tìm được hiện đúng mã đó; thấy một hóa đơn mà dòng không có mã thì chỉ gợi ý số trong thông báo. Việc tự gửi lại khi không thấy gì đang tắt (`MARKER_SEARCH_CONFIRMED = false` trong `minvoice-client.ts`) cho đến khi kiểm tra với Minvoice thật.
+   - "Xóa dữ liệu" của HĐQT giờ xóa cả hóa đơn điện tử của phạm vi đã chọn trong database (không xóa gì trên Minvoice); cấu hình đăng nhập Minvoice của cơ sở được giữ lại.
+
 ## 7. Xử lý sự cố
 
 | Hiện tượng | Nguyên nhân / cách xử lý |
 |------------|--------------------------|
 | `backend` liên tục `Restarting` | `docker compose logs backend`. Thường là lỗi migration hoặc sai mật khẩu DB. |
 | `password authentication failed for user` | Đã đổi `POSTGRES_PASSWORD` sau khi `data/postgres` được tạo. PostgreSQL chỉ đọc biến này lần đầu. Đổi lại giá trị cũ, hoặc vào psql chạy `ALTER USER karaoke_user PASSWORD '<mới>';`. |
-| `docker compose up` báo thiếu `POSTGRES_PASSWORD` / `JWT_SECRET` | Chưa có file `.env` cạnh `docker-compose.yml`, hoặc thiếu biến. |
+| `docker compose up` báo thiếu `POSTGRES_PASSWORD` / `JWT_SECRET` / `EINVOICE_SECRET` | Chưa có file `.env` cạnh `docker-compose.yml`, hoặc thiếu biến. `EINVOICE_SECRET` mới có từ bản 6.18: tạo bằng `openssl rand -base64 32`. |
+| Trang Hóa đơn điện tử báo "Không kết nối được Minvoice" | Máy chủ không gọi ra được `*.minvoice.net` (DNS, tường lửa) hoặc Minvoice đang lỗi. Thử lại sau; nháp không mất. Kiểm tra mục 6.18 điểm 3. |
+| Hóa đơn điện tử báo "cần đăng nhập Minvoice lại" | Mật khẩu Minvoice đã đổi, MST của cơ sở đã đổi, hoặc `EINVOICE_SECRET` đã đổi (không giải mã được mật khẩu đã lưu). Quản lý hệ thống đăng nhập lại ở khung Minvoice của trang. |
 | Đăng nhập được nhưng tải lại trang là bị đăng xuất | `COOKIE_SECURE=true` trong khi đang truy cập bằng `http://`. |
 | "Đăng nhập sai quá nhiều lần. Vui lòng thử lại sau … phút." | Tên đăng nhập bị khoá tạm vì sai mật khẩu 5 lần. Chờ hết thời gian, hoặc `docker compose restart backend` để mở khoá ngay. |
 | Nginx báo `502 Bad Gateway` | Container `frontend` chưa chạy, hoặc `proxy_pass` khác cổng `APP_PORT`. |

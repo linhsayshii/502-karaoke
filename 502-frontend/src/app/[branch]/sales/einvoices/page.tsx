@@ -5,11 +5,14 @@ import { FileCheck2Icon } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { EmptyState } from "@/components/data-states";
+import { BillEinvoicesPanel } from "@/components/einvoices/bill-einvoices-panel";
 import { BillPickerDialog } from "@/components/einvoices/bill-picker-dialog";
 import { EinvoiceConfigCard } from "@/components/einvoices/einvoice-config-card";
 import { EinvoiceList } from "@/components/einvoices/einvoice-list";
 import { PageHeader } from "@/components/layout/page-header";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useApiData } from "@/hooks/use-api-data";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useBranchCode } from "@/lib/branch";
 import { can } from "@/lib/permissions";
 import type { EinvoiceConfigView } from "@/lib/types";
@@ -30,10 +33,12 @@ export default function EinvoicesPage() {
     "Không thể tải cấu hình Minvoice",
   );
   const [selected, setSelected] = useState<EinvoiceSelection | null>(null);
+  // Bumped by every switch through select(): the panel is keyed by it, so a
+  // click on another invoice of the bill that is open reopens it there.
+  const [nonce, setNonce] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
-  // Bumped after a save or an issue so the list and its counts reload (the
-  // setter comes with the panel that reports the changes).
-  const [listVersion] = useState(0);
+  // Bumped after a save, a delete or an issue so the list and its counts reload.
+  const [listVersion, setListVersion] = useState(0);
   // Unsaved edits in the panel. Closing or reloading the tab asks through
   // beforeunload, and so does switching bill or invoice inside the page through
   // select(); leaving through the sidebar is not guarded.
@@ -47,6 +52,10 @@ export default function EinvoicesPage() {
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
+  const show = (next: EinvoiceSelection | null) => {
+    setSelected(next);
+    setNonce((n) => n + 1);
+  };
   // Every switch of bill or invoice (the list, the picker) goes through here:
   // unsaved edits ask first, and choosing the invoice that is open changes nothing.
   const select = (next: EinvoiceSelection | null) => {
@@ -58,8 +67,27 @@ export default function EinvoicesPage() {
       next.einvoiceId === selected.einvoiceId;
     if (same) return;
     if (dirty) setPending(next);
-    else setSelected(next);
+    else show(next);
   };
+
+  const isMobile = useIsMobile();
+  const changed = () => {
+    setListVersion((v) => v + 1);
+    config.reload();
+  };
+  const panel = selected && (
+    <BillEinvoicesPanel
+      key={`${selected.orderId}:${nonce}`}
+      orderId={selected.orderId}
+      initialEinvoiceId={selected.einvoiceId}
+      config={config.data}
+      onChanged={changed}
+      onDirtyChange={setDirty}
+      // The panel's own tabs switch invoices without a remount; the page only
+      // follows, so the list marks the invoice shown.
+      onActiveChange={(einvoiceId) => setSelected((s) => s && { ...s, einvoiceId })}
+    />
+  );
 
   return (
     <>
@@ -76,14 +104,30 @@ export default function EinvoicesPage() {
             onSelect={(orderId, einvoiceId) => select({ orderId, einvoiceId })}
             onCreate={() => setPickerOpen(true)}
           />
-          <EmptyState
-            icon={FileCheck2Icon}
-            title={selected ? `Bill #${selected.orderId}` : "Chọn một hóa đơn"}
-            description={can(user, "einvoices.write") ? "Hoặc bấm Tạo HĐĐT mới để chia một bill." : undefined}
-            className="rounded-xl border"
-          />
+          {!isMobile &&
+            (panel ?? (
+              <EmptyState
+                icon={FileCheck2Icon}
+                title="Chọn một hóa đơn"
+                description={can(user, "einvoices.write") ? "Hoặc bấm Tạo HĐĐT mới để chia một bill." : undefined}
+                className="rounded-xl border"
+              />
+            ))}
         </div>
       </div>
+      {isMobile && (
+        <Sheet open={!!selected} onOpenChange={(value) => !value && select(null)}>
+          {/* The panel scrolls under a fixed title row, which keeps the close
+              button clear of the panel's header. */}
+          <SheetContent side="bottom" className="h-[100dvh] gap-0 p-0">
+            <SheetHeader className="border-b py-3 pr-12">
+              <SheetTitle>Hóa đơn điện tử của bill</SheetTitle>
+              <SheetDescription className="sr-only">Sửa, lưu nháp và xuất các hóa đơn nhỏ của bill</SheetDescription>
+            </SheetHeader>
+            <div className="min-h-0 flex-1 overflow-y-auto p-2">{panel}</div>
+          </SheetContent>
+        </Sheet>
+      )}
       <BillPickerDialog
         open={pickerOpen}
         onOpenChange={setPickerOpen}
@@ -101,7 +145,7 @@ export default function EinvoicesPage() {
         destructive
         onConfirm={() => {
           setDirty(false);
-          setSelected(pending ?? null);
+          show(pending ?? null);
           setPending(undefined);
         }}
       />

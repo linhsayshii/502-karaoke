@@ -451,9 +451,9 @@ Trong cùng một ký hiệu, hóa đơn mới không được mang ngày sớm 
 
 ## 12. Việc cần xác minh với Minvoice thật
 
-Mỗi bước cần người dùng cho phép riêng.
+Người dùng đã cho phép làm các bước dưới đây mà không hỏi lại (01/10/2026). Riêng mật khẩu Minvoice thì người dùng tự gõ; agent không nhập. Dữ liệu kiểm tra: MST `0107811836`, ký hiệu `1C26MTT`, tài khoản `admin`.
 
-**Bước 0** (trước khi code, **chỉ đọc**, tenant `0108963990`):
+**Bước 0** (trước khi code, **chỉ đọc**, tenant `0107811836`):
 1. Tìm API danh sách hoặc tìm hóa đơn (ví dụ `GET /api/api/app/invoice?…` theo quy ước của ABP) trong bundle JavaScript của web app Minvoice.
 2. Xác định một trường của payload mà Minvoice lưu lại và tìm được, để chứa `K502-<id>`. Ứng viên là `orderNumber`.
 3. Ghi lại mẫu thông báo lỗi khi ngày hóa đơn sớm hơn hóa đơn mới nhất, nếu tìm được trong bundle.

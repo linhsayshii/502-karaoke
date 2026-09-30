@@ -19,6 +19,7 @@ import { DataPurgeModule } from './data-purge/data-purge.module';
 import { PrModule } from './pr/pr.module';
 import { DiscountsModule } from './discounts/discounts.module';
 import { LiveModule } from './live/live.module';
+import { EinvoiceModule } from './einvoice/einvoice.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { LiveModule } from './live/live.module';
     DataPurgeModule,
     PrModule,
     DiscountsModule,
+    EinvoiceModule,
     LiveModule,
   ],
   controllers: [AppController],

@@ -124,6 +124,12 @@ describe('MinvoiceClient', () => {
     await expect(
       client.createInvoice('0107811836', session, {}),
     ).rejects.toBeInstanceOf(MinvoiceHttpError);
+    // A 2xx may mean Minvoice committed the invoice: a body that is neither
+    // JSON nor a page (cut short) is an unknown outcome, never a refusal.
+    replies.push(reply('{"id":"inv-1","invoiceNu', 200));
+    await expect(
+      client.createInvoice('0107811836', session, {}),
+    ).rejects.toBeInstanceOf(MinvoiceUnexpectedResponse);
     replies.push(
       Object.assign(new TypeError('fetch failed'), {
         cause: { code: 'ECONNREFUSED' },

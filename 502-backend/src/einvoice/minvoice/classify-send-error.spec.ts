@@ -94,6 +94,49 @@ describe('classifySendError (spec §9.1)', () => {
     expect(classifySendError(httpCode('29504')).kind).toBe('retry');
   });
 
+  it('does not resend a 5xx that is not an ABP error: the invoice may exist', () => {
+    // A gateway page or an empty body says nothing about what Minvoice did.
+    const raw = (status: number, body: string) =>
+      new MinvoiceHttpError(status, body, `HTTP ${status}`);
+    expect(
+      classifySendError(raw(502, '<html><body>Bad gateway</body></html>')).kind,
+    ).toBe('uncertain');
+    expect(
+      classifySendError(raw(504, '<html>Gateway Time-out</html>')).kind,
+    ).toBe('uncertain');
+    expect(classifySendError(raw(520, '<html>Unknown error</html>')).kind).toBe(
+      'uncertain',
+    );
+    expect(classifySendError(raw(500, '')).kind).toBe('uncertain');
+    expect(classifySendError(raw(503, '{"message":"busy"}')).kind).toBe(
+      'uncertain',
+    );
+  });
+
+  it('resends what Minvoice answered with an ABP error or below 500', () => {
+    const raw = (status: number, body: string) =>
+      new MinvoiceHttpError(status, body, `HTTP ${status}`);
+    expect(
+      classifySendError(raw(500, '{"error":{"message":"Internal error"}}'))
+        .kind,
+    ).toBe('retry');
+    expect(classifySendError(raw(404, '<html>Not found</html>')).kind).toBe(
+      'retry',
+    );
+    expect(classifySendError(raw(302, '')).kind).toBe('retry');
+    // The login page served instead of the API, with a 200.
+    expect(classifySendError(raw(200, '<html>login</html>')).kind).toBe(
+      'retry',
+    );
+  });
+
+  it('keeps the date-order check first on a 5xx', () => {
+    const failure = classifySendError(
+      new MinvoiceHttpError(500, '{"error":{"code":"296"}}', 'HTTP 500'),
+    );
+    expect(failure.kind).toBe('date-order');
+  });
+
   it('marks as uncertain what may have been created', () => {
     expect(
       classifySendError(new MinvoiceNetworkError(true, 'timeout')).kind,

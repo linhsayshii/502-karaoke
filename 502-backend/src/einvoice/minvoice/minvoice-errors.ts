@@ -77,6 +77,13 @@ export function minvoiceMessage(body: string): string {
     .slice(0, 300);
 }
 
+// Whether the body is an ABP error ({error: {...}}): Minvoice's own answer to a
+// request it refused, as opposed to a gateway page or an empty body.
+export function isAbpError(body: string): boolean {
+  const error = parseBody(body)?.error;
+  return typeof error === 'object' && error !== null;
+}
+
 // `error.code` of an ABP error body ("296" for ErrorCode-296: the Minvoice web
 // shows its own text for that code), as a string, or null when there is none.
 export function minvoiceErrorCode(body: string): string | null {

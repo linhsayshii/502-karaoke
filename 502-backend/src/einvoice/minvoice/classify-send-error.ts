@@ -1,6 +1,7 @@
 import {
   MinvoiceHttpError,
   MinvoiceNetworkError,
+  isAbpError,
   minvoiceErrorCode,
   minvoiceJsonMessage,
   minvoiceMessage,
@@ -11,7 +12,8 @@ import {
 //   symbol's range again and resend once (the user's rule);
 // - date-order: dated before the newest invoice of the symbol: resending
 //   cannot help;
-// - uncertain: it may have been created: never resend blindly.
+// - uncertain: it may have been created (no answer, a 2xx without the
+//   invoice, a gateway 5xx): never resend blindly.
 export type SendFailure = {
   kind: 'retry' | 'date-order' | 'uncertain';
   message: string;
@@ -44,6 +46,12 @@ export function classifySendError(error: unknown): SendFailure {
     const text = minvoiceMessage(error.body);
     if (DATE_ORDER_PATTERNS.some((pattern) => pattern.test(text))) {
       return { kind: 'date-order', message: text };
+    }
+    // A gateway page or an empty 5xx may come from a request that Minvoice
+    // went on to commit (a proxy cut the answer): only an ABP error body, or
+    // a status below 500, shows Minvoice refused it.
+    if (error.status >= 500 && !isAbpError(error.body)) {
+      return { kind: 'uncertain', message: error.message };
     }
     return { kind: 'retry', message: error.message };
   }

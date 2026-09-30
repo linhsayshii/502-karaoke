@@ -305,10 +305,18 @@ export class MinvoiceClient {
     try {
       return body ? (JSON.parse(body) as unknown) : null;
     } catch {
-      throw new MinvoiceHttpError(
-        response.status,
-        body.slice(0, 2000),
-        'Minvoice trả về trang web thay vì dữ liệu (phiên đăng nhập có thể đã hết)',
+      // Only a web page (the login page served instead of the API) is a
+      // refusal. Any other 2xx body that cannot be read may belong to an
+      // invoice Minvoice committed, e.g. a JSON answer cut short: unknown.
+      if (/^\s*</.test(body)) {
+        throw new MinvoiceHttpError(
+          response.status,
+          body.slice(0, 2000),
+          'Minvoice trả về trang web thay vì dữ liệu (phiên đăng nhập có thể đã hết)',
+        );
+      }
+      throw new MinvoiceUnexpectedResponse(
+        'Minvoice trả về dữ liệu không đọc được',
       );
     }
   }

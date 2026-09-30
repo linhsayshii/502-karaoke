@@ -137,7 +137,7 @@ export function EinvoiceConfigCard({
             onLogin={login}
           />
           <Select
-            value={config.registerInvoiceId ?? undefined}
+            value={config.registerInvoiceId ?? ""}
             onValueChange={selectSymbol}
             disabled={!symbols || savingSymbol || config.needsLogin}
           >
@@ -174,6 +174,8 @@ export function EinvoiceConfigCard({
 // Username + password + Đăng nhập. Keyed by the saved username, so the box
 // starts from it without an effect; the password is never filled in, is only
 // held in this state while typing and is cleared after a successful login.
+// The password box says "new-password" because Chrome ignores "off" there and
+// could fill in the Karaoke 502 login, which would burn Minvoice login attempts.
 function LoginForm({
   taxCode,
   initialUsername,
@@ -207,7 +209,7 @@ function LoginForm({
         aria-label="Mật khẩu Minvoice"
         type="password"
         placeholder="Mật khẩu"
-        autoComplete="off"
+        autoComplete="new-password"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
         className="w-full @lg/main:w-40"

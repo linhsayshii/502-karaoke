@@ -46,7 +46,7 @@ npm run lint               # eslint --fix
 npm test                   # unit tests (*.spec.ts under src/)
 npx jest src/orders/billing.spec.ts   # single test file
 npx jest -t "test name"               # single test by name
-npm run test:e2e           # test/{foundation,reports,costing,board,pr,approvals}.e2e-spec.ts --runInBand; resets the DB in test/e2e.env (karaoke_test)
+npm run test:e2e           # test/{foundation,reports,costing,board,pr,approvals,live}.e2e-spec.ts --runInBand; resets the DB in test/e2e.env (karaoke_test)
 npx prisma migrate dev --name <name>  # after editing prisma/schema.prisma
 npx prisma migrate deploy             # production
 node test/load/bench.mjs load <from> <to>  # load test (10 cashiers + 10 report downloads, STAFF=n floor-staff phones) on test/load/generate.sql data; setup in docs/resource-rules.md §6

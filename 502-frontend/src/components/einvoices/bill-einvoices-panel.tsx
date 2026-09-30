@@ -7,9 +7,12 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { EmptyState } from "@/components/data-states";
 import type { BuyerValue } from "@/components/einvoices/buyer-fields";
 import { EinvoiceEditor } from "@/components/einvoices/einvoice-editor";
+import { IssuedView } from "@/components/einvoices/issued-view";
+import { UncertainBox } from "@/components/einvoices/uncertain-box";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useApiData } from "@/hooks/use-api-data";
 import { billLabel, formatDateTime, formatMoney } from "@/lib/format";
@@ -136,7 +139,10 @@ export function BillEinvoicesPanel({
             Tổng {formatMoney(order.finalAmount)} (VAT {formatMoney(order.taxAmount)})
           </div>
           <div className="text-muted-foreground">
-            Đã chia {formatMoney(allocated)} · Còn {formatMoney(billTotal - allocated)}
+            Đã chia {formatMoney(allocated)} ·{" "}
+            {allocated > billTotal
+              ? `Vượt ${formatMoney(allocated - billTotal)}`
+              : `Còn ${formatMoney(billTotal - allocated)}`}
           </div>
         </div>
       </div>
@@ -156,7 +162,13 @@ export function BillEinvoicesPanel({
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Tabs value={String(activeId)} onValueChange={(value) => choose(value === "new" ? "new" : Number(value))}>
+        {/* Manual: arrow keys only move the focus, so a key press never opens
+            the "bỏ thay đổi chưa lưu" question. */}
+        <Tabs
+          value={String(activeId)}
+          activationMode="manual"
+          onValueChange={(value) => choose(value === "new" ? "new" : Number(value))}
+        >
           {/* The list's own h-9 is set for the horizontal orientation, so the override carries the same variant. */}
           <TabsList className="max-w-full flex-wrap justify-start group-data-[orientation=horizontal]/tabs:h-auto">
             {einvoices.map((einvoice, i) => {
@@ -192,10 +204,26 @@ export function BillEinvoicesPanel({
         ) : (
           <EmptyState icon={FileCheck2Icon} title="Hóa đơn không còn" description="Chọn một hóa đơn khác của bill." />
         )
-      ) : active && active.status !== "DRAFT" ? (
-        <p className="text-sm text-muted-foreground">
-          Hóa đơn {active.status === "ISSUED" ? "đã xuất" : "đang chờ đối chiếu"}.
-        </p>
+      ) : active?.status === "ISSUED" ? (
+        <IssuedView einvoice={active} onChanged={(row) => afterWrite(row.id)} />
+      ) : active?.status === "UNCERTAIN" ? (
+        <UncertainBox
+          einvoice={active}
+          config={config}
+          billCompleted={order.status === "COMPLETED"}
+          busy={loading}
+          onChanged={(row) => afterWrite(row.id)}
+        />
+      ) : active?.status === "SENDING" ? (
+        // The server turns a send that never answered into "Không rõ" when the
+        // bill is read, so a reload is all this row ever needs.
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          <Spinner data-icon="inline-start" />
+          Đang gửi lên Minvoice…
+          <Button size="sm" variant="ghost" disabled={loading} onClick={reload}>
+            Tải lại
+          </Button>
+        </div>
       ) : (
         <EinvoiceEditor
           // A save changes updatedAt, so the editor restarts from the saved row
@@ -208,6 +236,7 @@ export function BillEinvoicesPanel({
           onSaved={(row) => afterWrite(row.id)}
           onDeleted={deleted}
           onDirtyChange={handleDirty}
+          busy={loading}
         />
       )}
 

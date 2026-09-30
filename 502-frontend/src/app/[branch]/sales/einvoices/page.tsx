@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FileCheck2Icon } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -52,9 +52,23 @@ export default function EinvoicesPage() {
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
+  // The panel sits beside the list from @4xl/main up and under it below that
+  // (the list can be long): there a pick must bring the panel into view.
+  const gridRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const scrollToPanel = () => {
+    const list = gridRef.current?.firstElementChild;
+    const panelBox = panelRef.current;
+    if (!list || !panelBox) return;
+    const stacked = panelBox.getBoundingClientRect().top > list.getBoundingClientRect().top + 1;
+    if (stacked) panelBox.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   const show = (next: EinvoiceSelection | null) => {
     setSelected(next);
     setNonce((n) => n + 1);
+    // After the render that follows, so a panel opened now is in place.
+    if (next) requestAnimationFrame(scrollToPanel);
   };
   // Every switch of bill or invoice (the list, the picker) goes through here:
   // unsaved edits ask first, and choosing the invoice that is open changes nothing.
@@ -97,22 +111,25 @@ export default function EinvoicesPage() {
       />
       <div className="flex flex-col gap-4">
         <EinvoiceConfigCard config={config.data} loading={config.loading} onChanged={config.reload} />
-        <div className="grid items-start gap-4 @4xl/main:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+        <div ref={gridRef} className="grid items-start gap-4 @4xl/main:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
           <EinvoiceList
             version={listVersion}
             selectedId={selected && selected.einvoiceId !== "new" ? selected.einvoiceId : null}
             onSelect={(orderId, einvoiceId) => select({ orderId, einvoiceId })}
             onCreate={() => setPickerOpen(true)}
           />
-          {!isMobile &&
-            (panel ?? (
-              <EmptyState
-                icon={FileCheck2Icon}
-                title="Chọn một hóa đơn"
-                description={can(user, "einvoices.write") ? "Hoặc bấm Tạo HĐĐT mới để chia một bill." : undefined}
-                className="rounded-xl border"
-              />
-            ))}
+          {!isMobile && (
+            <div ref={panelRef} className="min-w-0 scroll-mt-[calc(var(--header-height)+1rem)]">
+              {panel ?? (
+                <EmptyState
+                  icon={FileCheck2Icon}
+                  title="Chọn một hóa đơn"
+                  description={can(user, "einvoices.write") ? "Hoặc bấm Tạo HĐĐT mới để chia một bill." : undefined}
+                  className="rounded-xl border"
+                />
+              )}
+            </div>
+          )}
         </div>
       </div>
       {isMobile && (

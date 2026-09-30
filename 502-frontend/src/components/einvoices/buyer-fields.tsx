@@ -64,7 +64,6 @@ export function BuyerFields({
             <FieldLabel htmlFor="buyer-tax-code">MST</FieldLabel>
             <Input
               id="buyer-tax-code"
-              inputMode="numeric"
               maxLength={14}
               value={value.buyerTaxCode}
               disabled={locked}
@@ -91,7 +90,15 @@ export function BuyerFields({
               disabled={locked}
               onClick={() => {
                 setFound(null);
-                onChange(previous);
+                // An issued invoice keeps no draft, so its address and email
+                // come empty: an empty source field must not blank what is
+                // typed here.
+                onChange({
+                  buyerTaxCode: previous.buyerTaxCode || value.buyerTaxCode,
+                  buyerName: previous.buyerName || value.buyerName,
+                  buyerAddress: previous.buyerAddress || value.buyerAddress,
+                  buyerEmail: previous.buyerEmail || value.buyerEmail,
+                });
               }}
             >
               <CopyIcon data-icon="inline-start" />

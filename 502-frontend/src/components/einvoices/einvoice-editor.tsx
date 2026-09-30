@@ -6,6 +6,7 @@ import { useAuth } from "@/components/auth-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { BuyerFields, type BuyerValue } from "@/components/einvoices/buyer-fields";
 import { EinvoiceLines } from "@/components/einvoices/einvoice-lines";
+import { IssueControls } from "@/components/einvoices/issue-controls";
 import { MoneyInput } from "@/components/einvoices/number-input";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -50,7 +51,7 @@ export function EinvoiceEditor({
   onSaved,
   onDeleted,
   onDirtyChange,
-  actions,
+  busy,
 }: {
   bill: EinvoiceBillDetail["order"];
   einvoice: EinvoiceDetail | null;
@@ -59,8 +60,9 @@ export function EinvoiceEditor({
   onSaved: (row: EinvoiceDetail) => void;
   onDeleted: (id: number | null) => void;
   onDirtyChange: (dirty: boolean) => void;
-  // Task 15: the issue controls, given the problem that blocks issuing.
-  actions?: (state: { dirty: boolean; problem: string | null }) => React.ReactNode;
+  // The panel is reloading after a write: the editor still shows the old row,
+  // so saving or issuing it again waits for the new one.
+  busy: boolean;
 }) {
   const { user } = useAuth();
   const notify = useNotify();
@@ -68,6 +70,8 @@ export function EinvoiceEditor({
   // A voided bill takes no new or changed invoice (the server refuses to
   // issue it), but its drafts can still be deleted so they leave the Nháp tab.
   const canEdit = canWrite && bill.status === "COMPLETED";
+  // The same goes for issuing: the chain manager, on a bill that stands.
+  const canIssue = can(user, "einvoices.issue") && bill.status === "COMPLETED";
   const saved = useMemo(() => formOf(einvoice), [einvoice]);
   const [form, setForm] = useState<FormState>(saved);
   const [saving, setSaving] = useState(false);
@@ -81,7 +85,6 @@ export function EinvoiceEditor({
   const totals = totalsOf(form.lines);
   const missing = (form.amount ?? 0) - totals.total;
   const problem = form.amount ? issueProblem(form.amount, form.lines) : "Nhập số tiền của hóa đơn";
-  void config;
 
   const body = () => ({
     amount: form.amount,
@@ -179,7 +182,7 @@ export function EinvoiceEditor({
       {problem && (form.amount === null || missing === 0) && <p className="text-sm text-destructive">{problem}</p>}
       <div className="flex flex-wrap items-center gap-2">
         {canEdit && (
-          <Button onClick={save} disabled={saving || !dirty}>
+          <Button onClick={save} disabled={saving || busy || !dirty}>
             {saving && <Spinner data-icon="inline-start" />}
             Lưu nháp
           </Button>
@@ -196,7 +199,15 @@ export function EinvoiceEditor({
               </Button>
             )}
         {dirty && <span className="text-sm text-muted-foreground">Có thay đổi chưa lưu</span>}
-        {einvoice && actions?.({ dirty, problem })}
+        {einvoice && canIssue && (
+          <IssueControls
+            einvoice={einvoice}
+            config={config}
+            problem={dirty ? "Lưu nháp trước khi xuất" : problem}
+            busy={busy}
+            onIssued={onSaved}
+          />
+        )}
       </div>
       <ConfirmDialog
         open={deleteOpen}

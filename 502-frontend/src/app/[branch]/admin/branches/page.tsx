@@ -257,7 +257,6 @@ export default function BranchesPage() {
                 <FieldLabel htmlFor="branch-tax-code">Mã số thuế</FieldLabel>
                 <Input
                   id="branch-tax-code"
-                  inputMode="numeric"
                   placeholder="vd: 0107811836"
                   value={form.taxCode}
                   aria-invalid={taxCodeInvalid || undefined}

@@ -92,6 +92,11 @@ function BillDetail({ orderId, onChanged }: { orderId: number; onChanged: () => 
   };
 
   const minutes = order?.endTime ? minutesBetween(order.startTime, new Date(order.endTime)) : 0;
+  // Voiding or correcting a bill never touches its e-invoices on Minvoice.
+  const einvoiceCount = order?._count?.einvoices ?? 0;
+  const einvoiceNote = einvoiceCount
+    ? `Bill có ${einvoiceCount} hóa đơn điện tử (${order?.einvoices?.length ?? 0} đã xuất).`
+    : null;
 
   return (
     <>
@@ -201,8 +206,10 @@ function BillDetail({ orderId, onChanged }: { orderId: number; onChanged: () => 
           order={order}
           open={editOpen}
           onOpenChange={setEditOpen}
+          warning={einvoiceNote && `${einvoiceNote} Sửa bill không sửa hóa đơn trên Minvoice.`}
           onSaved={(saved) => {
-            setOrder(saved);
+            // The correction's answer carries neither e-invoice field.
+            setOrder((prev) => ({ ...saved, _count: prev?._count, einvoices: prev?.einvoices }));
             onChanged();
           }}
         />
@@ -212,7 +219,14 @@ function BillDetail({ orderId, onChanged }: { orderId: number; onChanged: () => 
         open={voidOpen}
         onOpenChange={setVoidOpen}
         title={`Hủy hóa đơn ${order ? billLabel(order) : ""}?`}
-        description={`Hàng đã bán được hoàn lại kho, phiếu thu ${formatMoney(order?.finalAmount)} bị hủy và doanh thu giảm tương ứng. Hóa đơn vẫn được lưu để đối chiếu.`}
+        description={
+          <>
+            {`Hàng đã bán được hoàn lại kho, phiếu thu ${formatMoney(order?.finalAmount)} bị hủy và doanh thu giảm tương ứng. Hóa đơn vẫn được lưu để đối chiếu.`}
+            {einvoiceNote && (
+              <span className="mt-2 block text-warning">{`${einvoiceNote} Hủy bill không hủy hóa đơn trên Minvoice.`}</span>
+            )}
+          </>
+        }
         confirmLabel="Hủy hóa đơn"
         onConfirm={voidBill}
       />

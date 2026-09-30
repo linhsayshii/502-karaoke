@@ -137,13 +137,23 @@ const messageOf = (error: unknown) =>
 // Our reference on Minvoice (spec §6.2).
 const markerOf = (id: number) => `K502-${id}`;
 
-// What a recheck adds to an outcome: the date Minvoice shows for an invoice
-// found by our reference, or the start of the lost send to keep on a row
-// left uncertain.
+// What a recheck adds to an outcome.
 interface OutcomeExtra {
+  // Set only for an invoice found by our reference (not sent): its date on
+  // Minvoice. A number clash then leaves the row uncertain.
   foundDate?: string;
+  // The start of the lost send, kept on a row left uncertain.
   sendingAt?: Date | null;
 }
+
+// A number found by our reference that one of our rows already holds: our
+// database and the search disagree.
+const foundNumberTaken = (
+  invoiceNumber: number,
+  marker: string,
+  holderId: number | null,
+) =>
+  `Số ${invoiceNumber} mà Minvoice trả về cho ${marker} đã có ở hóa đơn #${holderId ?? '?'}; ${MANUAL_CHECK}`;
 
 // The header of a send, written at the lock (global constraints, decision 5).
 function sentHeader(ready: IssueConfig, dto: IssueEinvoiceDto) {
@@ -524,11 +534,12 @@ export class EinvoicesService implements OnApplicationBootstrap {
 
   // Spec §9.2: a send whose answer was lost is looked up by our reference
   // before anything goes out again, as a duplicate tax invoice must never be
-  // made. Only a sure answer moves it on: found -> issued with Minvoice's
-  // number; nothing found -> sent again, but only once MARKER_SEARCH_CONFIRMED
-  // shows Minvoice filters by the reference and the lost send started at
-  // least STALE_SENDING_MS ago. Anything else leaves it uncertain for a
-  // manual check.
+  // made. Only a sure answer moves it on: found (its row shows our
+  // reference, or MARKER_SEARCH_CONFIRMED shows Minvoice filters by it) with
+  // a number none of our rows holds -> issued with that number; nothing
+  // found -> sent again, only when confirmed too and the lost send started at
+  // least STALE_SENDING_MS ago. Anything else leaves it uncertain, draft
+  // kept, for a manual check.
   private async recheck(
     user: AuthUser,
     id: number,
@@ -583,6 +594,24 @@ export class EinvoicesService implements OnApplicationBootstrap {
       );
     }
     if (result.kind === 'found') {
+      // The web app's list does not show orderNumber: a row that does not
+      // is ours only if Minvoice filtered by it (MARKER_SEARCH_CONFIRMED).
+      if (!result.markerSeen && !this.markerSearchConfirmed) {
+        return uncertain(
+          `Có thể là hóa đơn số ${result.invoiceNumber} ngày ${dmy(result.invoiceDate)} trên Minvoice (chưa chắc Minvoice lọc theo mã ${marker}); ${MANUAL_CHECK}`,
+        );
+      }
+      const holder = await this.numberHolder(
+        sellerTaxCode,
+        symbolCode,
+        result.invoiceNumber,
+        id,
+      );
+      if (holder !== null) {
+        return uncertain(
+          foundNumberTaken(result.invoiceNumber, marker, holder),
+        );
+      }
       // Recorded under the header it was sent with, not the current config.
       return this.record(
         user,
@@ -600,7 +629,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
             registerInvoiceId,
           },
         },
-        { foundDate: result.invoiceDate },
+        { foundDate: result.invoiceDate, sendingAt: row.sendingAt },
       );
     }
     if (result.kind === 'ambiguous') {
@@ -629,7 +658,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
     // the header of this request.
     await this.prisma.einvoice.update({
       where: { id },
-      data: sentHeader(ready, dto),
+      data: { ...sentHeader(ready, dto), sendingAt: new Date() },
     });
     await this.send(user, id, ready, row, draft, dto);
   }
@@ -925,25 +954,55 @@ export class EinvoicesService implements OnApplicationBootstrap {
       });
     } catch (error) {
       if (!isUniqueViolation(error)) throw error;
-      const holder = await this.prisma.einvoice.findFirst({
-        where: {
-          sellerTaxCode: outcome.config.taxCode,
-          symbolCode: outcome.config.symbolCode,
-          invoiceNumber: outcome.invoiceNumber,
-        },
-        select: { id: true },
-      });
+      const holder = await this.numberHolder(
+        outcome.config.taxCode,
+        outcome.config.symbolCode,
+        outcome.invoiceNumber,
+        id,
+      );
+      if (extra.foundDate) {
+        // Found by our reference: a clash is doubt, not a number to fix. The
+        // row keeps its draft for the manual check.
+        await this.prisma.einvoice.update({
+          where: { id },
+          data: {
+            status: EinvoiceStatus.UNCERTAIN,
+            lastError: errorText(
+              foundNumberTaken(outcome.invoiceNumber, markerOf(id), holder),
+            ),
+            ...(extra.sendingAt === undefined
+              ? {}
+              : { sendingAt: extra.sendingAt }),
+          },
+        });
+        return;
+      }
       await this.prisma.einvoice.update({
         where: { id },
         data: {
           ...header,
           invoiceNumber: null,
           lastError: errorText(
-            `Số ${outcome.invoiceNumber} trùng hóa đơn #${holder?.id ?? '?'}, kiểm tra và sửa số`,
+            `Số ${outcome.invoiceNumber} trùng hóa đơn #${holder ?? '?'}, kiểm tra và sửa số`,
           ),
         },
       });
     }
+  }
+
+  // The row other than `id` holding a number of a tenant + symbol (the
+  // unique (sellerTaxCode, symbolCode, invoiceNumber) index).
+  private async numberHolder(
+    sellerTaxCode: string,
+    symbolCode: string,
+    invoiceNumber: number,
+    id: number,
+  ) {
+    const row = await this.prisma.einvoice.findFirst({
+      where: { sellerTaxCode, symbolCode, invoiceNumber, id: { not: id } },
+      select: { id: true },
+    });
+    return row?.id ?? null;
   }
 
   private async numberTaken(

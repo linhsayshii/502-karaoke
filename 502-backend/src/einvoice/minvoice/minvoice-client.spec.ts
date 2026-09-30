@@ -237,11 +237,13 @@ describe('MinvoiceClient', () => {
     };
 
     it('asks the invoice list of the symbol for our reference', async () => {
+      // The real list does not show orderNumber: a candidate, not proof.
       await expect(find({ items: [row()], totalCount: 1 })).resolves.toEqual({
         kind: 'found',
         id: 'inv-9',
         invoiceNumber: 1009,
         invoiceDate: '2026-10-01',
+        markerSeen: false,
       });
       const url = new URL(calls[0].url);
       expect(url.pathname).toBe(SEARCH_PATH);
@@ -261,7 +263,11 @@ describe('MinvoiceClient', () => {
     it('takes a row that carries our reference, or none, and a digit number', async () => {
       await expect(
         find({ items: [row({ [SEARCH_PARAM]: 'K502-7' })] }),
-      ).resolves.toMatchObject({ kind: 'found', id: 'inv-9' });
+      ).resolves.toMatchObject({
+        kind: 'found',
+        id: 'inv-9',
+        markerSeen: true,
+      });
       await expect(
         find({ items: [row({ invoiceNumber: '1009' })], totalCount: 1 }),
       ).resolves.toMatchObject({ kind: 'found', invoiceNumber: 1009 });

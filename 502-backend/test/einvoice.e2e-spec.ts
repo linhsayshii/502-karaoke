@@ -656,16 +656,28 @@ describe('E-invoices (e2e)', () => {
       });
     });
 
-    it('finds an invoice created by a send whose answer was lost', async () => {
+    // A lost answer: the invoice exists on Minvoice under K502-<id>.
+    const lostAnswer = async () => {
       const id = await newDraft();
+      fake.behaviours = ['drop-after-create'];
+      expect(((await issue(id).expect(200)).body as Json).status).toBe(
+        'UNCERTAIN',
+      );
+      const created = fake.invoices.at(-1)!;
+      expect(created.orderNumber).toBe(`K502-${id}`);
+      return { id, created };
+    };
+    const dmy = (ymd: string) => ymd.split('-').reverse().join('/');
+
+    it('finds an invoice created by a send whose answer was lost', async () => {
+      const service = app.get(EinvoicesService);
+      const trusted = service.markerSearchConfirmed;
       try {
-        fake.behaviours = ['drop-after-create'];
-        expect(((await issue(id).expect(200)).body as Json).status).toBe(
-          'UNCERTAIN',
-        );
-        const created = fake.invoices.at(-1)!;
-        expect(created.orderNumber).toBe(`K502-${id}`);
+        const { id, created } = await lostAnswer();
         const posts = fake.posts;
+        // The fake's list, like the real one, does not show orderNumber: its
+        // single row counts once the filter is trusted.
+        service.markerSearchConfirmed = true;
         // A stale stored session: the search logs in again by itself.
         fake.expireSessions();
         const logins = fake.logins;
@@ -683,6 +695,67 @@ describe('E-invoices (e2e)', () => {
         expect(fake.posts).toBe(posts);
         expect(fake.logins).toBe(logins + 1);
       } finally {
+        service.markerSearchConfirmed = trusted;
+        fake.behaviours = [];
+      }
+    });
+
+    it('only points at the likely invoice while the filter is unconfirmed', async () => {
+      try {
+        const { id, created } = await lostAnswer();
+        const posts = fake.posts;
+        const body = (await issue(id).expect(200)).body as Json;
+        expect(body.status).toBe('UNCERTAIN');
+        expect(body.lastError).toBe(
+          `Có thể là hóa đơn số ${created.invoiceNumber as number} ngày ${dmy(today())} trên Minvoice (chưa chắc Minvoice lọc theo mã K502-${id}); kiểm tra trên Minvoice rồi đối chiếu bằng tay`,
+        );
+        expect((body.draft as Json).lines).toHaveLength(1);
+        expect(fake.posts).toBe(posts);
+        // The manual check confirms it.
+        const found = (
+          await as('admin')
+            .post(`/einvoices/${id}/resolve`, {
+              found: true,
+              invoiceNumber: created.invoiceNumber,
+            })
+            .expect(200)
+        ).body as Json;
+        expect(found).toMatchObject({
+          status: 'ISSUED',
+          invoiceNumber: created.invoiceNumber,
+        });
+      } finally {
+        fake.behaviours = [];
+      }
+    });
+
+    it('stays uncertain when the number found is already on one of ours', async () => {
+      const service = app.get(EinvoicesService);
+      const trusted = service.markerSearchConfirmed;
+      try {
+        const { id, created } = await lostAnswer();
+        // An issued invoice whose number was fixed by hand to that one.
+        await as('admin')
+          .patch(`/einvoices/${draftId}/number`, {
+            invoiceNumber: created.invoiceNumber,
+          })
+          .expect(200);
+        service.markerSearchConfirmed = true;
+        const posts = fake.posts;
+        const body = (await issue(id).expect(200)).body as Json;
+        expect(body).toMatchObject({
+          status: 'UNCERTAIN',
+          invoiceNumber: null,
+          lastError: `Số ${created.invoiceNumber as number} mà Minvoice trả về cho K502-${id} đã có ở hóa đơn #${draftId}; kiểm tra trên Minvoice rồi đối chiếu bằng tay`,
+        });
+        expect((body.draft as Json).lines).toHaveLength(1);
+        expect(fake.posts).toBe(posts);
+        await as('admin')
+          .post(`/einvoices/${id}/resolve`, { found: false })
+          .expect(200);
+        await as('tn1_cs1').delete(`/einvoices/${id}`).expect(200);
+      } finally {
+        service.markerSearchConfirmed = trusted;
         fake.behaviours = [];
       }
     });

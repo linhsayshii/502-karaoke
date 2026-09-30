@@ -235,6 +235,8 @@ describe('EinvoicesService.issue of an uncertain invoice', () => {
       ...sent,
       ...fields,
     });
+    // No other row holds the number found.
+    context.einvoice.findFirst.mockResolvedValue(null);
     return context;
   };
   const writes = (einvoice: ReturnType<typeof setup>['einvoice']) =>
@@ -250,6 +252,7 @@ describe('EinvoicesService.issue of an uncertain invoice', () => {
       id: 'inv-2001',
       invoiceNumber: 2001,
       invoiceDate: sentDate,
+      markerSeen: true,
     });
     await service.issue(user, 12, dto);
 
@@ -271,6 +274,16 @@ describe('EinvoicesService.issue of an uncertain invoice', () => {
       marker: 'K502-12',
     });
     expect(sender.send).not.toHaveBeenCalled();
+    // (sellerTaxCode, symbolCode, invoiceNumber) is unique: an index lookup.
+    expect(einvoice.findFirst).toHaveBeenCalledWith({
+      where: {
+        sellerTaxCode: ready.taxCode,
+        symbolCode: sentSymbol,
+        invoiceNumber: 2001,
+        id: { not: 12 },
+      },
+      select: { id: true },
+    });
     expect(writes(einvoice)).toEqual([
       expect.objectContaining({
         status: 'ISSUED',
@@ -285,6 +298,80 @@ describe('EinvoicesService.issue of an uncertain invoice', () => {
         sendingAt: null,
       }),
     ]);
+  });
+
+  // The web app's list does not show orderNumber: a single row is ours only
+  // if Minvoice really filtered by it.
+  it.each([false, true])(
+    'takes a row that does not show our reference only when the search is confirmed (%s)',
+    async (confirmed) => {
+      const { service, einvoice, sender, config } = uncertain();
+      service.markerSearchConfirmed = confirmed;
+      config.findByMarker.mockResolvedValue({
+        kind: 'found',
+        id: 'inv-2001',
+        invoiceNumber: 2001,
+        invoiceDate: sentDate,
+        markerSeen: false,
+      });
+      await service.issue(user, 12, dto);
+      expect(sender.send).not.toHaveBeenCalled();
+      const [write] = writes(einvoice);
+      expect(writes(einvoice)).toHaveLength(1);
+      if (confirmed) {
+        expect(write).toMatchObject({ status: 'ISSUED', invoiceNumber: 2001 });
+        return;
+      }
+      expect(write).toEqual({
+        status: 'UNCERTAIN',
+        lastError: `Có thể là hóa đơn số 2001 ngày ${sentDate.split('-').reverse().join('/')} trên Minvoice (chưa chắc Minvoice lọc theo mã K502-12); ${MANUAL}`,
+        sendingAt: lostAt,
+      });
+    },
+  );
+
+  // Our own rows disagree with the search: doubt, never a silent fix.
+  it('leaves it uncertain with its draft when the number found is already ours', async () => {
+    const { service, einvoice, config } = uncertain();
+    config.findByMarker.mockResolvedValue({
+      kind: 'found',
+      id: 'inv-2001',
+      invoiceNumber: 2001,
+      invoiceDate: sentDate,
+      markerSeen: true,
+    });
+    einvoice.findFirst.mockResolvedValue({ id: 3 });
+    await service.issue(user, 12, dto);
+    expect(writes(einvoice)).toEqual([
+      {
+        status: 'UNCERTAIN',
+        lastError: `Số 2001 mà Minvoice trả về cho K502-12 đã có ở hóa đơn #3; ${MANUAL}`,
+        sendingAt: lostAt,
+      },
+    ]);
+  });
+
+  it('does the same when the number is taken while it is written', async () => {
+    const { service, einvoice, config } = uncertain();
+    config.findByMarker.mockResolvedValue({
+      kind: 'found',
+      id: 'inv-2001',
+      invoiceNumber: 2001,
+      invoiceDate: sentDate,
+      markerSeen: true,
+    });
+    einvoice.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 5 });
+    einvoice.update.mockRejectedValueOnce(clash());
+    await service.issue(user, 12, dto);
+    const [attempt, fallback] = writes(einvoice);
+    expect(attempt).toMatchObject({ status: 'ISSUED', invoiceNumber: 2001 });
+    expect(fallback).toEqual({
+      status: 'UNCERTAIN',
+      lastError: `Số 2001 mà Minvoice trả về cho K502-12 đã có ở hóa đơn #5; ${MANUAL}`,
+      sendingAt: lostAt,
+    });
   });
 
   it.each<[string, () => Promise<MarkerSearch>, RegExp]>([
@@ -390,7 +477,10 @@ describe('EinvoicesService.issue of an uncertain invoice', () => {
       symbolCode: ready.symbolCode,
       registerInvoiceId: ready.registerInvoiceId,
       invoiceDate: toDbDate(dto.invoiceDate),
+      // The time of this send, for a later recheck of it.
+      sendingAt: expect.any(Date) as unknown,
     });
+    expect(header.sendingAt).not.toEqual(lostAt);
     expect(einvoice.update.mock.invocationCallOrder[0]).toBeLessThan(
       sender.send.mock.invocationCallOrder[0],
     );

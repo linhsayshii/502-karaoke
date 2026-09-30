@@ -50,10 +50,19 @@ export interface MarkerQuery {
   marker: string;
 }
 
-// `found` and `none` are only given when the answer leaves no doubt; any
-// other answer is `ambiguous`, never a guess.
+// `found` and `none` are only given when the answer leaves no doubt about
+// what Minvoice listed; any other answer is `ambiguous`, never a guess.
+// `markerSeen` tells whether the row itself shows our reference: the list of
+// the web app does not, so otherwise the match rests on Minvoice having
+// filtered by it (MARKER_SEARCH_CONFIRMED), and the caller decides.
 export type MarkerSearch =
-  | { kind: 'found'; id: string; invoiceNumber: number; invoiceDate: string }
+  | {
+      kind: 'found';
+      id: string;
+      invoiceNumber: number;
+      invoiceDate: string;
+      markerSeen: boolean;
+    }
   | { kind: 'none' }
   | { kind: 'ambiguous' };
 
@@ -321,7 +330,13 @@ export class MinvoiceClient {
     ) {
       return ambiguous;
     }
-    return { kind: 'found', id: item.id, invoiceNumber, invoiceDate };
+    return {
+      kind: 'found',
+      id: item.id,
+      invoiceNumber,
+      invoiceDate,
+      markerSeen: item[SEARCH_PARAM] === query.marker,
+    };
   }
 
   private authed(

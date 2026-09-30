@@ -1,6 +1,7 @@
 import { ValidationPipe } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { WsAdapter } from '@nestjs/platform-ws';
 import cookieParser from 'cookie-parser';
 import { json } from 'express';
 import helmet from 'helmet';
@@ -37,5 +38,7 @@ export function configureApp<T extends NestExpressApplication>(app: T): T {
   app.useGlobalFilters(
     new PrismaExceptionFilter(app.get(HttpAdapterHost).httpAdapter),
   );
+  // WebSocket on the same HTTP server (src/live), plain `ws`, no socket.io.
+  app.useWebSocketAdapter(new WsAdapter(app));
   return app;
 }

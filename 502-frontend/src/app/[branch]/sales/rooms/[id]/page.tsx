@@ -117,6 +117,7 @@ export default function RoomDetailPage() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState(ALL);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [pendingWarnOpen, setPendingWarnOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [lockOpen, setLockOpen] = useState(false);
 
@@ -805,15 +806,17 @@ export default function RoomDetailPage() {
               <Button
                 size="lg"
                 className="w-full"
-                disabled={!!order.discountRequests?.length}
                 onClick={async () => {
                   // Let pending edits land before the server computes the bill.
                   await queueRef.current;
-                  setCheckoutOpen(true);
+                  // A discount still waiting: the server refuses the checkout,
+                  // so ask first — wait, or drop the request and take the full price.
+                  if (orderRef.current?.discountRequests?.length) setPendingWarnOpen(true);
+                  else setCheckoutOpen(true);
                 }}
               >
                 <ReceiptTextIcon data-icon="inline-start" />
-                {order.discountRequests?.length ? "Chờ duyệt giảm giá…" : `Thanh toán · ${formatMoney(bill.finalAmount)}`}
+                Thanh toán · {formatMoney(bill.finalAmount)}
               </Button>
             </CardFooter>
           )}
@@ -826,6 +829,20 @@ export default function RoomDetailPage() {
         open={checkoutOpen}
         onOpenChange={setCheckoutOpen}
         onCheckedOut={() => router.push(roomsPath)}
+      />
+      <ConfirmDialog
+        open={pendingWarnOpen}
+        onOpenChange={setPendingWarnOpen}
+        title="Giảm giá đang chờ quản lý duyệt"
+        description="Tiền hiện tính theo giá chưa giảm. Chờ quản lý duyệt rồi thanh toán, hoặc hủy yêu cầu và thu theo giá gốc."
+        cancelLabel="Chờ duyệt"
+        confirmLabel="Hủy yêu cầu, thanh toán giá gốc"
+        destructive
+        onConfirm={async () => {
+          const request = orderRef.current?.discountRequests?.[0];
+          if (request && !(await cancelRequest(request.id))) return false;
+          setCheckoutOpen(true);
+        }}
       />
       <ConfirmDialog
         open={lockOpen}

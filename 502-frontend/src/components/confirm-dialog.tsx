@@ -19,6 +19,7 @@ interface ConfirmDialogProps {
   title: string;
   description?: React.ReactNode;
   confirmLabel?: string;
+  cancelLabel?: string;
   destructive?: boolean;
   // Return false to keep the dialog open (e.g. the call failed).
   onConfirm: () => Promise<boolean | void> | boolean | void;
@@ -31,6 +32,7 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel = "Xác nhận",
+  cancelLabel = "Hủy bỏ",
   destructive,
   onConfirm,
 }: ConfirmDialogProps) {
@@ -54,7 +56,7 @@ export function ConfirmDialog({
           {description && <AlertDialogDescription>{description}</AlertDialogDescription>}
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>Hủy bỏ</AlertDialogCancel>
+          <AlertDialogCancel disabled={pending}>{cancelLabel}</AlertDialogCancel>
           <AlertDialogAction variant={destructive ? "destructive" : "default"} disabled={pending} onClick={confirm}>
             {pending && <Spinner data-icon="inline-start" />}
             {confirmLabel}

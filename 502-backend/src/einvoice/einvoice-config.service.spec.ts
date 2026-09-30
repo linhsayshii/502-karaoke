@@ -1,11 +1,17 @@
 import { BadRequestException } from '@nestjs/common';
-import { EinvoiceConfigService } from './einvoice-config.service';
+import {
+  EinvoiceConfigService,
+  type IssueConfig,
+} from './einvoice-config.service';
 import { encryptSecret } from './einvoice-secret';
 import type {
   MinvoiceClient,
   MinvoiceSession,
 } from './minvoice/minvoice-client';
-import { MinvoiceLoginError } from './minvoice/minvoice-errors';
+import {
+  MinvoiceHttpError,
+  MinvoiceLoginError,
+} from './minvoice/minvoice-errors';
 
 const TAX_CODE = '0107811836';
 const session = (id: string): MinvoiceSession => ({
@@ -157,5 +163,115 @@ describe('EinvoiceConfigService.latestIssued', () => {
   it('is null while nothing was issued under the symbol', async () => {
     findFirst.mockResolvedValue(null);
     await expect(service.latestIssued(TAX_CODE, '1C26MTT')).resolves.toBeNull();
+  });
+});
+
+describe('EinvoiceConfigService.findByMarker', () => {
+  const query = {
+    symbolCode: '1C26MTT',
+    invoiceDate: '2026-10-01',
+    marker: 'K502-7',
+  };
+  const found = {
+    kind: 'found' as const,
+    id: 'inv-9',
+    invoiceNumber: 1009,
+    invoiceDate: '2026-10-01',
+  };
+  let findByMarker: jest.Mock;
+  let login: jest.Mock;
+  let service: EinvoiceConfigService;
+
+  beforeEach(() => {
+    findByMarker = jest.fn();
+    login = jest.fn().mockResolvedValue(session('new'));
+    const prisma = {
+      branch: {
+        findUniqueOrThrow: jest.fn().mockResolvedValue({ taxCode: TAX_CODE }),
+      },
+      einvoiceConfig: {
+        findUnique: jest.fn().mockResolvedValue({
+          taxCode: TAX_CODE,
+          username: 'admin',
+          passwordEnc: encryptSecret('the-stored-password'),
+          sessionEnc: encryptSecret(JSON.stringify(session('old'))),
+          loginError: null,
+        }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+    };
+    service = new EinvoiceConfigService(
+      prisma as never,
+      {} as never,
+      { login, findByMarker } as unknown as MinvoiceClient,
+    );
+  });
+
+  it('searches with the stored session', async () => {
+    findByMarker.mockResolvedValue(found);
+    await expect(service.findByMarker(1, TAX_CODE, query)).resolves.toEqual(
+      found,
+    );
+    expect(findByMarker).toHaveBeenCalledWith(TAX_CODE, session('old'), query);
+    expect(login).not.toHaveBeenCalled();
+  });
+
+  it('logs in again once when Minvoice refuses the stored session', async () => {
+    findByMarker
+      .mockRejectedValueOnce(new MinvoiceHttpError(401, '', 'Unauthorized'))
+      .mockResolvedValueOnce(found);
+    await expect(service.findByMarker(1, TAX_CODE, query)).resolves.toEqual(
+      found,
+    );
+    expect(login).toHaveBeenCalledTimes(1);
+    expect(findByMarker).toHaveBeenLastCalledWith(
+      TAX_CODE,
+      session('new'),
+      query,
+    );
+  });
+
+  it('never searches another tenant than the one it was sent to', async () => {
+    await expect(service.findByMarker(1, '0100000001', query)).rejects.toThrow(
+      /0100000001/,
+    );
+    expect(findByMarker).not.toHaveBeenCalled();
+  });
+});
+
+describe('EinvoiceConfigService.refreshRange', () => {
+  it('stores the new range only while the symbol is still the one sent', async () => {
+    const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    const update = jest.fn();
+    const listSymbols = jest
+      .fn()
+      .mockResolvedValue([
+        { symbolCode: '1C26MTT', registerInvoiceId: 'range-2' },
+      ]);
+    const service = new EinvoiceConfigService(
+      { einvoiceConfig: { updateMany, update } } as never,
+      {} as never,
+      { listSymbols } as unknown as MinvoiceClient,
+    );
+    const config = {
+      branchId: 1,
+      taxCode: TAX_CODE,
+      symbolCode: '1C26MTT',
+      registerInvoiceId: 'range-1',
+      currencyId: 'vnd-id',
+      seller: {} as IssueConfig['seller'],
+      session: null,
+    };
+    await expect(
+      service.refreshRange(config, session('a')),
+    ).resolves.toMatchObject({
+      registerInvoiceId: 'range-2',
+      session: session('a'),
+    });
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { branchId: 1, symbolCode: '1C26MTT' },
+      data: { registerInvoiceId: 'range-2' },
+    });
+    expect(update).not.toHaveBeenCalled();
   });
 });

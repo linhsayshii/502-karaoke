@@ -615,7 +615,16 @@ describe('E-invoices (e2e)', () => {
         'UNCERTAIN',
       );
       expect(fake.posts).toBe(posts + 1);
-      await issue(id).expect(409);
+      // Nothing carries its reference on Minvoice, but that answer is not
+      // trusted yet (MARKER_SEARCH_CONFIRMED): it stays uncertain, unsent.
+      const again = (await issue(id).expect(200)).body as Json;
+      expect(again).toMatchObject({
+        status: 'UNCERTAIN',
+        lastError: `Chưa tìm thấy hóa đơn K502-${id} trên Minvoice; kiểm tra trên Minvoice rồi đối chiếu bằng tay`,
+        symbolCode: fake.symbolCode(),
+        invoiceDate: today(),
+      });
+      expect(fake.posts).toBe(posts + 1);
       await as('tn1_cs1')
         .post(`/einvoices/${id}/resolve`, { found: false })
         .expect(403);
@@ -645,6 +654,98 @@ describe('E-invoices (e2e)', () => {
         draft: null,
         invoiceDate: today(),
       });
+    });
+
+    it('finds an invoice created by a send whose answer was lost', async () => {
+      const id = await newDraft();
+      try {
+        fake.behaviours = ['drop-after-create'];
+        expect(((await issue(id).expect(200)).body as Json).status).toBe(
+          'UNCERTAIN',
+        );
+        const created = fake.invoices.at(-1)!;
+        expect(created.orderNumber).toBe(`K502-${id}`);
+        const posts = fake.posts;
+        // A stale stored session: the search logs in again by itself.
+        fake.expireSessions();
+        const logins = fake.logins;
+        const body = (await issue(id).expect(200)).body as Json;
+        expect(body).toMatchObject({
+          status: 'ISSUED',
+          invoiceNumber: created.invoiceNumber,
+          minvoiceId: created.id,
+          symbolCode: fake.symbolCode(),
+          sellerTaxCode: TAX_CODE,
+          invoiceDate: today(),
+          draft: null,
+          lastError: null,
+        });
+        expect(fake.posts).toBe(posts);
+        expect(fake.logins).toBe(logins + 1);
+      } finally {
+        fake.behaviours = [];
+      }
+    });
+
+    it('sends again once a search that finds nothing is trusted', async () => {
+      const id = await newDraft();
+      const service = app.get(EinvoicesService);
+      const trusted = service.markerSearchConfirmed;
+      try {
+        fake.behaviours = ['drop'];
+        expect(((await issue(id).expect(200)).body as Json).status).toBe(
+          'UNCERTAIN',
+        );
+        const posts = fake.posts;
+        service.markerSearchConfirmed = true;
+        const body = (await issue(id).expect(200)).body as Json;
+        const created = fake.invoices.at(-1)!;
+        expect(created.orderNumber).toBe(`K502-${id}`);
+        expect(body).toMatchObject({
+          status: 'ISSUED',
+          invoiceNumber: created.invoiceNumber,
+          invoiceDate: today(),
+        });
+        expect(fake.posts).toBe(posts + 1);
+      } finally {
+        service.markerSearchConfirmed = trusted;
+        fake.behaviours = [];
+      }
+    });
+
+    it('stays uncertain when Minvoice lists other invoices too', async () => {
+      const id = await newDraft();
+      const service = app.get(EinvoicesService);
+      const trusted = service.markerSearchConfirmed;
+      try {
+        fake.behaviours = ['drop'];
+        expect(((await issue(id).expect(200)).body as Json).status).toBe(
+          'UNCERTAIN',
+        );
+        const posts = fake.posts;
+        // A list that ignores the reference: never taken for a match, even
+        // with a trusted search.
+        fake.ignoreMarkerFilter = true;
+        service.markerSearchConfirmed = true;
+        expect(
+          fake.invoices.filter((i) => i.invoiceSerial === fake.symbolCode())
+            .length,
+        ).toBeGreaterThanOrEqual(2);
+        const body = (await issue(id).expect(200)).body as Json;
+        expect(body.status).toBe('UNCERTAIN');
+        expect(body.lastError).toBe(
+          `Minvoice trả về kết quả không rõ khi tìm hóa đơn K502-${id}; kiểm tra trên Minvoice rồi đối chiếu bằng tay`,
+        );
+        expect(fake.posts).toBe(posts);
+      } finally {
+        fake.ignoreMarkerFilter = false;
+        service.markerSearchConfirmed = trusted;
+        fake.behaviours = [];
+      }
+      await as('admin')
+        .post(`/einvoices/${id}/resolve`, { found: false })
+        .expect(200);
+      await as('tn1_cs1').delete(`/einvoices/${id}`).expect(200);
     });
 
     it('resolves only an uncertain invoice', async () => {
@@ -805,6 +906,13 @@ describe('E-invoices (e2e)', () => {
         ((await as('admin').get(`/einvoices/${id}`).expect(200)).body as Json)
           .status,
       ).toBe('UNCERTAIN');
+      // It never went through a lock: no symbol or date to look up by, so
+      // nothing is searched or sent.
+      const posts = fake.posts;
+      const again = (await issue(id).expect(200)).body as Json;
+      expect(again.status).toBe('UNCERTAIN');
+      expect(again.lastError).toMatch(/^Không rõ ký hiệu hoặc ngày/);
+      expect(fake.posts).toBe(posts);
     });
 
     it('is wiped with the data of its branch', async () => {

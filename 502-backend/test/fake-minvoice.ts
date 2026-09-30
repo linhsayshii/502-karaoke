@@ -7,7 +7,14 @@ import { AddressInfo } from 'net';
 //   npx ts-node test/fake-minvoice.ts 4555
 //   MINVOICE_URL_TEMPLATE=http://127.0.0.1:4555/{taxCode} (backend, not production)
 
-export type SendBehaviour = 'ok' | 'drop' | 'date-order' | 'reject';
+// 'drop': the connection is cut before anything is created;
+// 'drop-after-create': the invoice is created, then the answer is lost.
+export type SendBehaviour =
+  | 'ok'
+  | 'drop'
+  | 'drop-after-create'
+  | 'date-order'
+  | 'reject';
 
 export class FakeMinvoice {
   password = 'minvoice-pass';
@@ -16,8 +23,11 @@ export class FakeMinvoice {
   // One entry per POST invoice, used in order; nothing left = 'ok'.
   behaviours: SendBehaviour[] = [];
   delayMs = 0;
+  // A list that does not filter by orderNumber (a server that ignores it).
+  ignoreMarkerFilter = false;
   logins = 0;
   posts = 0;
+  // Each created invoice: the payload, with the id and number it was given.
   invoices: Record<string, unknown>[] = [];
   private sessions = new Set<string>();
   private nextNumber = 1001;
@@ -168,6 +178,31 @@ export class FakeMinvoice {
         ],
       });
     }
+    // The invoice list, filtered by column name like the web app's table;
+    // its rows do not show orderNumber (plan Task 0).
+    if (path === '/api/api/app/invoice' && req.method === 'GET') {
+      const serial = url.searchParams.get('invoiceSerial');
+      const marker = url.searchParams.get('orderNumber');
+      const skip = Number(url.searchParams.get('skipCount') ?? 0);
+      const max = Number(url.searchParams.get('maxResultCount') ?? 10);
+      const matches = this.invoices.filter(
+        (invoice) =>
+          (serial === null || invoice.invoiceSerial === serial) &&
+          (marker === null ||
+            this.ignoreMarkerFilter ||
+            invoice.orderNumber === marker),
+      );
+      return json(200, {
+        items: matches.slice(skip, skip + max).map((invoice) => ({
+          id: invoice.id,
+          invoiceSerial: invoice.invoiceSerial,
+          invoiceNumber: invoice.invoiceNumber,
+          invoiceDate: `${invoice.invoiceDate as string}T00:00:00`,
+          invoiceStatus: 0,
+        })),
+        totalCount: matches.length,
+      });
+    }
     if (path === '/api/api/app/invoice' && req.method === 'POST') {
       const behaviour = this.behaviours.shift() ?? 'ok';
       if (this.delayMs)
@@ -191,8 +226,16 @@ export class FakeMinvoice {
       if (invoice.registerInvoiceId !== this.rangeId) {
         return json(400, { error: { message: 'Dải hóa đơn không hợp lệ' } });
       }
-      this.invoices.push(invoice);
       const number = this.nextNumber++;
+      this.invoices.push({
+        ...invoice,
+        id: `inv-${number}`,
+        invoiceNumber: number,
+      });
+      if (behaviour === 'drop-after-create') {
+        req.socket.destroy();
+        return;
+      }
       return json(200, {
         id: `inv-${number}`,
         invoiceNumber: number,

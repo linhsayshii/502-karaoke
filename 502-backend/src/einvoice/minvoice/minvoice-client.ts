@@ -31,6 +31,32 @@ const NOT_SENT_CODES = new Set([
   'ERR_TLS_CERT_ALTNAME_INVALID',
 ]);
 
+// Invoice list of the Minvoice web app, filtered by column name (plan Task 0:
+// no generic filter exists). SEARCH_PARAM is the payload's MARKER_FIELD.
+export const SEARCH_PATH = '/api/api/app/invoice';
+export const SEARCH_PARAM = 'orderNumber';
+
+// Whether "no invoice carries K502-<id>" may be trusted enough to send again.
+// Stays false until the real-Minvoice check shows that Minvoice keeps
+// orderNumber and filters its list by it: a wrong guess would post duplicate
+// tax invoices. While false, a search that finds nothing leaves the invoice
+// "Không rõ" for a manual check.
+export const MARKER_SEARCH_CONFIRMED = false;
+
+// What was sent under our reference: the symbol and date of that send.
+export interface MarkerQuery {
+  symbolCode: string;
+  invoiceDate: string;
+  marker: string;
+}
+
+// `found` and `none` are only given when the answer leaves no doubt; any
+// other answer is `ambiguous`, never a guess.
+export type MarkerSearch =
+  | { kind: 'found'; id: string; invoiceNumber: number; invoiceDate: string }
+  | { kind: 'none' }
+  | { kind: 'ambiguous' };
+
 export interface MinvoiceSession {
   cookie: string;
   // RequestVerificationToken header (the XSRF-TOKEN cookie of the logged-in user).
@@ -253,6 +279,51 @@ export class MinvoiceClient {
     return { id: body.id, invoiceNumber };
   }
 
+  // The invoice sent under `marker` (spec §9.2). Found only when Minvoice
+  // lists exactly one invoice, of the symbol and date that were sent, whose
+  // reference (when the row shows it) is ours; nothing found only for an
+  // empty list. A refused session throws, like every read.
+  async findByMarker(
+    taxCode: string,
+    session: MinvoiceSession,
+    query: MarkerQuery,
+  ): Promise<MarkerSearch> {
+    const data = (await this.authed(taxCode, session, SEARCH_PATH, {
+      invoiceSerial: query.symbolCode,
+      [SEARCH_PARAM]: query.marker,
+      loadAll: 'true',
+      skipCount: '0',
+      maxResultCount: '5',
+    })) as { items?: unknown; totalCount?: unknown } | null;
+    const items = data?.items;
+    const count = data?.totalCount;
+    const ambiguous = { kind: 'ambiguous' } as const;
+    // A count that is present but not a number tells nothing: never trusted.
+    if (!Array.isArray(items) || (count != null && typeof count !== 'number'))
+      return ambiguous;
+    if (items.length === 0)
+      return count == null || count === 0 ? { kind: 'none' } : ambiguous;
+    if (items.length !== 1 || (count != null && count !== 1)) return ambiguous;
+
+    const first: unknown = items[0];
+    if (!first || typeof first !== 'object') return ambiguous;
+    const item = first as Record<string, unknown>;
+    const invoiceNumber = wholeNumber(item.invoiceNumber);
+    const invoiceDate =
+      typeof item.invoiceDate === 'string' ? item.invoiceDate.slice(0, 10) : '';
+    if (
+      typeof item.id !== 'string' ||
+      !item.id ||
+      invoiceNumber === null ||
+      item.invoiceSerial !== query.symbolCode ||
+      invoiceDate !== query.invoiceDate ||
+      (item[SEARCH_PARAM] !== undefined && item[SEARCH_PARAM] !== query.marker)
+    ) {
+      return ambiguous;
+    }
+    return { kind: 'found', id: item.id, invoiceNumber, invoiceDate };
+  }
+
   private authed(
     taxCode: string,
     session: MinvoiceSession,
@@ -348,6 +419,17 @@ function networkError(
     sent,
     `Không kết nối được Minvoice${code ? ` (${code})` : ''}`,
   );
+}
+
+// An invoice number: an integer >= 1, as a number or a string of digits.
+function wholeNumber(value: unknown): number | null {
+  const n =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && /^\d+$/.test(value)
+        ? Number(value)
+        : NaN;
+  return Number.isSafeInteger(n) && n >= 1 ? n : null;
 }
 
 // tenant-company answers an object, a list or {result|data: …} depending on

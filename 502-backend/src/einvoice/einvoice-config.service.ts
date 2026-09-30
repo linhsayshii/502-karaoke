@@ -15,6 +15,8 @@ import type { SellerProfile } from './einvoice-types';
 import {
   MinvoiceClient,
   type InvoiceSymbol,
+  type MarkerQuery,
+  type MarkerSearch,
   type MinvoiceSession,
 } from './minvoice/minvoice-client';
 import {
@@ -313,12 +315,33 @@ export class EinvoiceConfigService {
       );
     }
     if (symbol.registerInvoiceId !== config.registerInvoiceId) {
-      await this.prisma.einvoiceConfig.update({
-        where: { branchId: config.branchId },
+      // Only while the branch still uses this symbol: a symbol chosen during
+      // the send keeps its own range.
+      await this.prisma.einvoiceConfig.updateMany({
+        where: { branchId: config.branchId, symbolCode: config.symbolCode },
         data: { registerInvoiceId: symbol.registerInvoiceId },
       });
     }
     return { ...config, registerInvoiceId: symbol.registerInvoiceId, session };
+  }
+
+  // Looks an invoice up by our reference (spec §9.2) with the branch's
+  // session, logging in again once when Minvoice refuses it. Only on the
+  // tenant it was sent to: another one cannot hold it, so finding nothing
+  // there would prove nothing.
+  findByMarker(
+    branchId: number,
+    sellerTaxCode: string,
+    query: MarkerQuery,
+  ): Promise<MarkerSearch> {
+    return this.withSession(branchId, (taxCode, session) => {
+      if (taxCode !== sellerTaxCode) {
+        throw new BadRequestException(
+          `Hóa đơn đã gửi với MST ${sellerTaxCode}, cơ sở nay dùng MST ${taxCode}`,
+        );
+      }
+      return this.client.findByMarker(taxCode, session, query);
+    });
   }
 
   // Logs the branch in again with the stored password, one at a time per branch.

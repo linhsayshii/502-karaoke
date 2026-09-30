@@ -41,6 +41,10 @@ import {
 } from './einvoice-select';
 import { EinvoiceSender, type SendOutcome } from './einvoice-sender';
 import type { EinvoiceDraft, EinvoiceLine } from './einvoice-types';
+import {
+  MARKER_SEARCH_CONFIRMED,
+  type MarkerSearch,
+} from './minvoice/minvoice-client';
 import { buildMinvoicePayload } from './minvoice/minvoice-payload';
 
 const clean = (value: string | null | undefined) => value?.trim() || null;
@@ -123,6 +127,25 @@ const isUniqueViolation = (error: unknown) =>
 const errorText = (message: string) => message.slice(0, 300);
 
 const NOT_UNCERTAIN = 'Hóa đơn không ở trạng thái "Không rõ"';
+const MANUAL_CHECK = 'kiểm tra trên Minvoice rồi đối chiếu bằng tay';
+const UNKNOWN_SEND_ERROR =
+  'Lỗi không xác định khi gửi, hãy đối chiếu trên Minvoice';
+
+const messageOf = (error: unknown) =>
+  error instanceof Error ? error.message : 'lỗi không xác định';
+
+// Our reference on Minvoice (spec §6.2).
+const markerOf = (id: number) => `K502-${id}`;
+
+// The header of a send, written at the lock (global constraints, decision 5).
+function sentHeader(ready: IssueConfig, dto: IssueEinvoiceDto) {
+  return {
+    sellerTaxCode: ready.taxCode,
+    symbolCode: ready.symbolCode,
+    registerInvoiceId: ready.registerInvoiceId,
+    invoiceDate: toDbDate(dto.invoiceDate),
+  };
+}
 
 // Longer than any send (≈80 s of Minvoice timeouts in the worst chain, plus
 // database waits): a row still SENDING after this was cut off without a
@@ -147,6 +170,8 @@ export class EinvoicesService implements OnApplicationBootstrap {
   // (spec §8), so this is every send in flight; bounded by them, as each id
   // leaves once its outcome is written or failed to be.
   private readonly sending = new Set<number>();
+  // Read through this field so the e2e test can flip it.
+  markerSearchConfirmed = MARKER_SEARCH_CONFIRMED;
 
   constructor(
     private prisma: PrismaService,
@@ -434,16 +459,23 @@ export class EinvoicesService implements OnApplicationBootstrap {
         buyerName: true,
         draft: true,
         updatedAt: true,
+        // What an uncertain send went out with (spec §9.2).
+        sellerTaxCode: true,
+        symbolCode: true,
+        registerInvoiceId: true,
+        invoiceDate: true,
         order: { select: { status: true } },
       },
     });
     if (!row) throw new NotFoundException('Không tìm thấy hóa đơn điện tử');
     this.scope.assertBranchAccess(user, row.branchId);
-    if (row.status !== EinvoiceStatus.DRAFT) {
+    // An uncertain invoice is looked up before anything is sent (spec §9.2).
+    const recheck = row.status === EinvoiceStatus.UNCERTAIN;
+    if (row.status !== EinvoiceStatus.DRAFT && !recheck) {
       throw new ConflictException(
         row.status === EinvoiceStatus.ISSUED
           ? 'Hóa đơn đã xuất'
-          : 'Hóa đơn đang được gửi hoặc chưa rõ kết quả; đối chiếu trên Minvoice trước khi gửi lại',
+          : 'Hóa đơn đang được gửi',
       );
     }
     if (row.order.status !== OrderStatus.COMPLETED) {
@@ -457,27 +489,116 @@ export class EinvoicesService implements OnApplicationBootstrap {
 
     // Locked only as it was read: a draft saved meanwhile would otherwise
     // go out with the lines checked above but keep the amount saved since.
+    // An uncertain row keeps its header: it describes what was sent, and the
+    // search looks for that.
     const { count } = await this.prisma.einvoice.updateMany({
-      where: { id, status: EinvoiceStatus.DRAFT, updatedAt: row.updatedAt },
+      where: { id, status: row.status, updatedAt: row.updatedAt },
       data: {
         status: EinvoiceStatus.SENDING,
         sendingAt: new Date(),
         lastError: null,
-        sellerTaxCode: ready.taxCode,
-        symbolCode: ready.symbolCode,
-        registerInvoiceId: ready.registerInvoiceId,
-        invoiceDate: toDbDate(dto.invoiceDate),
+        ...(recheck ? {} : sentHeader(ready, dto)),
       },
     });
     if (count === 0) throw await this.notLocked(id);
 
     this.sending.add(id);
     try {
-      await this.send(user, id, ready, row, draft, dto);
+      if (recheck) await this.recheck(user, id, ready, row, draft, dto);
+      else await this.send(user, id, ready, row, draft, dto);
     } finally {
       this.sending.delete(id);
     }
     return this.findOne(user, id);
+  }
+
+  // Spec §9.2: a send whose answer was lost is looked up by our reference
+  // before anything goes out again, as a duplicate tax invoice must never be
+  // made. Only a sure answer moves it on: found -> issued with Minvoice's
+  // number; nothing found -> sent again, and only once MARKER_SEARCH_CONFIRMED
+  // shows Minvoice filters by the reference. Anything else leaves it
+  // uncertain for a manual check.
+  private async recheck(
+    user: AuthUser,
+    id: number,
+    ready: IssueConfig,
+    row: {
+      branchId: number;
+      buyerTaxCode: string | null;
+      buyerName: string | null;
+      sellerTaxCode: string | null;
+      symbolCode: string | null;
+      registerInvoiceId: string | null;
+      invoiceDate: Date | null;
+    },
+    draft: EinvoiceDraft,
+    dto: IssueEinvoiceDto,
+  ) {
+    const marker = markerOf(id);
+    const uncertain = (message: string) =>
+      this.record(user, id, ready, draft.lines, { kind: 'uncertain', message });
+    const { sellerTaxCode, symbolCode, registerInvoiceId, invoiceDate } = row;
+    if (!sellerTaxCode || !symbolCode || !registerInvoiceId || !invoiceDate) {
+      return uncertain(
+        `Không rõ ký hiệu hoặc ngày của lần gửi trước nên không tìm được hóa đơn ${marker}; ${MANUAL_CHECK}`,
+      );
+    }
+    if (sellerTaxCode !== ready.taxCode) {
+      return uncertain(
+        `Hóa đơn ${marker} đã gửi với MST ${sellerTaxCode}, cơ sở nay dùng MST ${ready.taxCode}; ${MANUAL_CHECK}`,
+      );
+    }
+
+    let result: MarkerSearch;
+    try {
+      result = await this.config.findByMarker(row.branchId, sellerTaxCode, {
+        symbolCode,
+        invoiceDate: fromDbDate(invoiceDate),
+        marker,
+      });
+    } catch (error) {
+      return uncertain(
+        `Không tìm được hóa đơn ${marker} trên Minvoice, ${MANUAL_CHECK}: ${messageOf(error)}`,
+      );
+    }
+    if (result.kind === 'found') {
+      // Recorded under the header it was sent with, not the current config.
+      return this.record(
+        user,
+        id,
+        ready,
+        draft.lines,
+        {
+          kind: 'issued',
+          minvoiceId: result.id,
+          invoiceNumber: result.invoiceNumber,
+          config: {
+            ...ready,
+            taxCode: sellerTaxCode,
+            symbolCode,
+            registerInvoiceId,
+          },
+        },
+        result.invoiceDate,
+      );
+    }
+    if (result.kind === 'ambiguous') {
+      return uncertain(
+        `Minvoice trả về kết quả không rõ khi tìm hóa đơn ${marker}; ${MANUAL_CHECK}`,
+      );
+    }
+    if (!this.markerSearchConfirmed) {
+      return uncertain(
+        `Chưa tìm thấy hóa đơn ${marker} trên Minvoice; ${MANUAL_CHECK}`,
+      );
+    }
+    // Nothing carries our reference: sent as a draft would be (spec §8), with
+    // the header of this request.
+    await this.prisma.einvoice.update({
+      where: { id },
+      data: sentHeader(ready, dto),
+    });
+    await this.send(user, id, ready, row, draft, dto);
   }
 
   // Sends the locked invoice and writes the outcome (spec §8 steps 3–5).
@@ -506,7 +627,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
             email: draft.buyerEmail,
           },
           lines: draft.lines,
-          marker: `K502-${id}`,
+          marker: markerOf(id),
         }),
       );
     } catch (error) {
@@ -514,7 +635,9 @@ export class EinvoicesService implements OnApplicationBootstrap {
       outcome = {
         kind: 'uncertain',
         message:
-          error instanceof Error ? error.message : 'Lỗi không xác định khi gửi',
+          error instanceof Error
+            ? `${UNKNOWN_SEND_ERROR}: ${error.message}`
+            : UNKNOWN_SEND_ERROR,
       };
     }
     await this.record(user, id, ready, draft.lines, outcome);
@@ -637,9 +760,14 @@ export class EinvoicesService implements OnApplicationBootstrap {
       where: { id },
       select: { status: true },
     });
+    if (now?.status === EinvoiceStatus.DRAFT) {
+      return new ConflictException(
+        'Hóa đơn vừa được sửa, kiểm tra lại rồi xuất',
+      );
+    }
     return new ConflictException(
-      now?.status === EinvoiceStatus.DRAFT
-        ? 'Hóa đơn vừa được sửa, kiểm tra lại rồi xuất'
+      now?.status === EinvoiceStatus.UNCERTAIN
+        ? 'Hóa đơn vừa được kiểm tra lại, tải lại rồi thử lại'
         : 'Hóa đơn đang được gửi hoặc đã xuất',
     );
   }
@@ -683,9 +811,11 @@ export class EinvoicesService implements OnApplicationBootstrap {
     ready: IssueConfig,
     lines: EinvoiceLine[],
     outcome: SendOutcome,
+    // The date Minvoice shows for an invoice found by our reference.
+    foundDate?: string,
   ) {
     try {
-      await this.writeOutcome(user, id, ready, lines, outcome);
+      await this.writeOutcome(user, id, ready, lines, outcome, foundDate);
     } catch (error) {
       const answer =
         outcome.kind === 'issued'
@@ -704,6 +834,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
     ready: IssueConfig,
     lines: EinvoiceLine[],
     outcome: SendOutcome,
+    foundDate?: string,
   ) {
     if (outcome.kind === 'failed') {
       await this.prisma.einvoice.update({
@@ -741,6 +872,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
       sellerTaxCode: outcome.config.taxCode,
       symbolCode: outcome.config.symbolCode,
       registerInvoiceId: outcome.config.registerInvoiceId,
+      ...(foundDate ? { invoiceDate: toDbDate(foundDate) } : {}),
       vatAmount: totalsOf(lines).vatAmount,
       draft: Prisma.DbNull,
       issuedById: user.id,

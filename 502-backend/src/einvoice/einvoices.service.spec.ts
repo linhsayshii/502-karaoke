@@ -1,10 +1,11 @@
 import { Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { AuthUser } from '../auth/auth-user';
-import { toDateString } from '../common/dates';
+import { toDateString, toDbDate } from '../common/dates';
 import type { IssueConfig } from './einvoice-config.service';
 import type { SendOutcome } from './einvoice-sender';
 import { EinvoicesService } from './einvoices.service';
+import type { MarkerSearch } from './minvoice/minvoice-client';
 
 const yy = String(new Date().getFullYear() % 100).padStart(2, '0');
 const ready: IssueConfig = {
@@ -42,18 +43,25 @@ const issued: SendOutcome = {
   config: ready,
 };
 
+// The row issue() reads for a draft.
+const draftRow = () => ({
+  branchId: 1,
+  status: 'DRAFT',
+  amount: 1000000,
+  buyerTaxCode: null,
+  buyerName: null,
+  draft: { buyerAddress: null, buyerEmail: null, lines: [line] },
+  updatedAt: new Date(),
+  sellerTaxCode: null,
+  symbolCode: null,
+  registerInvoiceId: null,
+  invoiceDate: null,
+  order: { status: 'COMPLETED' },
+});
+
 function setup(outcome: SendOutcome) {
   const einvoice = {
-    findUnique: jest.fn().mockResolvedValue({
-      branchId: 1,
-      status: 'DRAFT',
-      amount: 1000000,
-      buyerTaxCode: null,
-      buyerName: null,
-      draft: { buyerAddress: null, buyerEmail: null, lines: [line] },
-      updatedAt: new Date(),
-      order: { status: 'COMPLETED' },
-    }),
+    findUnique: jest.fn().mockResolvedValue(draftRow()),
     updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     update: jest.fn().mockResolvedValue({}),
     findFirst: jest.fn().mockResolvedValue({ id: 3 }),
@@ -62,20 +70,22 @@ function setup(outcome: SendOutcome) {
   };
   const order = { findUnique: jest.fn() };
   const sender = { send: jest.fn().mockResolvedValue(outcome) };
+  const config = {
+    readyForIssue: jest.fn().mockResolvedValue(ready),
+    latestIssued: jest.fn().mockResolvedValue(null),
+    findByMarker: jest.fn<Promise<MarkerSearch>, unknown[]>(),
+  };
   const service = new EinvoicesService(
     { einvoice, order } as never,
     {} as never,
     { assertBranchAccess: jest.fn() } as never,
-    {
-      readyForIssue: jest.fn().mockResolvedValue(ready),
-      latestIssued: jest.fn().mockResolvedValue(null),
-    } as never,
+    config as never,
     sender as never,
   );
   const log = jest
     .spyOn(Logger.prototype, 'error')
     .mockImplementation(() => undefined);
-  return { service, einvoice, order, sender, log };
+  return { service, einvoice, order, sender, config, log };
 }
 
 // Spec §9.1: a failed write of the outcome is logged with the invoice and
@@ -198,5 +208,201 @@ describe('EinvoicesService stale SENDING sweep', () => {
     expect((byId.sendingAt as { lt: unknown }).lt).toBeInstanceOf(Date);
     expect(byOrder).toMatchObject({ orderId: 5 });
     expect(byOrder).not.toHaveProperty('id');
+  });
+});
+
+// Spec §9.2: an uncertain invoice is looked up by our reference before it is
+// ever sent again; only a sure answer moves it on.
+describe('EinvoicesService.issue of an uncertain invoice', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  const sentSymbol = `1C${yy}OLD`;
+  const sentDate = `${new Date().getFullYear()}-01-02`;
+  const sent = {
+    status: 'UNCERTAIN',
+    sellerTaxCode: ready.taxCode,
+    symbolCode: sentSymbol,
+    registerInvoiceId: 'range-0',
+    invoiceDate: toDbDate(sentDate),
+  };
+  const uncertain = (fields: Record<string, unknown> = {}) => {
+    const context = setup(issued);
+    context.einvoice.findUnique.mockResolvedValueOnce({
+      ...draftRow(),
+      ...sent,
+      ...fields,
+    });
+    return context;
+  };
+  const writes = (einvoice: ReturnType<typeof setup>['einvoice']) =>
+    einvoice.update.mock.calls.map(
+      ([arg]) => (arg as { data: Record<string, unknown> }).data,
+    );
+  const MANUAL = 'kiểm tra trên Minvoice rồi đối chiếu bằng tay';
+
+  it('locks it without touching what was sent, then records the invoice found', async () => {
+    const { service, einvoice, sender, config } = uncertain();
+    config.findByMarker.mockResolvedValue({
+      kind: 'found',
+      id: 'inv-2001',
+      invoiceNumber: 2001,
+      invoiceDate: sentDate,
+    });
+    await service.issue(user, 12, dto);
+
+    const [lock] = einvoice.updateMany.mock.calls[0] as [
+      { where: Record<string, unknown>; data: Record<string, unknown> },
+    ];
+    expect(lock.where).toMatchObject({ id: 12, status: 'UNCERTAIN' });
+    expect(lock.where.updatedAt).toBeInstanceOf(Date);
+    expect(Object.keys(lock.data).sort()).toEqual([
+      'lastError',
+      'sendingAt',
+      'status',
+    ]);
+    expect(lock.data.status).toBe('SENDING');
+    expect(config.findByMarker).toHaveBeenCalledWith(1, ready.taxCode, {
+      symbolCode: sentSymbol,
+      invoiceDate: sentDate,
+      marker: 'K502-12',
+    });
+    expect(sender.send).not.toHaveBeenCalled();
+    expect(writes(einvoice)).toEqual([
+      expect.objectContaining({
+        status: 'ISSUED',
+        invoiceNumber: 2001,
+        minvoiceId: 'inv-2001',
+        sellerTaxCode: ready.taxCode,
+        symbolCode: sentSymbol,
+        registerInvoiceId: 'range-0',
+        invoiceDate: toDbDate(sentDate),
+        draft: Prisma.DbNull,
+        lastError: null,
+        sendingAt: null,
+      }),
+    ]);
+  });
+
+  it.each<[string, () => Promise<MarkerSearch>, RegExp]>([
+    [
+      'an ambiguous answer',
+      () => Promise.resolve({ kind: 'ambiguous' }),
+      /^Minvoice trả về kết quả không rõ khi tìm hóa đơn K502-12/,
+    ],
+    [
+      'a failed search',
+      () =>
+        Promise.reject(new Error('Không kết nối được Minvoice (ENOTFOUND)')),
+      /^Không tìm được hóa đơn K502-12 trên Minvoice, .*ENOTFOUND/,
+    ],
+    [
+      'nothing found while the search is unconfirmed',
+      () => Promise.resolve({ kind: 'none' }),
+      /^Chưa tìm thấy hóa đơn K502-12 trên Minvoice; /,
+    ],
+  ])(
+    'leaves it uncertain after %s, sending nothing',
+    async (_, search, message) => {
+      const { service, einvoice, sender, config } = uncertain();
+      config.findByMarker.mockImplementation(search);
+      await service.issue(user, 12, dto);
+      expect(sender.send).not.toHaveBeenCalled();
+      const [write] = writes(einvoice);
+      expect(writes(einvoice)).toHaveLength(1);
+      expect(write).toEqual({
+        status: 'UNCERTAIN',
+        lastError: expect.stringMatching(message) as unknown,
+      });
+      expect(write.lastError).toContain(MANUAL);
+    },
+  );
+
+  it.each<[string, Record<string, unknown>, RegExp]>([
+    ['without the symbol of the send', { symbolCode: null }, /ký hiệu/],
+    ['without the date of the send', { invoiceDate: null }, /ký hiệu/],
+    [
+      'sent under another tax code',
+      { sellerTaxCode: '0100000001' },
+      /MST 0100000001/,
+    ],
+  ])('does not search %s', async (_, fields, message) => {
+    const { service, einvoice, sender, config } = uncertain(fields);
+    await service.issue(user, 12, dto);
+    expect(config.findByMarker).not.toHaveBeenCalled();
+    expect(sender.send).not.toHaveBeenCalled();
+    expect(writes(einvoice)).toEqual([
+      {
+        status: 'UNCERTAIN',
+        lastError: expect.stringMatching(message) as unknown,
+      },
+    ]);
+  });
+
+  it('sends once more when nothing is found and the search is confirmed', async () => {
+    const { service, einvoice, sender, config } = uncertain();
+    service.markerSearchConfirmed = true;
+    config.findByMarker.mockResolvedValue({ kind: 'none' });
+    await service.issue(user, 12, dto);
+    expect(sender.send).toHaveBeenCalledTimes(1);
+    const [header, outcome] = writes(einvoice);
+    // The header of this request is written before anything goes out.
+    expect(header).toEqual({
+      sellerTaxCode: ready.taxCode,
+      symbolCode: ready.symbolCode,
+      registerInvoiceId: ready.registerInvoiceId,
+      invoiceDate: toDbDate(dto.invoiceDate),
+    });
+    expect(einvoice.update.mock.invocationCallOrder[0]).toBeLessThan(
+      sender.send.mock.invocationCallOrder[0],
+    );
+    expect(outcome).toMatchObject({ status: 'ISSUED', invoiceNumber: 1015 });
+  });
+
+  it('keeps the stale-SENDING sweep away while it searches', async () => {
+    const { service, einvoice, config } = uncertain();
+    let answer!: (result: MarkerSearch) => void;
+    config.findByMarker.mockReturnValue(
+      new Promise<MarkerSearch>((resolve) => (answer = resolve)),
+    );
+    const issuing = service.issue(user, 12, dto);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(config.findByMarker).toHaveBeenCalledTimes(1);
+    einvoice.findUnique.mockResolvedValueOnce({
+      id: 12,
+      branchId: 1,
+      status: 'SENDING',
+      invoiceDate: null,
+    });
+    await service.findOne(user, 12);
+    // Only the lock ran, no sweep.
+    expect(einvoice.updateMany).toHaveBeenCalledTimes(1);
+    answer({ kind: 'ambiguous' });
+    await issuing;
+  });
+
+  it('refuses an invoice being sent', async () => {
+    const { service, config } = uncertain({ status: 'SENDING' });
+    await expect(service.issue(user, 12, dto)).rejects.toThrow(
+      'Hóa đơn đang được gửi',
+    );
+    expect(config.findByMarker).not.toHaveBeenCalled();
+  });
+});
+
+describe('EinvoicesService.issue after an unexpected error', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('marks it uncertain with a Vietnamese reason', async () => {
+    const { service, einvoice, sender } = setup(issued);
+    sender.send.mockRejectedValue(new Error('boom'));
+    await service.issue(user, 12, dto);
+    expect(einvoice.update).toHaveBeenCalledWith({
+      where: { id: 12 },
+      data: {
+        status: 'UNCERTAIN',
+        lastError:
+          'Lỗi không xác định khi gửi, hãy đối chiếu trên Minvoice: boom',
+      },
+    });
   });
 });

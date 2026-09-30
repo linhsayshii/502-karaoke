@@ -1,4 +1,10 @@
-import { MinvoiceClient, minvoiceBaseUrl } from './minvoice-client';
+import {
+  MinvoiceClient,
+  SEARCH_PARAM,
+  SEARCH_PATH,
+  minvoiceBaseUrl,
+} from './minvoice-client';
+import { MARKER_FIELD } from './minvoice-payload';
 import {
   MinvoiceHttpError,
   MinvoiceLoginError,
@@ -208,6 +214,96 @@ describe('MinvoiceClient', () => {
     expect(url.searchParams.get('userName')).toBe('admin');
     expect(url.searchParams.get('Sorting')).toBe('creationTime');
     expect(url.searchParams.get('SortType')).toBe('DESCEND');
+  });
+
+  describe('findByMarker', () => {
+    const serial = '1C26MTT';
+    const query = {
+      symbolCode: serial,
+      invoiceDate: '2026-10-01',
+      marker: 'K502-7',
+    };
+    const row = (fields: Record<string, unknown> = {}) => ({
+      id: 'inv-9',
+      invoiceSerial: serial,
+      invoiceNumber: 1009,
+      invoiceDate: '2026-10-01T00:00:00',
+      invoiceStatus: 0,
+      ...fields,
+    });
+    const find = (body: unknown) => {
+      replies.push(reply(body));
+      return client.findByMarker('0107811836', session, query);
+    };
+
+    it('asks the invoice list of the symbol for our reference', async () => {
+      await expect(find({ items: [row()], totalCount: 1 })).resolves.toEqual({
+        kind: 'found',
+        id: 'inv-9',
+        invoiceNumber: 1009,
+        invoiceDate: '2026-10-01',
+      });
+      const url = new URL(calls[0].url);
+      expect(url.pathname).toBe(SEARCH_PATH);
+      expect(Object.fromEntries(url.searchParams)).toEqual({
+        invoiceSerial: serial,
+        [SEARCH_PARAM]: 'K502-7',
+        loadAll: 'true',
+        skipCount: '0',
+        maxResultCount: '5',
+      });
+      expect(SEARCH_PARAM).toBe(MARKER_FIELD);
+      expect(calls[0].init.method ?? 'GET').toBe('GET');
+      expect(header(calls[0], 'cookie')).toBe('a=b');
+      expect(header(calls[0], 'RequestVerificationToken')).toBe('tok');
+    });
+
+    it('takes a row that carries our reference, or none, and a digit number', async () => {
+      await expect(
+        find({ items: [row({ [SEARCH_PARAM]: 'K502-7' })] }),
+      ).resolves.toMatchObject({ kind: 'found', id: 'inv-9' });
+      await expect(
+        find({ items: [row({ invoiceNumber: '1009' })], totalCount: 1 }),
+      ).resolves.toMatchObject({ kind: 'found', invoiceNumber: 1009 });
+    });
+
+    it('is none only for an empty list', async () => {
+      await expect(find({ items: [], totalCount: 0 })).resolves.toEqual({
+        kind: 'none',
+      });
+      await expect(find({ items: [] })).resolves.toEqual({ kind: 'none' });
+    });
+
+    it.each<[string, unknown]>([
+      ['another symbol', { items: [row({ invoiceSerial: '1C26MMS' })] }],
+      [
+        'another date',
+        { items: [row({ invoiceDate: '2026-09-30T00:00:00' })] },
+      ],
+      ['two rows', { items: [row(), row({ id: 'inv-10' })], totalCount: 2 }],
+      ['more than it lists', { items: [row()], totalCount: 3 }],
+      ['a count that is not a number', { items: [row()], totalCount: '1' }],
+      ['another reference', { items: [row({ [SEARCH_PARAM]: 'K502-70' })] }],
+      ['an empty reference', { items: [row({ [SEARCH_PARAM]: null })] }],
+      ['no id', { items: [row({ id: 9 })] }],
+      ['no number', { items: [row({ invoiceNumber: null })] }],
+      ['number 0', { items: [row({ invoiceNumber: 0 })] }],
+      ['a fraction', { items: [row({ invoiceNumber: 1009.5 })] }],
+      ['a boolean number', { items: [row({ invoiceNumber: true })] }],
+      ['an empty list that counts some', { items: [], totalCount: 2 }],
+      ['no list', { totalCount: 0 }],
+      ['no body', ''],
+      ['a row that is not an object', { items: ['inv-9'] }],
+    ])('is ambiguous for %s', async (_, body) => {
+      await expect(find(body)).resolves.toEqual({ kind: 'ambiguous' });
+    });
+
+    it('lets a refused session fail, for a fresh login', async () => {
+      replies.push(reply({ error: { message: 'Unauthorized' } }, 401));
+      await expect(
+        client.findByMarker('0107811836', session, query),
+      ).rejects.toBeInstanceOf(MinvoiceHttpError);
+    });
   });
 
   it('checks the MST before building a host name', () => {

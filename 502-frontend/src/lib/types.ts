@@ -9,6 +9,7 @@ export interface BranchRef {
 
 export interface Branch extends BranchRef {
   address: string | null;
+  taxCode: string | null;
   active: boolean;
 }
 
@@ -157,6 +158,9 @@ export interface Order {
   taxPercent: number;
   taxAmount: string | number;
   finalAmount: string | number;
+  // GET /orders/:id only: e-invoices of the bill, for the edit / void dialogs.
+  _count?: { einvoices: number };
+  einvoices?: { id: number }[];
 }
 
 type BillAmounts =
@@ -605,4 +609,140 @@ export interface DiscountRequestRow extends Omit<PendingDiscount, "after"> {
   decidedBy: StaffRef | null;
   branch: { id: number; code: string; name: string };
   order: { id: number; billNumber: string | null; status: OrderStatus; room: { id: number; name: string } | null };
+}
+
+// Hóa đơn điện tử (spec 2026-10-01).
+export type EinvoiceStatus = "DRAFT" | "SENDING" | "UNCERTAIN" | "ISSUED";
+export type VatRate = 0 | 5 | 8 | 10;
+
+export interface EinvoiceLine {
+  name: string;
+  unit: string;
+  quantity: number;
+  unitPrice: number; // whole đồng, before VAT
+  vatRate: VatRate;
+  vatAmount?: number; // filler line only
+}
+
+export interface EinvoiceDraft {
+  buyerAddress: string | null;
+  buyerEmail: string | null;
+  lines: EinvoiceLine[];
+}
+
+// GET /einvoices (newest 500).
+export interface EinvoiceRow {
+  id: number;
+  branchId: number;
+  orderId: number;
+  status: EinvoiceStatus;
+  amount: string;
+  vatAmount: string;
+  buyerTaxCode: string | null;
+  buyerName: string | null;
+  symbolCode: string | null;
+  invoiceDate: string | null; // YYYY-MM-DD
+  invoiceNumber: number | null;
+  lastError: string | null;
+  createdAt: string;
+  issuedAt: string | null;
+  createdBy: StaffRef | null;
+  issuedBy: StaffRef | null;
+  order: {
+    id: number;
+    billNumber: string | null;
+    finalAmount: string;
+    endTime: string | null;
+    cancelledAt: string | null;
+    editedAt: string | null;
+    room: { name: string } | null;
+  };
+}
+
+// One invoice with its draft (null once issued).
+export interface EinvoiceDetail extends EinvoiceRow {
+  draft: EinvoiceDraft | null;
+  sellerTaxCode: string | null;
+  minvoiceId: string | null;
+  updatedAt: string;
+  updatedBy: StaffRef | null;
+  numberEditedAt: string | null;
+  numberEditedBy: StaffRef | null;
+}
+
+// GET /einvoices/bills: paid bills of a day for the picker.
+export interface EinvoiceBill {
+  orderId: number;
+  billNumber: string | null;
+  roomName: string | null;
+  endTime: string | null;
+  finalAmount: string;
+  allocated: number;
+  einvoiceCount: number;
+}
+
+// GET /einvoices/bill/:orderId.
+export interface EinvoiceBillDetail {
+  order: {
+    id: number;
+    branchId: number;
+    status: OrderStatus;
+    billNumber: string | null;
+    startTime: string | null;
+    endTime: string | null;
+    finalAmount: string;
+    taxAmount: string;
+    taxPercent: number;
+    pricePerHour: string;
+    hourlyFee: string;
+    discountAmount: string;
+    hourlyDiscountAmount: string;
+    cancelledAt: string | null;
+    editedAt: string | null;
+    billedHours: number;
+    room: { name: string } | null;
+    items: { name: string; unit: string; quantity: number; price: string }[];
+  };
+  einvoices: EinvoiceDetail[];
+  allocated: number;
+}
+
+export interface EinvoiceSummary {
+  draftCount: number;
+  errorCount: number;
+  uncertainCount: number;
+  issuedCount: number;
+  issuedAmount: number;
+  issuedVat: number;
+}
+
+// GET /einvoice/config: never the password, cookie or token.
+export interface EinvoiceConfigView {
+  branchTaxCode: string | null;
+  username: string | null;
+  symbolCode: string | null;
+  registerInvoiceId: string | null;
+  sellerName: string | null;
+  loginError: string | null;
+  minInvoiceDate: string | null;
+  latestInvoiceNumber: number | null;
+  needsLogin: boolean;
+  configured: boolean;
+}
+
+export interface InvoiceSymbol {
+  registerInvoiceId: string;
+  symbolCode: string;
+  invoiceTypeName: string | null;
+  invoiceYear: number | null;
+  creationTime: string | null;
+}
+
+export interface TaxPayer {
+  taxCode: string;
+  name: string;
+  address: string;
+  status: string;
+  active: boolean;
+  source: "gdt" | "xinvoice";
 }

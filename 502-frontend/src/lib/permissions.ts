@@ -41,6 +41,10 @@ export type Permission =
   | "pr" // PR/KTV list and roll call (also any account with managesPr)
   | "pr.view" // the same, read only
   | "pr.assign" // put PR/KTV into a room (sales roles, and managesPr)
+  | "einvoices.view" // Hóa đơn điện tử (read; HĐQT too)
+  | "einvoices.write" // create, edit, delete drafts
+  | "einvoices.issue" // send to Minvoice, resolve "Không rõ", edit numbers
+  | "einvoices.config" // the branch's Minvoice account and symbol
   | "live"; // the WebSocket of the cashier/manager screens (sales roles)
 
 const MANAGERS: Role[] = ["CHAIN_MANAGER", "BRANCH_MANAGER"];
@@ -77,6 +81,10 @@ const MATRIX: Record<Permission, Role[]> = {
   pr: MANAGERS,
   "pr.view": READERS,
   "pr.assign": [...MANAGERS, "CASHIER"],
+  "einvoices.view": [...MANAGERS, "CASHIER", "BOARD"],
+  "einvoices.write": [...MANAGERS, "CASHIER"],
+  "einvoices.issue": ["CHAIN_MANAGER"],
+  "einvoices.config": ["CHAIN_MANAGER"],
   live: [...MANAGERS, "CASHIER"],
 };
 
@@ -99,6 +107,7 @@ const ROUTE_PERMISSIONS: [string, Permission][] = [
   ["/sales/statistics", "sales.reports"],
   ["/sales/overview", "sales.reports"],
   ["/sales/discounts", "discounts.view"],
+  ["/sales/einvoices", "einvoices.view"],
   ["/sales/settings", "catalog.view"],
   ["/inventory/stock", "reports"], // redirects to /reports/stock
   ["/inventory/documents", "inventory.view"],

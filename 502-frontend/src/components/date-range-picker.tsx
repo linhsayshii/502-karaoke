@@ -72,6 +72,8 @@ export function DatePicker({
   value,
   onChange,
   max,
+  min,
+  today: todayProp,
   align = "start",
   className,
   label,
@@ -80,13 +82,17 @@ export function DatePicker({
   onChange: (value: string) => void;
   // Last day that can be picked (YYYY-MM-DD), e.g. today's business day.
   max?: string;
+  // First day that can be picked (YYYY-MM-DD), e.g. the date of the newest e-invoice.
+  min?: string;
+  // The day "Hôm nay" picks; default today's business day (e-invoice dates use the calendar day).
+  today?: string;
   align?: "start" | "end";
   className?: string;
   // What the day is, for screen readers ("Ngày kinh doanh"); read before the date.
   label?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const today = parseISO(businessDate());
+  const today = parseISO(todayProp ?? businessDate());
   const dayPresets = [
     { label: "Hôm nay", day: ymd(today) },
     { label: "Hôm qua", day: ymd(subDays(today, 1)) },
@@ -115,6 +121,7 @@ export function DatePicker({
                 variant="ghost"
                 size="sm"
                 className="justify-start"
+                disabled={(!!min && preset.day < min) || (!!max && preset.day > max)}
                 onClick={() => apply(preset.day)}
               >
                 {preset.label}
@@ -128,7 +135,10 @@ export function DatePicker({
             locale={vi}
             defaultMonth={parseISO(value)}
             selected={parseISO(value)}
-            disabled={max ? { after: parseISO(max) } : undefined}
+            disabled={[
+              ...(max ? [{ after: parseISO(max) }] : []),
+              ...(min ? [{ before: parseISO(min) }] : []),
+            ]}
             // Clicking the selected day again keeps it.
             onSelect={(_, day) => apply(ymd(day))}
           />

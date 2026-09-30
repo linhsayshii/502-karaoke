@@ -1,4 +1,4 @@
-import type { FundType, GroupBy, OrderStatus, PaymentMethod, StaffRole, StockDocType, StockMovementType } from "@/lib/types";
+import type { EinvoiceStatus, FundType, GroupBy, OrderStatus, PaymentMethod, StaffRole, StockDocType, StockMovementType } from "@/lib/types";
 
 // Vietnamese labels of the business enums.
 
@@ -67,3 +67,16 @@ export const WEEKDAY_LABELS = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"];
 export const UNASSIGNED_STAFF = "Chưa gán";
 export const NO_ROOM = "Không phòng";
 export const NO_CATEGORY = "Không danh mục";
+
+// Hóa đơn điện tử: "Lỗi" is a draft whose last send failed. An issued row that
+// still carries a lastError is one whose Minvoice number clashed with one of
+// ours: its number is null and has to be fixed by hand.
+export function einvoiceStatusBadge(
+  status: EinvoiceStatus,
+  lastError: string | null,
+): { label: string; variant: "secondary" | "destructive" | "warning" | "success" } {
+  if (status === "DRAFT") return lastError ? { label: "Lỗi", variant: "destructive" } : { label: "Nháp", variant: "secondary" };
+  if (status === "SENDING") return { label: "Đang gửi", variant: "warning" };
+  if (status === "UNCERTAIN") return { label: "Không rõ", variant: "warning" };
+  return lastError ? { label: "Cần sửa số", variant: "warning" } : { label: "Đã xuất", variant: "success" };
+}

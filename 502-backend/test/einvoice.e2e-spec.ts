@@ -8,7 +8,10 @@ import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 import { EinvoiceConfigService } from '../src/einvoice/einvoice-config.service';
-import { EinvoicesService } from '../src/einvoice/einvoices.service';
+import {
+  EinvoicesService,
+  STALE_SENDING_MS,
+} from '../src/einvoice/einvoices.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { FakeMinvoice } from './fake-minvoice';
 
@@ -707,6 +710,53 @@ describe('E-invoices (e2e)', () => {
       ).body as Json;
       expect(edited.invoiceNumber).toBe(2001);
       expect(edited.numberEditedAt).not.toBeNull();
+    });
+
+    it('turns a send stuck for minutes into uncertain when it is read', async () => {
+      const id = await newDraft();
+      const prisma = app.get(PrismaService);
+      const stuck = () =>
+        prisma.einvoice.update({
+          where: { id },
+          data: {
+            status: 'SENDING',
+            sendingAt: new Date(Date.now() - STALE_SENDING_MS - 1000),
+          },
+        });
+      // A send still within its time is left alone.
+      await prisma.einvoice.update({
+        where: { id },
+        data: { status: 'SENDING', sendingAt: new Date() },
+      });
+      expect(
+        ((await as('admin').get(`/einvoices/${id}`).expect(200)).body as Json)
+          .status,
+      ).toBe('SENDING');
+      await stuck();
+      const row = (await as('tn1_cs1').get(`/einvoices/${id}`).expect(200))
+        .body as Json;
+      expect(row).toMatchObject({
+        status: 'UNCERTAIN',
+        lastError: 'Lần gửi bị cắt ngang, hãy đối chiếu trên Minvoice',
+      });
+      await as('admin')
+        .post(`/einvoices/${id}/resolve`, { found: false })
+        .expect(200);
+      // The bill panel sweeps its rows the same way.
+      await stuck();
+      const detail = (
+        await as('tn1_cs1').get(`/einvoices/bill/${orderId}`).expect(200)
+      ).body as Json;
+      expect(
+        (detail.einvoices as Json[]).find((e) => e.id === id),
+      ).toMatchObject({ status: 'UNCERTAIN' });
+      const back = (
+        await as('admin')
+          .post(`/einvoices/${id}/resolve`, { found: false })
+          .expect(200)
+      ).body as Json;
+      expect(back.status).toBe('DRAFT');
+      await as('tn1_cs1').delete(`/einvoices/${id}`).expect(200);
     });
 
     it('turns a send cut off by a restart into uncertain', async () => {

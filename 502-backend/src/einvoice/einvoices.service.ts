@@ -124,6 +124,21 @@ const errorText = (message: string) => message.slice(0, 300);
 
 const NOT_UNCERTAIN = 'Hóa đơn không ở trạng thái "Không rõ"';
 
+// Longer than any send (≈80 s of Minvoice timeouts in the worst chain, plus
+// database waits): a row still SENDING after this was cut off without a
+// restart (e.g. saving its outcome failed) and goes to the "Không rõ" flow
+// when it is read.
+export const STALE_SENDING_MS = 3 * 60_000;
+const STALE_SENDING_ERROR = 'Lần gửi bị cắt ngang, hãy đối chiếu trên Minvoice';
+
+// The kind and Prisma code of an error, for a log line: never its message,
+// which may quote the values written.
+function errorKind(error: unknown): string {
+  if (!(error instanceof Error)) return 'unknown error';
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' ? `${error.name} ${code}` : error.name;
+}
+
 @Injectable()
 export class EinvoicesService implements OnApplicationBootstrap {
   private readonly logger = new Logger(EinvoicesService.name);
@@ -290,20 +305,27 @@ export class EinvoicesService implements OnApplicationBootstrap {
       throw new BadRequestException('Phòng chưa thanh toán');
     }
 
-    const [einvoices, allocated] = await Promise.all([
-      // A bill split into more than 200 invoices is not a real case; the cap
-      // keeps the answer bounded.
+    // A bill split into more than 200 invoices is not a real case; the cap
+    // keeps the answer bounded.
+    const readInvoices = () =>
       this.prisma.einvoice.findMany({
         where: { orderId },
         select: einvoiceDetailSelect,
         orderBy: { id: 'asc' },
         take: 200,
-      }),
+      });
+    const [listed, allocated] = await Promise.all([
+      readInvoices(),
       this.prisma.einvoice.aggregate({
         where: { orderId },
         _sum: { amount: true },
       }),
     ]);
+    const einvoices =
+      listed.some((e) => e.status === EinvoiceStatus.SENDING) &&
+      (await this.sweepStaleSending({ orderId }))
+        ? await readInvoices()
+        : listed;
     const minutes =
       order.startTime && order.endTime
         ? Math.max(
@@ -331,12 +353,20 @@ export class EinvoicesService implements OnApplicationBootstrap {
   }
 
   async findOne(user: AuthUser, id: number) {
-    const row = await this.prisma.einvoice.findUnique({
-      where: { id },
-      select: einvoiceDetailSelect,
-    });
+    const read = () =>
+      this.prisma.einvoice.findUnique({
+        where: { id },
+        select: einvoiceDetailSelect,
+      });
+    let row = await read();
     if (!row) throw new NotFoundException('Không tìm thấy hóa đơn điện tử');
     this.scope.assertBranchAccess(user, row.branchId);
+    if (
+      row.status === EinvoiceStatus.SENDING &&
+      (await this.sweepStaleSending({ id }))
+    ) {
+      row = (await read()) ?? row;
+    }
     return toEinvoiceRow(row);
   }
 
@@ -592,7 +622,49 @@ export class EinvoicesService implements OnApplicationBootstrap {
     );
   }
 
+  // A SENDING row whose send has long ended (spec §9.1: saving its outcome
+  // failed) becomes UNCERTAIN. record() still writes by id, so a result that
+  // arrives later lands over it.
+  private async sweepStaleSending(where: { id: number } | { orderId: number }) {
+    const { count } = await this.prisma.einvoice.updateMany({
+      where: {
+        ...where,
+        status: EinvoiceStatus.SENDING,
+        sendingAt: { lt: new Date(Date.now() - STALE_SENDING_MS) },
+      },
+      data: {
+        status: EinvoiceStatus.UNCERTAIN,
+        lastError: errorText(STALE_SENDING_ERROR),
+      },
+    });
+    return count > 0;
+  }
+
+  // Any failed write leaves the row SENDING (a restart or a read after
+  // STALE_SENDING_MS makes it UNCERTAIN); the log keeps what Minvoice
+  // answered, never the payload, draft or session.
   private async record(
+    user: AuthUser,
+    id: number,
+    ready: IssueConfig,
+    lines: EinvoiceLine[],
+    outcome: SendOutcome,
+  ) {
+    try {
+      await this.writeOutcome(user, id, ready, lines, outcome);
+    } catch (error) {
+      const answer =
+        outcome.kind === 'issued'
+          ? ` (Minvoice number ${outcome.invoiceNumber}, id ${outcome.minvoiceId})`
+          : '';
+      this.logger.error(
+        `Einvoice ${id}: saving the ${outcome.kind} outcome${answer} failed: ${errorKind(error)}`,
+      );
+      throw error;
+    }
+  }
+
+  private async writeOutcome(
     user: AuthUser,
     id: number,
     ready: IssueConfig,
@@ -651,14 +723,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
         },
       });
     } catch (error) {
-      if (!isUniqueViolation(error)) {
-        // The row stays SENDING and becomes UNCERTAIN at the next start-up.
-        this.logger.error(
-          `Einvoice ${id}: Minvoice issued number ${outcome.invoiceNumber} (id ${outcome.minvoiceId}) but saving it failed`,
-          error instanceof Error ? error.stack : undefined,
-        );
-        throw error;
-      }
+      if (!isUniqueViolation(error)) throw error;
       const holder = await this.prisma.einvoice.findFirst({
         where: {
           sellerTaxCode: outcome.config.taxCode,

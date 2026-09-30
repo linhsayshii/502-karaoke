@@ -78,7 +78,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Báo cáo",
     items: [
-      { title: "Doanh thu", path: "/reports/revenue", icon: ChartColumnBig, permission: "reports" },
+      { title: "Doanh thu", path: "/reports/revenue", icon: ChartColumnBig, permission: "reports.revenue" },
       { title: "Nhân viên", path: "/reports/staff", icon: UserRound, permission: "reports" },
       { title: "Phòng", path: "/reports/rooms", icon: DoorOpen, permission: "reports" },
       { title: "Hàng hóa", path: "/reports/products", icon: Package, permission: "reports" },

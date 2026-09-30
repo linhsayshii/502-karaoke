@@ -38,7 +38,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/components/auth-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ListLimitNotice, TableEmpty, TableSkeleton } from "@/components/data-states";
@@ -220,17 +220,12 @@ export default function PrStaffPage() {
               />
             </InputGroup>
             <DateRangePicker value={range} onChange={setRange} />
-            <ToggleGroup
-              type="single"
-              variant="outline"
-              size="sm"
-              value={sortBy}
-              onValueChange={(v) => v && setSortBy(v as "name" | "hours")}
-              aria-label="Sắp xếp"
-            >
-              <ToggleGroupItem value="name">Tên</ToggleGroupItem>
-              <ToggleGroupItem value="hours">Số giờ</ToggleGroupItem>
-            </ToggleGroup>
+            <Tabs value={sortBy} onValueChange={(v) => setSortBy(v as "name" | "hours")}>
+              <TabsList aria-label="Sắp xếp">
+                <TabsTrigger value="name">Theo tên</TabsTrigger>
+                <TabsTrigger value="hours">Theo số giờ</TabsTrigger>
+              </TabsList>
+            </Tabs>
             <div className="flex items-center gap-2 md:ml-auto">
               <Switch id="show-left" checked={showInactive} onCheckedChange={setShowInactive} />
               <Label htmlFor="show-left" className="font-normal">

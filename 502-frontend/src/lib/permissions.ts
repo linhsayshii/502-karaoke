@@ -21,8 +21,9 @@ export type Permission =
   | "sales.void" // void a paid bill (chain manager only)
   | "discounts.approve" // approve / reject cashiers' discount requests
   | "discounts.view" // discount log (read only)
-  | "sales.reports" // bill list (view)
+  | "sales.reports" // bill list (view; the cashier too)
   | "reports" // Báo cáo (managers)
+  | "reports.revenue" // the Doanh thu report (the cashier too)
   | "reports.chain" // whole-chain reports and branch comparison
   | "sales.settings" // change rooms, categories, products
   | "catalog.view" // rooms, categories, products (read only)
@@ -45,6 +46,8 @@ export type Permission =
 const MANAGERS: Role[] = ["CHAIN_MANAGER", "BRANCH_MANAGER"];
 // HĐQT is read-only: it only appears in the "view" permissions below.
 const READERS: Role[] = [...MANAGERS, "BOARD"];
+// The cashier also looks at the bills and the revenue of their branch.
+const SALES_READERS: Role[] = [...READERS, "CASHIER"];
 
 const MATRIX: Record<Permission, Role[]> = {
   "branch.switch": ["CHAIN_MANAGER", "BOARD"],
@@ -54,8 +57,9 @@ const MATRIX: Record<Permission, Role[]> = {
   "sales.void": ["CHAIN_MANAGER"],
   "discounts.approve": MANAGERS,
   "discounts.view": READERS,
-  "sales.reports": READERS,
+  "sales.reports": SALES_READERS,
   reports: READERS,
+  "reports.revenue": SALES_READERS,
   "reports.chain": ["CHAIN_MANAGER", "BOARD"],
   "sales.settings": MANAGERS,
   "catalog.view": READERS,
@@ -90,6 +94,7 @@ export function can(user: User | null, permission: Permission): boolean {
 // Page permissions by path after /[branch]; first match wins.
 const ROUTE_PERMISSIONS: [string, Permission][] = [
   ["/reports/branches", "reports.chain"],
+  ["/reports/revenue", "reports.revenue"],
   ["/reports", "reports"],
   ["/sales/statistics", "sales.reports"],
   ["/sales/overview", "sales.reports"],

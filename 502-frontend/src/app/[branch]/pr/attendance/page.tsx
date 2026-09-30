@@ -38,6 +38,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/components/auth-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ListLimitNotice, TableEmpty, TableSkeleton } from "@/components/data-states";
+import { DatePicker } from "@/components/date-range-picker";
 import { PageHeader } from "@/components/layout/page-header";
 import { useApiData } from "@/hooks/use-api-data";
 import { useNotify } from "@/hooks/use-notify";
@@ -216,13 +217,13 @@ export default function PrAttendancePage() {
         description={`Ngày kinh doanh ${formatDate(date)}${isToday ? " (hôm nay)" : ""}`}
         info="Mỗi PR/KTV được điểm danh một lần mỗi ngày kinh doanh (06:00 hôm đó đến 06:00 hôm sau): bấm “Vào” khi đến, “Ra” khi về. Ngày đã qua thì nhập giờ vào bằng tay. Thêm người mới ở Thống kê PR."
         actions={
-          <Input
-            type="date"
-            aria-label="Ngày kinh doanh"
-            className="w-full md:w-44"
+          <DatePicker
+            label="Ngày kinh doanh"
+            className="w-full md:w-auto"
             value={date}
             max={today}
-            onChange={(e) => setDate(e.target.value || today)}
+            onChange={setDate}
+            align="end"
           />
         }
       />

@@ -189,8 +189,18 @@ describe('Reports (e2e)', () => {
   });
 
   describe('access', () => {
-    it('is for managers only, within their own branch', async () => {
-      await as('tn1_cs1').get(`/reports/revenue?${period}`).expect(403);
+    it('is for managers and the cashier, within their own branch', async () => {
+      const cashier = (
+        await as('tn1_cs1').get(`/reports/revenue?${period}`).expect(200)
+      ).body as Json;
+      const manager = (
+        await as('ql1_cs1').get(`/reports/revenue?${period}`).expect(200)
+      ).body as Json;
+      expect(cashier).toEqual(manager);
+      await as('tn1_cs1')
+        .get(`/reports/revenue?${period}&branch=cs2`)
+        .expect(403);
+      await as('tn1_cs1').get(`/reports/profit?${period}`).expect(403);
       await as('ql1_cs1')
         .get(`/reports/revenue?${period}&branch=cs2`)
         .expect(403);

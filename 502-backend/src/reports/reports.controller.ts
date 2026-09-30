@@ -4,7 +4,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/auth-user';
 import { SharedRequestInterceptor } from '../common/shared-request.interceptor';
-import { READERS, ALL_BRANCH_ROLES } from '../auth/roles';
+import { READERS, ALL_BRANCH_ROLES, SALES_READERS } from '../auth/roles';
 import { ReportsService } from './reports.service';
 import { BreakdownReportsService } from './breakdown-reports.service';
 import { AccountingReportsService } from './accounting-reports.service';
@@ -29,8 +29,10 @@ export class ReportsController {
   ) {}
 
   // Revenue (before VAT, VAT apart) per period; the whole chain when the
-  // chain manager leaves out ?branch.
+  // chain manager leaves out ?branch. The one report the cashier also sees
+  // (own branch only, like everyone with a branch).
   @Get('revenue')
+  @Roles(...SALES_READERS)
   revenue(@CurrentUser() user: AuthUser, @Query() query: ReportQuery) {
     return this.reportsService.revenue(user, query);
   }

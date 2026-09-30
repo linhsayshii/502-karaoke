@@ -66,6 +66,78 @@ export function formatDateRange({ from, to }: DateRangeValue) {
   return from === to ? dmy(from) : `${dmy(from)} – ${dmy(to)}`;
 }
 
+// One business day (YYYY-MM-DD): the same box as the range picker, for the
+// screens that show a single day (the PR/KTV roll call).
+export function DatePicker({
+  value,
+  onChange,
+  max,
+  align = "start",
+  className,
+  label,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  // Last day that can be picked (YYYY-MM-DD), e.g. today's business day.
+  max?: string;
+  align?: "start" | "end";
+  className?: string;
+  // What the day is, for screen readers ("Ngày kinh doanh"); read before the date.
+  label?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const today = parseISO(businessDate());
+  const dayPresets = [
+    { label: "Hôm nay", day: ymd(today) },
+    { label: "Hôm qua", day: ymd(subDays(today, 1)) },
+    { label: "Hôm kia", day: ymd(subDays(today, 2)) },
+  ];
+
+  const apply = (day: string) => {
+    onChange(day);
+    setOpen(false);
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" aria-label={label && `${label}: ${dmy(value)}`} className={cn("justify-start font-normal", className)}>
+          <CalendarIcon data-icon="inline-start" />
+          {dmy(value)}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-auto p-0" align={align} collisionPadding={16}>
+        <div className="flex flex-col sm:flex-row">
+          <div className="flex w-0 min-w-full flex-wrap gap-1 p-3 sm:w-36 sm:min-w-0 sm:flex-col">
+            {dayPresets.map((preset) => (
+              <Button
+                key={preset.label}
+                variant="ghost"
+                size="sm"
+                className="justify-start"
+                onClick={() => apply(preset.day)}
+              >
+                {preset.label}
+              </Button>
+            ))}
+          </div>
+          <Separator orientation="vertical" className="hidden h-auto sm:block" />
+          <Separator className="sm:hidden" />
+          <Calendar
+            mode="single"
+            locale={vi}
+            defaultMonth={parseISO(value)}
+            selected={parseISO(value)}
+            disabled={max ? { after: parseISO(max) } : undefined}
+            // Clicking the selected day again keeps it.
+            onSelect={(_, day) => apply(ymd(day))}
+          />
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 // Date range filter of the reports: presets + a calendar (Vietnamese).
 export function DateRangePicker({
   value,

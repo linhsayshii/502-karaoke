@@ -267,9 +267,17 @@ describe('Foundation (e2e)', () => {
       await as('tn1_cs1').get('/inventory/stock').expect(403);
       await as('tn1_cs1').get('/funds').expect(403);
       await as('tn1_cs1')
-        .get('/reports/revenue?from=2026-01-01&to=2026-01-02')
+        .get('/reports/profit?from=2026-01-01&to=2026-01-02')
         .expect(403);
-      await as('tn1_cs1').get('/orders').expect(403);
+      // Bills and the revenue report of their own branch are theirs to see.
+      await as('tn1_cs1')
+        .get('/reports/revenue?from=2026-01-01&to=2026-01-02')
+        .expect(200);
+      await as('tn1_cs1').get('/orders').expect(200);
+      await as('tn1_cs1').get('/orders?branch=cs2').expect(403);
+      await as('tn1_cs1')
+        .get('/orders/summary?from=2026-01-01&to=2026-01-02&branch=cs2')
+        .expect(403);
       await as('tn1_cs1').get('/users').expect(403);
       await as('tn1_cs1')
         .post('/rooms', { name: 'X', type: 'NORMAL', pricePerHour: 1 })
@@ -775,7 +783,11 @@ describe('Foundation (e2e)', () => {
         collected: finalAmount,
         vat: Number(order.taxAmount),
       });
-      await as('tn1_cs2').get(`/orders/summary?${period}`).expect(403);
+      // The cashier sees the same bills and totals of the branch.
+      expect(
+        (await as('tn1_cs2').get(`/orders/summary?${period}`).expect(200)).body,
+      ).toEqual(totals);
+      await as('pv1_cs1').get(`/orders/summary?${period}`).expect(403);
     });
 
     it('cancels only manual fund entries, with a reason', async () => {

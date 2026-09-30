@@ -49,7 +49,15 @@ export function LiveEventsProvider({ children }: { children: React.ReactNode }) 
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let graceTimer: ReturnType<typeof setTimeout> | undefined;
 
-    const dispatch = (event: LiveEvent) => listeners.current.forEach((l) => l(event));
+    // One throwing subscriber must not skip the others or escape onmessage.
+    const dispatch = (event: LiveEvent) =>
+      listeners.current.forEach((l) => {
+        try {
+          l(event);
+        } catch (error) {
+          console.error("Live event listener failed", error);
+        }
+      });
     const sendAuth = (ws: WebSocket) => {
       const token = getAccessToken();
       if (token && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "auth", token }));
@@ -62,7 +70,11 @@ export function LiveEventsProvider({ children }: { children: React.ReactNode }) 
       ws.onmessage = (e) => {
         let message: LiveEvent | { type: "ready" };
         try {
-          message = JSON.parse(String(e.data));
+          const parsed: unknown = JSON.parse(String(e.data));
+          if (typeof parsed !== "object" || parsed === null || typeof (parsed as { type?: unknown }).type !== "string") {
+            return;
+          }
+          message = parsed as LiveEvent | { type: "ready" };
         } catch {
           return;
         }

@@ -11,6 +11,7 @@ import { AdjustmentDiff } from "@/components/discounts/adjustment-diff";
 import { DISCOUNTS_CHANGED } from "@/hooks/use-pending-discounts";
 import { useApiData } from "@/hooks/use-api-data";
 import { useNotify } from "@/hooks/use-notify";
+import { useLiveEvent, useLiveInterval } from "@/hooks/use-live-events";
 import { usePolling } from "@/hooks/use-polling";
 import api from "@/lib/api";
 import { formatTime } from "@/lib/format";
@@ -28,7 +29,10 @@ export function PendingRequests() {
   );
   const [rejecting, setRejecting] = useState<DiscountRequestRow | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
-  usePolling(reload, 15_000);
+  usePolling(reload, useLiveInterval(60_000, 15_000));
+  useLiveEvent((event) => {
+    if (event.type === "discount.requested" || event.type === "discount.decided" || event.type === "reconnected") reload();
+  });
 
   // Reload the queue and tell the sidebar badge to refresh at once.
   const done = () => {

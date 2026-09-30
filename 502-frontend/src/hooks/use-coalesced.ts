@@ -15,6 +15,9 @@ export function useCoalesced(fn: () => void, waitMs: number): () => void {
   useEffect(
     () => () => {
       if (timer.current) clearTimeout(timer.current);
+      // Also reset it: a cleanup without a real unmount (Fast Refresh, React
+      // Activity) must not leave the coalescer thinking a run is pending.
+      timer.current = null;
     },
     [],
   );

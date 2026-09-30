@@ -59,6 +59,8 @@ import { BillSummary } from "@/components/sales/bill-summary";
 import { CheckoutDialog } from "@/components/sales/checkout-dialog";
 import { PrPicker } from "@/components/sales/pr-picker";
 import { RoomPrList, type PrTimes } from "@/components/sales/room-pr-list";
+import { useCoalesced } from "@/hooks/use-coalesced";
+import { useLiveEvent, useLiveInterval } from "@/hooks/use-live-events";
 import { useNotify } from "@/hooks/use-notify";
 import { useNow } from "@/hooks/use-now";
 import { usePolling } from "@/hooks/use-polling";
@@ -205,27 +207,33 @@ export default function RoomDetailPage() {
       .catch(() => notify.warning("Yêu cầu giảm giá đã được xử lý"));
   }, [order?.discountRequests, canOperate, notify]);
 
-  // Pick up changes made on another device (and notice a closed session).
+  // Pick up changes made on another device (and notice a closed session):
+  // every 15 s, 60 s while the socket signals this order's changes.
   const activeOrderId = order?.id;
-  usePolling(
-    async () => {
-      if (activeOrderId === undefined || pendingRef.current > 0) return;
-      try {
-        const res = await api.get<Order>(`/orders/${activeOrderId}`);
-        if (pendingRef.current > 0) return;
-        if (res.data.status !== "PENDING") {
-          notify.success(`Phòng ${room?.name ?? ""} đã được đóng trên máy khác`);
-          router.push(roomsPath);
-          return;
-        }
-        if (res.data.updatedAt !== orderRef.current?.updatedAt) applyOrder(res.data);
-      } catch {
-        // Next tick retries; errors of user actions are reported where they happen.
+  const refreshOrder = useCallback(async () => {
+    if (activeOrderId === undefined || pendingRef.current > 0) return;
+    try {
+      const res = await api.get<Order>(`/orders/${activeOrderId}`);
+      if (pendingRef.current > 0) return;
+      if (res.data.status !== "PENDING") {
+        notify.success(`Phòng ${room?.name ?? ""} đã được đóng trên máy khác`);
+        router.push(roomsPath);
+        return;
       }
-    },
-    15_000,
-    activeOrderId !== undefined,
-  );
+      if (res.data.updatedAt !== orderRef.current?.updatedAt) applyOrder(res.data);
+    } catch {
+      // Next tick retries; errors of user actions are reported where they happen.
+    }
+  }, [activeOrderId, room?.name, router, roomsPath, applyOrder, notify]);
+  const orderInterval = useLiveInterval(60_000, 15_000);
+  usePolling(refreshOrder, orderInterval, activeOrderId !== undefined);
+  const refreshSoon = useCoalesced(refreshOrder, 1000);
+  useLiveEvent((event) => {
+    if (event.type === "reconnected") refreshSoon();
+    else if ((event.type === "order.changed" || event.type === "discount.decided") && event.orderId === activeOrderId) {
+      refreshSoon();
+    }
+  });
 
   // Every write of the order goes through one queue, each built on the latest
   // saved order, so quick taps and PR/KTV changes never overwrite each other.

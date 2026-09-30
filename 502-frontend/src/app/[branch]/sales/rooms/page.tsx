@@ -12,6 +12,8 @@ import { useAuth } from "@/components/auth-provider";
 import { EmptyState } from "@/components/data-states";
 import { PageHeader } from "@/components/layout/page-header";
 import { OpenRoomDialog } from "@/components/sales/open-room-dialog";
+import { useCoalesced } from "@/hooks/use-coalesced";
+import { useLiveEvent, useLiveInterval } from "@/hooks/use-live-events";
 import { useNotify } from "@/hooks/use-notify";
 import { useNow } from "@/hooks/use-now";
 import { usePolling } from "@/hooks/use-polling";
@@ -92,7 +94,7 @@ function groupByFloor(rooms: Room[]) {
 export default function RoomsPage() {
   const router = useRouter();
   const branch = useBranchCode();
-  const { user } = useAuth();
+  const { user, branches } = useAuth();
   const notify = useNotify();
   const now = useNow();
   const canOperate = can(user, "sales.operate");
@@ -133,8 +135,17 @@ export default function RoomsPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
-  // Keep the map fresh when several cashiers work at the same time.
-  usePolling(() => fetchData(false), 30_000);
+  // Keep the map fresh when several cashiers work at the same time: every
+  // 30 s, or every 60 s while the socket reports the branch's changes.
+  const roomsInterval = useLiveInterval(60_000, 30_000);
+  usePolling(() => fetchData(false), roomsInterval);
+  // The id of the branch on the URL (the chain manager may look at any).
+  const branchId = branches.find((b) => b.code === branch)?.id;
+  const refreshRooms = useCoalesced(() => fetchData(false), 1000);
+  useLiveEvent((event) => {
+    if (event.type === "reconnected") refreshRooms();
+    else if (event.type === "room.changed" && event.branchId === branchId) refreshRooms();
+  });
   usePolling(
     async () => {
       try {

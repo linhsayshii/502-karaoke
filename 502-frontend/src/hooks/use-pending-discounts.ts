@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/components/auth-provider";
+import { useLiveEvent, useLiveInterval } from "@/hooks/use-live-events";
 import { usePolling } from "@/hooks/use-polling";
 import api from "@/lib/api";
 import { can } from "@/lib/permissions";
@@ -11,7 +12,7 @@ import { can } from "@/lib/permissions";
 export const DISCOUNTS_CHANGED = "discounts-changed";
 
 // Requests waiting for this manager (own branch; the chain manager: every
-// branch). Polled every 15 s on managers' screens only; null for others.
+// branch). Polled every 15 s (60 s while the socket is up) on managers' screens only; null for others.
 export function usePendingDiscounts(): number | null {
   const { user } = useAuth();
   const enabled = can(user, "discounts.approve");
@@ -49,7 +50,13 @@ export function usePendingDiscounts(): number | null {
       window.removeEventListener(DISCOUNTS_CHANGED, load);
     };
   }, [enabled, load]);
-  usePolling(load, 15_000, enabled);
+  usePolling(load, useLiveInterval(60_000, 15_000), enabled);
+  // A new or decided request reloads the count at once (the toast still
+  // fires from the count growing, so it never fires twice).
+  useLiveEvent((event) => {
+    if (!enabled) return;
+    if (event.type === "discount.requested" || event.type === "discount.decided" || event.type === "reconnected") load();
+  });
 
   return enabled ? count : null;
 }

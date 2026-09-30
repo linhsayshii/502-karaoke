@@ -67,6 +67,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-karaoke_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-karaoke_db}?schema=public&connection_limit=10&pool_timeout=20
       JWT_SECRET: ${JWT_SECRET:?Đặt JWT_SECRET trong .env}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Đặt JWT_REFRESH_SECRET trong .env}
+      EINVOICE_SECRET: ${EINVOICE_SECRET:?Đặt EINVOICE_SECRET trong .env (openssl rand -base64 32)}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}

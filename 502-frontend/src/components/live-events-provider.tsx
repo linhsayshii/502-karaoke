@@ -33,8 +33,10 @@ const CLOSE_EXPIRED = 4002;
 // A close for auth (4001/4002) while a token is held means the token ran out
 // (typically in a hidden tab, where polling does not renew it): the provider
 // renews the session itself and reconnects at once instead of retrying with
-// the dead token; if the renewal fails the auth provider signs the user out,
-// which switches `enabled` off. A new token while no socket is open (renewed
+// the dead token. If the renewal is refused for good (401/403) the auth
+// provider signs the user out, which switches `enabled` off; if it fails
+// for a transient reason (server busy, network) the normal backoff reconnect
+// applies and the session stays. A new token while no socket is open (renewed
 // by a 401 elsewhere, or the tab coming back) reconnects at once too. If a
 // reconnect right after a renewal is refused again before `ready`, the normal
 // backoff applies, so a server that keeps refusing is never hammered.
@@ -73,6 +75,14 @@ export function LiveEventsProvider({ children }: { children: React.ReactNode }) 
     const sendAuth = (ws: WebSocket) => {
       const token = getAccessToken();
       if (token && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "auth", token }));
+    };
+
+    // The normal backoff: 1, 2, 4… s up to 30 s (flat 30 s after a 1013) plus
+    // 0–1 s of jitter. Used by every close that is not retried at once.
+    const scheduleReconnect = (code: number) => {
+      const base = code === CLOSE_TOO_MANY ? MAX_BACKOFF_MS : Math.min(MAX_BACKOFF_MS, 1000 * 2 ** attempt);
+      attempt += 1;
+      reconnectTimer = setTimeout(connect, base + Math.random() * 1000);
     };
 
     const connect = () => {
@@ -114,15 +124,19 @@ export function LiveEventsProvider({ children }: { children: React.ReactNode }) 
         if ((e.code === CLOSE_AUTH || e.code === CLOSE_EXPIRED) && getAccessToken() && !renewedNoReady) {
           renewedNoReady = true;
           void refreshSession().then((ok) => {
-            if (!ok || stopped) return;
+            if (stopped) return;
+            if (!ok) {
+              // Not renewed: a sign-out flips `enabled` and the cleanup stops
+              // everything; otherwise the failure was transient, so retry.
+              scheduleReconnect(e.code);
+              return;
+            }
             attempt = 0;
             connect();
           });
           return;
         }
-        const base = e.code === CLOSE_TOO_MANY ? MAX_BACKOFF_MS : Math.min(MAX_BACKOFF_MS, 1000 * 2 ** attempt);
-        attempt += 1;
-        reconnectTimer = setTimeout(connect, base + Math.random() * 1000);
+        scheduleReconnect(e.code);
       };
       // onclose follows every error; nothing to do here.
       ws.onerror = () => {};

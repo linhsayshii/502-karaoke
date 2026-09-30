@@ -109,8 +109,11 @@ api.interceptors.response.use(
 
 // Renews the access token from the refresh cookie without any request having
 // failed (the live socket calls it when the server closes it for an expired
-// token). True when a new token is in place; false when the session is over,
-// in which case the user is signed out exactly as after a failed 401 retry.
+// token). True when a new token is in place. False when it could not be
+// renewed: only a 401/403 from /auth/refresh means the session is over (the
+// user is then signed out exactly as after a failed 401 retry); any other
+// failure (503 "Hệ thống đang bận", network error, timeout) is transient, so
+// the session is left alone and the caller retries later.
 export async function refreshSession(): Promise<boolean> {
   try {
     const response = await api.post('/auth/refresh');
@@ -118,7 +121,9 @@ export async function refreshSession(): Promise<boolean> {
     setSession(access_token, expiresAt);
     return true;
   } catch (error) {
-    endSession(error);
+    if (axios.isAxiosError(error) && [401, 403].includes(error.response?.status ?? 0)) {
+      endSession(error);
+    }
     return false;
   }
 }

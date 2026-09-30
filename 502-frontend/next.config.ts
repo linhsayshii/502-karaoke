@@ -4,7 +4,8 @@ import type { NextConfig } from "next";
 // so the Docker image sets it as a build arg; unset, it keeps pointing at production.
 const apiProxyTarget = process.env.API_PROXY_TARGET || 'https://kara.hvlsv.uk';
 
-// The API origin the browser calls, when it is not the app's own origin (/api).
+// The API origin the browser calls, when it is not the app's own origin (/api),
+// and the WebSocket (/api/ws) of the same API origin.
 function apiOrigin() {
   const url = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
   try {
@@ -23,7 +24,7 @@ const contentSecurityPolicy = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
-  `connect-src 'self'${apiOrigin() ? ` ${apiOrigin()}` : ''}`,
+  `connect-src 'self'${apiOrigin() ? ` ${apiOrigin()} ${apiOrigin()!.replace(/^http/, 'ws')}` : ''}`,
   "worker-src 'self' blob:",
   "object-src 'none'",
   "base-uri 'self'",

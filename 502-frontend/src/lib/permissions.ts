@@ -39,7 +39,8 @@ export type Permission =
   | "imports" // Excel import (each kind also needs its own permission)
   | "pr" // PR/KTV list and roll call (also any account with managesPr)
   | "pr.view" // the same, read only
-  | "pr.assign"; // put PR/KTV into a room (sales roles, and managesPr)
+  | "pr.assign" // put PR/KTV into a room (sales roles, and managesPr)
+  | "live"; // the WebSocket of the cashier/manager screens (sales roles)
 
 const MANAGERS: Role[] = ["CHAIN_MANAGER", "BRANCH_MANAGER"];
 // HĐQT is read-only: it only appears in the "view" permissions below.
@@ -72,6 +73,7 @@ const MATRIX: Record<Permission, Role[]> = {
   pr: MANAGERS,
   "pr.view": READERS,
   "pr.assign": [...MANAGERS, "CASHIER"],
+  live: [...MANAGERS, "CASHIER"],
 };
 
 // Given by the account's "Quản lý PR/KTV" flag, whatever its role.

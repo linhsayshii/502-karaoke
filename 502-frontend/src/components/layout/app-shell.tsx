@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/app-sidebar";
+import { LiveEventsProvider } from "@/components/live-events-provider";
 import { PageTitleProvider } from "@/components/layout/page-title";
 import { SiteHeader } from "@/components/layout/site-header";
 import { RouteGuard } from "@/components/route-guard";
@@ -29,22 +30,24 @@ export function AppShell({ defaultOpen, children }: { defaultOpen: boolean; chil
         } as React.CSSProperties
       }
     >
-      {!fullScreen && <AppSidebar variant="inset" />}
-      <SidebarInset className="min-w-0">
-        <PageTitleProvider>
-          {!fullScreen && <SiteHeader />}
-          <div className="@container/main flex flex-1 flex-col">
-            <RouteGuard>
-              <div
-                key={pathname}
-                className="flex flex-1 flex-col gap-4 p-4 animate-in duration-300 ease-out fade-in-0 slide-in-from-bottom-2 motion-reduce:animate-none md:gap-6 md:p-6"
-              >
-                {children}
-              </div>
-            </RouteGuard>
-          </div>
-        </PageTitleProvider>
-      </SidebarInset>
+      <LiveEventsProvider>
+        {!fullScreen && <AppSidebar variant="inset" />}
+        <SidebarInset className="min-w-0">
+          <PageTitleProvider>
+            {!fullScreen && <SiteHeader />}
+            <div className="@container/main flex flex-1 flex-col">
+              <RouteGuard>
+                <div
+                  key={pathname}
+                  className="flex flex-1 flex-col gap-4 p-4 animate-in duration-300 ease-out fade-in-0 slide-in-from-bottom-2 motion-reduce:animate-none md:gap-6 md:p-6"
+                >
+                  {children}
+                </div>
+              </RouteGuard>
+            </div>
+          </PageTitleProvider>
+        </SidebarInset>
+      </LiveEventsProvider>
     </SidebarProvider>
   );
 }

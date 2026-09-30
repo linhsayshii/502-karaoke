@@ -15,6 +15,9 @@ export const setSession = (token: string | null, expiresAt?: string | null) => {
 
 export const getSessionExpiresAt = () => sessionExpiresAt;
 
+// The current access token (memory only), for the WebSocket's auth message.
+export const getAccessToken = () => accessToken;
+
 // Called whenever the session changes (login, renewal, logout) with its end time.
 export function onSessionChange(listener: (expiresAt: number | null) => void) {
   sessionListeners.add(listener);

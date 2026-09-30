@@ -90,12 +90,13 @@ export function BuyerFields({
               disabled={locked}
               onClick={() => {
                 setFound(null);
-                // An issued invoice keeps no draft, so its address and email
-                // come empty: an empty source field must not blank what is
-                // typed here.
+                // MST and name come as a pair (a person without MST must not
+                // keep the MST of a company typed before). An issued invoice
+                // keeps no draft, so its address and email come empty: an
+                // empty source must not blank what is typed here.
                 onChange({
-                  buyerTaxCode: previous.buyerTaxCode || value.buyerTaxCode,
-                  buyerName: previous.buyerName || value.buyerName,
+                  buyerTaxCode: previous.buyerTaxCode,
+                  buyerName: previous.buyerName,
                   buyerAddress: previous.buyerAddress || value.buyerAddress,
                   buyerEmail: previous.buyerEmail || value.buyerEmail,
                 });

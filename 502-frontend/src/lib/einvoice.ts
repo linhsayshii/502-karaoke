@@ -34,6 +34,11 @@ export function totalsOf(lines: EinvoiceLine[]): EinvoiceTotals {
   return { amountWithoutVat, vatAmount, total: amountWithoutVat + vatAmount };
 }
 
+// An issue or re-check that failed for any reason but a 400 may still have
+// reached Minvoice (a network drop, a 524 or a 5xx after the send): the panel
+// is reloaded to show the row as the server has it, never "it failed".
+export const UNKNOWN_RESULT_MESSAGE = "Không rõ kết quả, đã tải lại để xem trạng thái hóa đơn";
+
 const dong = (value: number) => value.toLocaleString("vi-VN");
 
 // Why a draft cannot be issued yet, or null when it can: its lines must add

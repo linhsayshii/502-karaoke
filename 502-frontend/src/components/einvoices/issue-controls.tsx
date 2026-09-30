@@ -8,7 +8,8 @@ import { DatePicker } from "@/components/date-range-picker";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useNotify } from "@/hooks/use-notify";
-import api from "@/lib/api";
+import api, { isBadRequest, isSessionEnded } from "@/lib/api";
+import { UNKNOWN_RESULT_MESSAGE } from "@/lib/einvoice";
 import { formatDate, toDateInput } from "@/lib/format";
 import type { EinvoiceConfigView, EinvoiceDetail } from "@/lib/types";
 
@@ -52,15 +53,25 @@ export function IssueControls({
         confirmFutureDate: date > today,
       });
       const row = res.data;
-      if (row.status === "ISSUED") notify.success(`Đã xuất hóa đơn số ${row.invoiceNumber ?? "?"}`);
-      else if (row.status === "UNCERTAIN") {
+      if (row.status === "ISSUED") {
+        // Issued, but Minvoice's number clashed with one of ours: no number yet.
+        if (row.lastError) notify.warning(row.lastError);
+        else notify.success(`Đã xuất hóa đơn số ${row.invoiceNumber ?? "?"}`);
+      } else if (row.status === "UNCERTAIN") {
         notify.warning("Không rõ Minvoice đã tạo hóa đơn chưa. Hãy đối chiếu trên Minvoice.");
       } else toast.error(row.lastError ?? "Minvoice từ chối hóa đơn");
       onIssued(row);
       return true;
     } catch (error) {
-      notify.error(error, "Không xuất được hóa đơn");
-      return false;
+      // A 400 is a refusal before anything was sent. Anything else may have
+      // reached Minvoice, so the row is reloaded instead of calling it failed.
+      if (isBadRequest(error) || isSessionEnded(error)) {
+        notify.error(error, "Không xuất được hóa đơn");
+        return false;
+      }
+      notify.warning(UNKNOWN_RESULT_MESSAGE);
+      onIssued(einvoice);
+      return true;
     } finally {
       setIssuing(false);
     }

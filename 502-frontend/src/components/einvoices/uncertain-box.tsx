@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { useNotify } from "@/hooks/use-notify";
-import api from "@/lib/api";
+import api, { isBadRequest, isSessionEnded } from "@/lib/api";
+import { UNKNOWN_RESULT_MESSAGE } from "@/lib/einvoice";
 import { formatDate, formatMoney, toDateInput } from "@/lib/format";
 import { can } from "@/lib/permissions";
 import type { EinvoiceConfigView, EinvoiceDetail } from "@/lib/types";
@@ -75,14 +76,24 @@ export function UncertainBox({
         confirmFutureDate: recheckDate > today,
       });
       const row = res.data;
-      if (row.status === "ISSUED") notify.success(`Đã tìm thấy hóa đơn số ${row.invoiceNumber ?? "?"} trên Minvoice`);
-      else if (row.status === "UNCERTAIN") notify.warning("Vẫn chưa xác định được hóa đơn trên Minvoice");
+      if (row.status === "ISSUED") {
+        // Found, but its number clashed with one of ours: none recorded yet.
+        if (row.lastError) notify.warning(row.lastError);
+        else notify.success(`Đã tìm thấy hóa đơn số ${row.invoiceNumber ?? "?"} trên Minvoice`);
+      } else if (row.status === "UNCERTAIN") notify.warning("Vẫn chưa xác định được hóa đơn trên Minvoice");
       else toast.error(row.lastError ?? "Minvoice từ chối hóa đơn");
       onChanged(row);
       return true;
     } catch (error) {
-      notify.error(error, "Không kiểm tra lại được hóa đơn");
-      return false;
+      // As when issuing: only a 400 is known to have sent nothing; otherwise
+      // the row is reloaded to show what the server made of it.
+      if (isBadRequest(error) || isSessionEnded(error)) {
+        notify.error(error, "Không kiểm tra lại được hóa đơn");
+        return false;
+      }
+      notify.warning(UNKNOWN_RESULT_MESSAGE);
+      onChanged(einvoice);
+      return true;
     } finally {
       setWorking(false);
     }

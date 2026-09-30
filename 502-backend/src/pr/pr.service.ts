@@ -10,7 +10,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth-user';
 import { MANAGERS, SALES } from '../auth/roles';
 import { BranchScopeService } from '../common/branch-scope.service';
-import { businessDateOf, getBusinessDayRange } from '../common/dates';
+import {
+  businessDateOf,
+  fromDbDate,
+  getBusinessDayRange,
+  toDbDate,
+} from '../common/dates';
 import {
   CreatePrStaffDto,
   ListPrStaffQuery,
@@ -71,10 +76,6 @@ const attendanceSelect = {
 type SelectedAttendance = Prisma.PrAttendanceGetPayload<{
   select: typeof attendanceSelect;
 }>;
-
-// @db.Date values are read back as UTC midnight.
-const toDbDate = (date: string) => new Date(`${date}T00:00:00Z`);
-const fromDbDate = (date: Date) => date.toISOString().slice(0, 10);
 
 function toPublicAttendance(row: SelectedAttendance) {
   return { ...row, businessDate: fromDbDate(row.businessDate) };

@@ -21,6 +21,9 @@ model Branch {
   code             String            @unique
   name             String
   address          String?
+  // MST, entered on the Cơ sở page: 10 digits or 10-3. Not unique: several
+  // branches may belong to one company (spec 2026-10-01 §4).
+  taxCode          String?
   active           Boolean           @default(true)
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
@@ -38,6 +41,8 @@ model Branch {
   prSessions       PrSession[]
   orderEvents      OrderEvent[]
   discountRequests DiscountRequest[]
+  einvoiceConfig   EinvoiceConfig?
+  einvoices        Einvoice[]
 }
 
 enum Role {
@@ -90,6 +95,11 @@ model User {
   orderEventsCreated        OrderEvent[]      @relation("OrderEventCreatedBy")
   discountRequestsSent      DiscountRequest[] @relation("DiscountRequestedBy")
   discountRequestsDecided   DiscountRequest[] @relation("DiscountDecidedBy")
+  einvoiceConfigsUpdated    EinvoiceConfig[]  @relation("EinvoiceConfigUpdatedBy")
+  einvoicesCreated          Einvoice[]        @relation("EinvoiceCreatedBy")
+  einvoicesUpdated          Einvoice[]        @relation("EinvoiceUpdatedBy")
+  einvoicesIssued           Einvoice[]        @relation("EinvoiceIssuedBy")
+  einvoicesNumberEdited     Einvoice[]        @relation("EinvoiceNumberEditedBy")
 
   @@index([branchId])
 }
@@ -313,6 +323,7 @@ model Order {
 
   events           OrderEvent[]
   discountRequests DiscountRequest[]
+  einvoices        Einvoice[]
 
   @@unique([branchId, businessDate, billSeq])
   @@index([branchId, status])
@@ -551,4 +562,90 @@ enum DiscountSource {
   REQUEST
   DIRECT
   PAID_EDIT
+}
+
+// Hóa đơn điện tử (spec 2026-10-01).
+enum EinvoiceStatus {
+  DRAFT // Nháp: editable, has `draft`; with `lastError` the page shows "Lỗi"
+  SENDING // Being sent to Minvoice
+  UNCERTAIN // Unknown whether Minvoice created it: check before sending again
+  ISSUED // Đã xuất: has its number, `draft` is null
+}
+
+// The Minvoice account and symbol of a branch. Apart from Branch because
+// Branch is returned everywhere and this row holds secrets.
+model EinvoiceConfig {
+  id                Int       @id @default(autoincrement())
+  branchId          Int       @unique
+  branch            Branch    @relation(fields: [branchId], references: [id])
+  // MST the account logged in with; differs from Branch.taxCode -> log in again.
+  taxCode           String
+  username          String
+  // AES-256-GCM with EINVOICE_SECRET (einvoice-secret.ts); never returned or logged.
+  passwordEnc       String
+  // {cookie, token, userName} of the Minvoice session, encrypted the same way.
+  sessionEnc        String?
+  // Minvoice refused the stored password on a re-login; cleared by a login.
+  loginError        String?
+  symbolCode        String?
+  // GUID of that symbol's current range (register-invoice/using-list).
+  registerInvoiceId String?
+  currencyId        String?
+  // {legalName, address, email, tel, bankAccount, bankName, fax, website}
+  seller            Json?
+  loggedInAt        DateTime?
+  updatedById       Int?
+  updatedBy         User?     @relation("EinvoiceConfigUpdatedBy", fields: [updatedById], references: [id])
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+}
+
+// One small invoice of a paid bill. Its details (`draft`) live until it is
+// issued; then only the header and Minvoice's number stay.
+model Einvoice {
+  id           Int            @id @default(autoincrement())
+  branchId     Int
+  branch       Branch         @relation(fields: [branchId], references: [id])
+  orderId      Int
+  order        Order          @relation(fields: [orderId], references: [id])
+  // Copied from Order.businessDate so the list filters on its own index.
+  businessDate DateTime       @db.Date
+  status       EinvoiceStatus @default(DRAFT)
+  // VAT included, typed by whoever creates it.
+  amount       Decimal
+  // Σ VAT of the lines, recomputed on every save.
+  vatAmount    Decimal        @default(0)
+  buyerTaxCode String?
+  buyerName    String?
+  // {buyerAddress, buyerEmail, lines[]} (einvoice-types.ts EinvoiceDraft).
+  draft        Json?
+
+  // Header, written when it is sent / issued.
+  sellerTaxCode     String?
+  symbolCode        String?
+  registerInvoiceId String?
+  invoiceDate       DateTime? @db.Date
+  invoiceNumber     Int?
+  minvoiceId        String?
+  lastError         String?
+  sendingAt         DateTime?
+
+  createdById      Int?
+  createdBy        User?     @relation("EinvoiceCreatedBy", fields: [createdById], references: [id])
+  createdAt        DateTime  @default(now())
+  updatedById      Int?
+  updatedBy        User?     @relation("EinvoiceUpdatedBy", fields: [updatedById], references: [id])
+  updatedAt        DateTime  @updatedAt
+  issuedById       Int?
+  issuedBy         User?     @relation("EinvoiceIssuedBy", fields: [issuedById], references: [id])
+  issuedAt         DateTime?
+  numberEditedById Int?
+  numberEditedBy   User?     @relation("EinvoiceNumberEditedBy", fields: [numberEditedById], references: [id])
+  numberEditedAt   DateTime?
+
+  @@unique([sellerTaxCode, symbolCode, invoiceNumber])
+  @@index([branchId, businessDate])
+  @@index([branchId, status, createdAt])
+  @@index([orderId])
+  @@index([sellerTaxCode, symbolCode, invoiceDate])
 }

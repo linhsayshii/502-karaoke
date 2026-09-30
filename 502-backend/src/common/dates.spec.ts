@@ -2,8 +2,10 @@ import {
   businessDateOf,
   businessDatesBetween,
   businessDayRange,
+  fromDbDate,
   getBusinessDayRange,
   MAX_REPORT_RANGE_DAYS,
+  toDbDate,
 } from './dates';
 
 describe('getBusinessDayRange', () => {
@@ -104,5 +106,14 @@ describe('businessDatesBetween with a longer limit', () => {
     expect(() =>
       businessDatesBetween('2020-01-01', '2025-12-31', MAX_REPORT_RANGE_DAYS),
     ).toThrow('Chỉ xem được tối đa 1830 ngày một lần');
+  });
+});
+
+describe('toDbDate / fromDbDate', () => {
+  it('stores a YYYY-MM-DD at UTC midnight so a @db.Date column keeps the day', () => {
+    expect(toDbDate('2026-10-01').toISOString()).toBe(
+      '2026-10-01T00:00:00.000Z',
+    );
+    expect(fromDbDate(toDbDate('2026-10-01'))).toBe('2026-10-01');
   });
 });

@@ -89,6 +89,8 @@ export class DataPurgeService {
             await tx.discountRequest.deleteMany({ where: own })
           ).count,
           orderEvents: (await tx.orderEvent.deleteMany({ where: own })).count,
+          // Before orders: an e-invoice points at its bill.
+          einvoices: (await tx.einvoice.deleteMany({ where: own })).count,
           orderItems: (await tx.orderItem.deleteMany({ where: viaOrder }))
             .count,
           // Before orders: a visit points at an order and a PR.

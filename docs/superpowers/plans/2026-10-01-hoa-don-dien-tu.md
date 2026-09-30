@@ -181,7 +181,7 @@ Endpoint localization trả 404 thì thử `GET /api/api/abp/application-configu
 
   Không cần commit: file kế hoạch được commit cùng Task 1. Khi không chắc tham số lọc có thật sự lọc theo `MARKER_FIELD` hay không (chỉ xác nhận được khi đã đăng nhập), ghi "chưa xác nhận". Task 10 vẫn làm, và Task 18 xác nhận với Minvoice thật.
 
-**Kết quả bước 0:** _(điền ở Step 5)_
+**Kết quả bước 0:** SEARCH = `GET /api/api/app/invoice?invoiceSerial=<ký hiệu>&<tên trường>=<giá trị>&loadAll=true&skipCount=0&maxResultCount=5` (lọc theo tên cột, không có tham số `Filter` chung nên `SEARCH_PARAM` = tên trường, ví dụ `orderNumber`; có thể dùng `registerInvoiceId=<id>` thay `invoiceSerial`; `sorting=invoiceNumber&sortType=DESCEND`; `fromDate`/`toDate` dạng YYYY-MM-DD) → `{items[], totalCount}`, `items[].{id, invoiceSerial, invoiceNumber, invoiceDate, invoiceStatus, sendTaxStatus, buyerLegalName, buyerTaxCode}` (chưa xác nhận: chỉ đọc từ mã web, cần đăng nhập để thử, nhất là việc lọc theo `orderNumber`); MARKER_FIELD = orderNumber (chưa xác nhận: web không có tên trường này, nhãn "Số đơn hàng" có trong localization của server và `orderNumber` có trong payload mẫu của wrapper); DATE_ORDER_MESSAGE = "Ngày hóa đơn phải đảm bảo quy luật tăng dần của số hóa đơn" (`ErrorCode-296`, lỗi trả về dạng `error.code` = "296")
 
 ---
 

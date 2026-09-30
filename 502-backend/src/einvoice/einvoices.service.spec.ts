@@ -57,21 +57,25 @@ function setup(outcome: SendOutcome) {
     updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     update: jest.fn().mockResolvedValue({}),
     findFirst: jest.fn().mockResolvedValue({ id: 3 }),
+    findMany: jest.fn().mockResolvedValue([]),
+    aggregate: jest.fn().mockResolvedValue({ _sum: { amount: null } }),
   };
+  const order = { findUnique: jest.fn() };
+  const sender = { send: jest.fn().mockResolvedValue(outcome) };
   const service = new EinvoicesService(
-    { einvoice } as never,
+    { einvoice, order } as never,
     {} as never,
     { assertBranchAccess: jest.fn() } as never,
     {
       readyForIssue: jest.fn().mockResolvedValue(ready),
       latestIssued: jest.fn().mockResolvedValue(null),
     } as never,
-    { send: jest.fn().mockResolvedValue(outcome) } as never,
+    sender as never,
   );
   const log = jest
     .spyOn(Logger.prototype, 'error')
     .mockImplementation(() => undefined);
-  return { service, einvoice, log };
+  return { service, einvoice, order, sender, log };
 }
 
 // Spec §9.1: a failed write of the outcome is logged with the invoice and
@@ -97,6 +101,22 @@ describe('EinvoicesService.issue when saving the outcome fails', () => {
     for (const part of ['Einvoice 12', 'issued', '1015', 'inv-1015', 'P2024']) {
       expect(text).toContain(part);
     }
+    // The send has ended: the row left SENDING may now be swept.
+    einvoice.findUnique.mockResolvedValueOnce({
+      id: 12,
+      branchId: 1,
+      status: 'SENDING',
+      invoiceDate: null,
+    });
+    await service.findOne(user, 12);
+    expect(einvoice.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 12,
+          status: 'SENDING',
+        }) as unknown,
+      }),
+    );
   });
 
   it('logs a failed write after a number clash too', async () => {
@@ -125,5 +145,58 @@ describe('EinvoicesService.issue when saving the outcome fails', () => {
     await service.issue(user, 12, dto);
     expect(einvoice.update).toHaveBeenCalledTimes(1);
     expect(log).not.toHaveBeenCalled();
+  });
+});
+
+// The stale-SENDING sweep never touches a send this backend is still
+// running, however old its sendingAt looks.
+describe('EinvoicesService stale SENDING sweep', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  const sending = { id: 12, branchId: 1, status: 'SENDING', invoiceDate: null };
+  const sweeps = (einvoice: ReturnType<typeof setup>['einvoice']) =>
+    einvoice.updateMany.mock.calls
+      .map(([arg]) => (arg as { where: Record<string, unknown> }).where)
+      .filter((where) => where.status === 'SENDING' && 'sendingAt' in where);
+
+  it('skips an id whose send is running, sweeps it once the send ended', async () => {
+    const { service, einvoice, order, sender } = setup(issued);
+    let finish!: (outcome: SendOutcome) => void;
+    sender.send.mockReturnValueOnce(
+      new Promise<SendOutcome>((resolve) => (finish = resolve)),
+    );
+    order.findUnique.mockResolvedValue({
+      id: 5,
+      branchId: 1,
+      status: 'COMPLETED',
+      startTime: null,
+      endTime: null,
+      items: [],
+    });
+    einvoice.findMany.mockResolvedValue([sending]);
+
+    const issuing = service.issue(user, 12, dto);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(sender.send).toHaveBeenCalledTimes(1);
+
+    einvoice.findUnique.mockResolvedValueOnce(sending);
+    await service.findOne(user, 12);
+    expect(sweeps(einvoice)).toEqual([]);
+    await service.billDetail(user, 5);
+    expect(sweeps(einvoice)).toEqual([
+      expect.objectContaining({ orderId: 5, id: { notIn: [12] } }),
+    ]);
+
+    finish(issued);
+    await issuing;
+    einvoice.updateMany.mockClear();
+    einvoice.findUnique.mockResolvedValueOnce(sending);
+    await service.findOne(user, 12);
+    await service.billDetail(user, 5);
+    const [byId, byOrder] = sweeps(einvoice);
+    expect(byId).toMatchObject({ id: 12 });
+    expect((byId.sendingAt as { lt: unknown }).lt).toBeInstanceOf(Date);
+    expect(byOrder).toMatchObject({ orderId: 5 });
+    expect(byOrder).not.toHaveProperty('id');
   });
 });

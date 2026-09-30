@@ -142,6 +142,11 @@ function errorKind(error: unknown): string {
 @Injectable()
 export class EinvoicesService implements OnApplicationBootstrap {
   private readonly logger = new Logger(EinvoicesService.name);
+  // Ids whose send is running in this process, so the stale-SENDING sweep
+  // never takes a live send for a dead one. There is only one backend
+  // (spec §8), so this is every send in flight; bounded by them, as each id
+  // leaves once its outcome is written or failed to be.
+  private readonly sending = new Set<number>();
 
   constructor(
     private prisma: PrismaService,
@@ -466,6 +471,24 @@ export class EinvoicesService implements OnApplicationBootstrap {
     });
     if (count === 0) throw await this.notLocked(id);
 
+    this.sending.add(id);
+    try {
+      await this.send(user, id, ready, row, draft, dto);
+    } finally {
+      this.sending.delete(id);
+    }
+    return this.findOne(user, id);
+  }
+
+  // Sends the locked invoice and writes the outcome (spec §8 steps 3–5).
+  private async send(
+    user: AuthUser,
+    id: number,
+    ready: IssueConfig,
+    row: { buyerTaxCode: string | null; buyerName: string | null },
+    draft: EinvoiceDraft,
+    dto: IssueEinvoiceDto,
+  ) {
     let outcome: SendOutcome;
     try {
       outcome = await this.sender.send(ready, (config) =>
@@ -495,7 +518,6 @@ export class EinvoicesService implements OnApplicationBootstrap {
       };
     }
     await this.record(user, id, ready, draft.lines, outcome);
-    return this.findOne(user, id);
   }
 
   // Spec §9.2 (without a search): the chain manager looked on Minvoice.
@@ -623,9 +645,21 @@ export class EinvoicesService implements OnApplicationBootstrap {
   }
 
   // A SENDING row whose send has long ended (spec §9.1: saving its outcome
-  // failed) becomes UNCERTAIN. record() still writes by id, so a result that
-  // arrives later lands over it.
-  private async sweepStaleSending(where: { id: number } | { orderId: number }) {
+  // failed) becomes UNCERTAIN; a send still running here is left alone.
+  // record() still writes by id, so a result that arrives later lands over it.
+  private async sweepStaleSending(
+    target: { id: number } | { orderId: number },
+  ) {
+    let where: Prisma.EinvoiceWhereInput;
+    if ('id' in target) {
+      if (this.sending.has(target.id)) return false;
+      where = { id: target.id };
+    } else {
+      where = {
+        orderId: target.orderId,
+        ...(this.sending.size ? { id: { notIn: [...this.sending] } } : {}),
+      };
+    }
     const { count } = await this.prisma.einvoice.updateMany({
       where: {
         ...where,

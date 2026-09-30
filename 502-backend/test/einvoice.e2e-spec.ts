@@ -712,6 +712,42 @@ describe('E-invoices (e2e)', () => {
       expect(edited.numberEditedAt).not.toBeNull();
     });
 
+    it('never sweeps a send still running, however old it looks', async () => {
+      const id = await newDraft();
+      const prisma = app.get(PrismaService);
+      fake.delayMs = 500;
+      const issuing = issue(id).then((res) => res);
+      let status: string | undefined;
+      for (let i = 0; i < 100 && status !== 'SENDING'; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        status = (
+          await prisma.einvoice.findUniqueOrThrow({
+            where: { id },
+            select: { status: true },
+          })
+        ).status;
+      }
+      expect(status).toBe('SENDING');
+      await prisma.einvoice.update({
+        where: { id },
+        data: { sendingAt: new Date(Date.now() - STALE_SENDING_MS - 1000) },
+      });
+      expect(
+        ((await as('admin').get(`/einvoices/${id}`).expect(200)).body as Json)
+          .status,
+      ).toBe('SENDING');
+      const detail = (
+        await as('tn1_cs1').get(`/einvoices/bill/${orderId}`).expect(200)
+      ).body as Json;
+      expect(
+        (detail.einvoices as Json[]).find((e) => e.id === id),
+      ).toMatchObject({ status: 'SENDING' });
+      const res = await issuing;
+      fake.delayMs = 0;
+      expect(res.status).toBe(200);
+      expect((res.body as Json).status).toBe('ISSUED');
+    });
+
     it('turns a send stuck for minutes into uncertain when it is read', async () => {
       const id = await newDraft();
       const prisma = app.get(PrismaService);

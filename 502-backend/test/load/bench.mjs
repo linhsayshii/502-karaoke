@@ -4,6 +4,7 @@
 // does (`concurrency` reports at a time; half one branch, half the chain).
 //   node bench.mjs single <from> <to>        each report alone, one after another
 //   node bench.mjs load <from> <to> [downloaders=10] [concurrency=2]
+// SOCKETS=1: also holds 20 WebSockets (10 cashiers, 5 branch managers, 5 chain-manager screens).
 // Env: BASE (default http://localhost:14100/api; point it at the frontend's /api
 // to go through the Next.js proxy as in production), DISTINCT=1 (no two
 // downloads alike), DURATION (seconds the cashiers work when downloaders=0),
@@ -17,6 +18,23 @@
 const BASE = process.env.BASE ?? 'http://localhost:14100/api';
 const [mode, from, to, nDl = '10', conc = '2'] = process.argv.slice(2);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// SOCKETS=1: cashiers and manager screens hold a WebSocket for the whole run,
+// as the app does; events received and unexpected closes are counted.
+const WS_URL = BASE.replace(/^http/, 'ws') + '/ws';
+const wsStats = { opened: 0, ready: 0, events: 0, closes: 0 };
+function holdSocket(token, stop) {
+  if (!process.env.SOCKETS) return Promise.resolve();
+  return new Promise((resolve) => {
+    const ws = new WebSocket(WS_URL);
+    wsStats.opened++;
+    ws.onopen = () => ws.send(JSON.stringify({ type: 'auth', token }));
+    ws.onmessage = (e) => (JSON.parse(e.data).type === 'ready' ? wsStats.ready++ : wsStats.events++);
+    ws.onclose = () => { if (!stop.done) wsStats.closes++; resolve(); };
+    ws.onerror = () => {};
+    const check = setInterval(() => { if (stop.done) { clearInterval(check); ws.close(1000); } }, 500);
+  });
+}
 
 async function call(token, method, url, body) {
   const t = performance.now();
@@ -65,6 +83,7 @@ function report() {
     const e = Object.keys(s.errors).length ? ' errors ' + JSON.stringify(s.errors) : '';
     console.log(`${name.padEnd(22)} n=${String(s.ms.length).padStart(4)} p50=${pct(s.ms, .5).toFixed(0).padStart(6)}ms p95=${pct(s.ms, .95).toFixed(0).padStart(6)}ms max=${Math.max(...s.ms).toFixed(0).padStart(6)}ms${e}`);
   }
+  if (process.env.SOCKETS) console.log('ws', wsStats);
 }
 
 async function download(token, branch, shift = 0) {
@@ -176,11 +195,15 @@ if (mode === 'single') {
     // the branch manager approves discounts (the chain manager if the branch has none)
     const manager = (await login(`load_ql_cs${b}`).catch(() => null)) ?? admin;
     screens.push(managerScreen(manager, stop));
+    screens.push(holdSocket(manager, stop));
     for (let k = 1; k <= 2; k++) {
       const token = await login(`load_tn${k}_cs${b}`);
+      cashiers.push(holdSocket(token, stop));
       cashiers.push(cashier(token, branch, rooms.slice((k - 1) * 20, k * 20), products, staff, stop, manager));
     }
   }
+  // 5 chain-manager screens: one user, under the 5-sockets-per-user cap
+  for (let i = 0; i < 5; i++) screens.push(holdSocket(admin, stop));
   // STAFF phones spread over the 5 branches (accounts load_nv1..40_csN; more
   // phones than accounts reuse them, as one person with two devices would).
   const phones = [];

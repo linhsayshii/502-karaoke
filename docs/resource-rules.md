@@ -140,6 +140,29 @@ Kết quả 30/09/2026 (duyệt giảm giá và chốt giờ, migration `2026100
 
 Các lời gọi mới (lần chạy `DURATION=60`, 420 phiên): `lock-time` p50 29 ms / p95 73 ms, xin giảm giá p50 30 ms / p95 75 ms, duyệt p50 22 ms / p95 64 ms, `pending-count` p50 8 ms / p95 17 ms; không lỗi. Trung vị thanh toán p95 của (c) không cao hơn (a), (b): chênh lệch giữa các lần chạy của cùng một kịch bản (321 – 777 ms) lớn hơn chênh lệch giữa các kịch bản. Kiểm tra `EXPLAIN ANALYZE` trên bảng `DiscountRequest` giả lập 50 nghìn dòng (~1 năm của 5 cơ sở): tìm yêu cầu chờ của một phiên dùng `DiscountRequest_orderId_idx` (0,02 ms), đếm hàng chờ dùng `DiscountRequest_branchId_status_idx` (0,06 ms), nhật ký 30 ngày dùng `DiscountRequest_branchId_createdAt_idx` (0,43 ms); truy vấn phiên đang mở của phòng vẫn dùng `Order_status_endTime_idx` như trước (0,02 ms).
 
+Kết quả 30/09/2026 (WebSocket, giai đoạn 2): `bench.mjs` với `SOCKETS=1` giữ 20 WebSocket `/api/ws` mở suốt bài đo, như app (10 thu ngân, 5 máy quản lý cơ sở, 5 máy quản lý hệ thống dùng chung tài khoản `admin`, dưới trần 5 socket cho một tài khoản), đếm số sự kiện nhận (`ws events`) và số lần bị đóng ngoài ý muốn (`ws closes`). Cùng database 547 nghìn hóa đơn, cùng giới hạn container như trên, backend build từ nhánh; chạy xen kẽ (a) không socket / (b) `SOCKETS=1`:
+
+```bash
+node test/load/bench.mjs load 2025-09-29 2026-09-28 10 2                    # (a), 4 lần (lần đầu database còn nguội)
+SOCKETS=1 node test/load/bench.mjs load 2025-09-29 2026-09-28 10 2          # (b), 3 lần
+DURATION=60 node test/load/bench.mjs load 2025-09-29 2026-09-28 10 2          # (a) + 60 giây
+SOCKETS=1 DURATION=60 node test/load/bench.mjs load 2025-09-29 2026-09-28 10 2  # (b) + 60 giây
+docker stats --no-stream kara-load-be kara-load-pg                          # mỗi ~5 giây trong lúc chạy
+docker logs kara-load-be 2>&1 | grep -ci error
+```
+
+| | (a) không socket | (b) `SOCKETS=1` | (a) `DURATION=60` | (b) `DURATION=60` |
+|---|---|---|---|---|
+| Thanh toán p95 (trung vị; nhỏ nhất – lớn nhất) | 350 ms (183 – 465), 4 lần | 247 ms (124 – 295), 3 lần | 181 ms | 116 ms |
+| Thanh toán lớn nhất | 366 – 863 ms | 317 – 579 ms | 628 ms | 409 ms |
+| Sơ đồ phòng p95 | 83 ms (75 – 169) | 157 ms (68 – 175) | 29 ms | 32 ms |
+| Một lượt tải toàn bộ báo cáo, trung vị | 11,4 – 12,5 s | 11,0 – 12,0 s | 12,3 s | 12,4 s |
+| RAM cao nhất của backend / db (`docker stats`, 2–3 mẫu mỗi lần thường, 11 mẫu lần 60 giây) | 121–140 / 264–916 MiB | 133–138 / 312–918 MiB | 152 / 925 MiB | 145 / 925 MiB |
+| `ws` (opened / ready / events / closes) | không có | 20 / 20 / 4336 – 4581 / 0 | không có | 20 / 20 / 26003 / 0 |
+| Lỗi 500/503, dòng `error` trong log backend (cả 9 lần chạy) | 0, 0 | 0, 0 | 0, 0 | 0, 0 |
+
+Cả 20 socket vào `ready` và không bị đóng lần nào trong mọi lần chạy; lần chạy 60 giây có ~426 phiên nên nhận 26 nghìn sự kiện. Kết luận: giữ 20 socket mở và phát sự kiện không làm thanh toán chậm đi (p95 trung vị (b) 247 ms không cao hơn (a) 350 ms, độ lệch giữa các lần chạy của (a) lớn hơn chênh lệch giữa hai kịch bản) và RAM backend cao nhất tăng không đáng kể (trong khoảng dao động giữa các lần chạy của (a), 60 giây: 145 so với 152 MiB); sơ đồ phòng p95 trung vị của (b) cao hơn (a) nhưng khoảng dao động của hai bên chồng nhau (68 – 175 so với 75 – 169 ms) và lần chạy 60 giây thì bằng nhau. RAM db tăng theo thứ tự chạy chứ không theo kịch bản (page cache, như ghi chú của lần đo trước). Đi qua proxy Next.js (frontend 384 MB, `BASE=http://localhost:13000/api SOCKETS=1`, một lần): `ws {opened: 20, ready: 20, events: 4307, closes: 0}`, thanh toán p95 219 ms, RAM frontend 64 MiB, backend 148 MiB.
+
 ## 7. Số đo sau lần rà soát 29/09/2026
 
 | Hạng mục | Trước | Sau |

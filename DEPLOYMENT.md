@@ -147,7 +147,7 @@ server {
 
 Chỉ cần một `location /`: frontend tự chuyển `/api` sang backend.
 
-WebSocket (`/api/ws`, màn hình thu ngân/quản lý) đi qua cùng `location /` nhờ hai dòng `Upgrade`/`Connection` ở trên; server tự `ping` mỗi 30 giây nên không cần nâng `proxy_read_timeout` (mặc định 60 giây). Nếu đặt `proxy_read_timeout` thì phải **> 30 giây**.
+WebSocket (`/api/ws`, màn hình thu ngân/quản lý) đi qua cùng `location /` nhờ hai dòng `Upgrade`/`Connection` ở trên; server tự `ping` mỗi 30 giây nên không cần nâng `proxy_read_timeout` (mặc định 60 giây). Nếu đặt `proxy_read_timeout` thì không dưới **60 giây** (giá trị 31–59 giây vẫn có thể cắt kết nối ngay trước ping kế tiếp).
 
 ```bash
 sudo ln -s /etc/nginx/sites-available/karaoke502 /etc/nginx/sites-enabled/
@@ -212,7 +212,10 @@ Rồi trong khối `server` của `/etc/nginx/sites-available/karaoke502` (khố
    - Cache Rule "Cache Everything" cho `/api/*` (số liệu phải luôn mới). File tĩnh `/_next/static/*` Cloudflare tự cache, vậy là tốt.
    - Cloudflare Web Analytics tự chèn script: CSP của app chặn nó (chỉ báo lỗi trong console, không hỏng gì); muốn dùng thì phải thêm vào CSP trong `next.config.ts`.
 6. **Giới hạn của Cloudflare:** request quá 100 giây bị cắt (lỗi 524); báo cáo chậm nhất đo được ~40 giây. Upload tối đa 100 MB (gói Free); nhập Excel tối đa 5 MB.
-7. **WebSocket** (`wss://<tên miền>/api/ws`): Cloudflare chuyển tiếp WebSocket mặc định (Network → WebSockets: On), và frontend chuyển tiếp request upgrade `/api/*` vào backend như request thường (đã chạy thử qua image production trên máy dev, giữ 10 phút với ping 30 giây; phần Cloudflare chưa thử được ở máy dev nên phải kiểm tra sau khi triển khai). Sau khi triển khai, mở app bằng tài khoản thu ngân, trong DevTools → Network → WS phải thấy `/api/ws` trạng thái `101` và các khung `ping/pong` mỗi 30 giây. Nếu không có (`ws` bị đóng liên tục), thêm trong tunnel một Public Hostname thứ hai cùng tên miền với **Path** `api/ws` trỏ `HTTP` `localhost:4000` và mở `ports: - "127.0.0.1:4000:4000"` cho `backend` trong `docker-compose.yml`; ứng dụng vẫn chạy bằng polling trong lúc đó.
+7. **WebSocket** (`wss://<tên miền>/api/ws`): Cloudflare chuyển tiếp WebSocket mặc định (Network → WebSockets: On), và frontend chuyển tiếp request upgrade `/api/*` vào backend như request thường (đã chạy thử qua image production trên máy dev, giữ 10 phút với ping 30 giây; phần Cloudflare chưa thử được ở máy dev nên phải kiểm tra sau khi triển khai).
+   - Kiểm tra: mở app bằng tài khoản thu ngân, trong DevTools → Network → WS phải thấy `/api/ws` trạng thái `101` và các khung `ping/pong` mỗi 30 giây.
+   - Nếu không có (`ws` bị đóng liên tục): thêm trong tunnel một Public Hostname thứ hai cùng tên miền với **Path** `api/ws` trỏ `HTTP` `localhost:4000` và mở `ports: - "127.0.0.1:4000:4000"` cho `backend` trong `docker-compose.yml`; ứng dụng vẫn chạy bằng polling trong lúc đó.
+   - Nên thêm một rule Rate limiting cho URI Path bằng `/api/ws`, ví dụ **30 request mỗi 10 giây** cho mỗi IP: kết nối chưa gửi token vẫn chiếm một chỗ tối đa 5 giây (backend chỉ nhận 20 kết nối như vậy cùng lúc). Nhân viên cùng quán dùng chung một IP nên đừng đặt thấp hơn.
 
 ## 4. Vận hành hằng ngày
 

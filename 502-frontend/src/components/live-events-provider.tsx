@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
-import { getAccessToken, onSessionChange } from "@/lib/api";
+import { getAccessToken, onSessionChange, refreshSession } from "@/lib/api";
 import { type LiveEvent, liveUrl } from "@/lib/live-events";
 import { can } from "@/lib/permissions";
 
@@ -21,6 +21,8 @@ const MAX_BACKOFF_MS = 30_000;
 const DISCONNECT_GRACE_MS = 30_000;
 // Server close codes (502-backend/src/live/live.gateway.ts).
 const CLOSE_TOO_MANY = 1013;
+const CLOSE_AUTH = 4001;
+const CLOSE_EXPIRED = 4002;
 
 // One WebSocket for the whole app (spec §7), opened for the sales roles only.
 // It sends {type:"auth", token} on open and again whenever lib/api renews the
@@ -28,6 +30,14 @@ const CLOSE_TOO_MANY = 1013;
 // flat after a 1013); stays open while the tab is hidden; closes on logout
 // or when the user loses the permission. Every message is handed to the
 // subscribers; a `reconnected` signal follows a re-established connection.
+// A close for auth (4001/4002) while a token is held means the token ran out
+// (typically in a hidden tab, where polling does not renew it): the provider
+// renews the session itself and reconnects at once instead of retrying with
+// the dead token; if the renewal fails the auth provider signs the user out,
+// which switches `enabled` off. A new token while no socket is open (renewed
+// by a 401 elsewhere, or the tab coming back) reconnects at once too. If a
+// reconnect right after a renewal is refused again before `ready`, the normal
+// backoff applies, so a server that keeps refusing is never hammered.
 export function LiveEventsProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const enabled = can(user, "live");
@@ -46,6 +56,8 @@ export function LiveEventsProvider({ children }: { children: React.ReactNode }) 
     let attempt = 0;
     let wasReady = false;
     let stopped = false;
+    // A connection opened after a session renewal that has not reached `ready`.
+    let renewedNoReady = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let graceTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -64,6 +76,9 @@ export function LiveEventsProvider({ children }: { children: React.ReactNode }) 
     };
 
     const connect = () => {
+      // Never two sockets: a timer, a renewal and a session change may race.
+      if (stopped || (socket && socket.readyState !== WebSocket.CLOSED)) return;
+      clearTimeout(reconnectTimer);
       const ws = new WebSocket(liveUrl());
       socket = ws;
       ws.onopen = () => sendAuth(ws);
@@ -80,6 +95,7 @@ export function LiveEventsProvider({ children }: { children: React.ReactNode }) 
         }
         if (message.type === "ready") {
           attempt = 0;
+          renewedNoReady = false;
           clearTimeout(graceTimer);
           graceTimer = undefined; // so the next drop starts a new grace period
           setConnected(true);
@@ -95,6 +111,15 @@ export function LiveEventsProvider({ children }: { children: React.ReactNode }) 
           graceTimer = undefined;
           setConnected(false);
         }, DISCONNECT_GRACE_MS);
+        if ((e.code === CLOSE_AUTH || e.code === CLOSE_EXPIRED) && getAccessToken() && !renewedNoReady) {
+          renewedNoReady = true;
+          void refreshSession().then((ok) => {
+            if (!ok || stopped) return;
+            attempt = 0;
+            connect();
+          });
+          return;
+        }
         const base = e.code === CLOSE_TOO_MANY ? MAX_BACKOFF_MS : Math.min(MAX_BACKOFF_MS, 1000 * 2 ** attempt);
         attempt += 1;
         reconnectTimer = setTimeout(connect, base + Math.random() * 1000);
@@ -107,7 +132,15 @@ export function LiveEventsProvider({ children }: { children: React.ReactNode }) 
     // A renewed access token (refresh) re-authenticates the open socket; a
     // cleared one (logout) is handled by the effect cleanup via `enabled`.
     const offSession = onSessionChange(() => {
-      if (socket) sendAuth(socket);
+      if (!getAccessToken()) return;
+      if (socket && socket.readyState !== WebSocket.CLOSED) {
+        sendAuth(socket);
+        return;
+      }
+      // No socket open: it was waiting for a retry with a token that has
+      // since been replaced, so connect at once.
+      attempt = 0;
+      connect();
     });
 
     return () => {

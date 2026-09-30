@@ -40,6 +40,15 @@ const sessionErrors = new WeakSet<object>();
 export const isSessionEnded = (error: unknown) =>
   typeof error === 'object' && error !== null && sessionErrors.has(error);
 
+// The session could not be renewed (expired, password changed, account
+// locked): forget the token, tell the auth provider (it signs the user out) and
+// mark the error so pages do not toast it.
+function endSession(refreshError: unknown) {
+  setSession(null);
+  if (typeof refreshError === "object" && refreshError) sessionErrors.add(refreshError);
+  expiredListeners.forEach((listener) => listener());
+}
+
 // A 401 from these means wrong credentials or no session, never a stale access token.
 const NO_REFRESH = ['/auth/login', '/auth/refresh', '/auth/logout'];
 
@@ -89,9 +98,7 @@ api.interceptors.response.use(
         return api(originalRequest);
       } catch (refreshError) {
         // Refresh failed (session expired or revoked): the user must log in again.
-        setSession(null);
-        if (typeof refreshError === "object" && refreshError) sessionErrors.add(refreshError);
-        expiredListeners.forEach((listener) => listener());
+        endSession(refreshError);
         return Promise.reject(refreshError);
       }
     }
@@ -99,6 +106,22 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// Renews the access token from the refresh cookie without any request having
+// failed (the live socket calls it when the server closes it for an expired
+// token). True when a new token is in place; false when the session is over,
+// in which case the user is signed out exactly as after a failed 401 retry.
+export async function refreshSession(): Promise<boolean> {
+  try {
+    const response = await api.post('/auth/refresh');
+    const { access_token, sessionExpiresAt: expiresAt } = response.data;
+    setSession(access_token, expiresAt);
+    return true;
+  } catch (error) {
+    endSession(error);
+    return false;
+  }
+}
 
 // Message from a failed API call (backend messages are Vietnamese).
 export function apiErrorMessage(error: unknown, fallback: string): string {

@@ -22,6 +22,8 @@ describe('E-invoices (e2e)', () => {
   const fake = new FakeMinvoice();
   const tokens: Record<string, string> = {};
   let cs1Id: number;
+  let orderId: number;
+  let draftId: number;
 
   const api = () => request(app.getHttpServer());
   const as = (name: string) => {
@@ -177,6 +179,227 @@ describe('E-invoices (e2e)', () => {
     it('checks a buyer tax code before looking it up', async () => {
       await as('tn1_cs1').get('/einvoice/tax-payers/12345').expect(400);
       await as('hdqt_hddt').get('/einvoice/tax-payers/0107068321').expect(403);
+    });
+  });
+
+  describe('drafts', () => {
+    const buyer = {
+      buyerTaxCode: '0107068321',
+      buyerName: 'CÔNG TY HOÀNG GIA',
+      buyerAddress: 'Số 26, phố Nhổn',
+      buyerEmail: '',
+    };
+    const beer = {
+      name: 'Bia Heineken',
+      unit: 'Lon',
+      quantity: 10,
+      unitPrice: 35000,
+      vatRate: 10,
+    };
+    const filler = {
+      name: 'Dịch vụ karaoke',
+      unit: 'Lần',
+      quantity: 1,
+      unitPrice: 559091,
+      vatRate: 10,
+    };
+    it('are for paid bills only', async () => {
+      const room = (
+        await as('ql1_cs1')
+          .post('/rooms', { name: 'HĐĐT-1', pricePerHour: 100000 })
+          .expect(201)
+      ).body as Json;
+      const order = (
+        await as('tn1_cs1').post('/orders', { roomId: room.id }).expect(201)
+      ).body as Json;
+      await as('tn1_cs1')
+        .post('/einvoices', { orderId: order.id, amount: 1000, lines: [] })
+        .expect(400);
+      const products = (await as('tn1_cs1').get('/products').expect(200))
+        .body as Json[];
+      await as('tn1_cs1')
+        .patch(`/orders/${order.id as number}`, {
+          items: [{ productId: products[0].id, quantity: 2 }],
+        })
+        .expect(200);
+      await as('tn1_cs1')
+        .post(`/orders/${order.id as number}/checkout`, {
+          paymentMethod: 'CASH',
+        })
+        .expect(200);
+      orderId = order.id as number;
+    });
+
+    it('are refused for a voided bill', async () => {
+      const room = (
+        await as('ql1_cs1')
+          .post('/rooms', { name: 'HĐĐT-2', pricePerHour: 100000 })
+          .expect(201)
+      ).body as Json;
+      const order = (
+        await as('tn1_cs1').post('/orders', { roomId: room.id }).expect(201)
+      ).body as Json;
+      const id = order.id as number;
+      await as('tn1_cs1')
+        .post(`/orders/${id}/checkout`, { paymentMethod: 'CASH' })
+        .expect(200);
+      await as('admin')
+        .post(`/orders/${id}/void`, { reason: 'Nhập nhầm phòng' })
+        .expect(200);
+      const res = await as('tn1_cs1')
+        .post('/einvoices', { orderId: id, amount: 1000, lines: [] })
+        .expect(400);
+      expect((res.body as Json).message).toMatch(/đã thanh toán và chưa hủy/);
+    });
+
+    it('are created and edited by the sales roles of the branch', async () => {
+      const created = (
+        await as('tn1_cs1')
+          .post('/einvoices', {
+            orderId,
+            amount: 1000000,
+            ...buyer,
+            lines: [beer],
+          })
+          .expect(201)
+      ).body as Json;
+      expect(created).toMatchObject({
+        status: 'DRAFT',
+        amount: '1000000',
+        vatAmount: '35000',
+        buyerName: 'CÔNG TY HOÀNG GIA',
+        draft: {
+          buyerAddress: 'Số 26, phố Nhổn',
+          buyerEmail: null,
+          lines: [beer],
+        },
+      });
+      draftId = created.id as number;
+      const edited = (
+        await as('ql1_cs1')
+          .patch(`/einvoices/${draftId}`, {
+            amount: 1000000,
+            ...buyer,
+            lines: [beer, filler],
+          })
+          .expect(200)
+      ).body as Json;
+      expect(edited.vatAmount).toBe('90909');
+
+      await as('hdqt_hddt')
+        .post('/einvoices', { orderId, amount: 1, lines: [] })
+        .expect(403);
+      await as('ql1_cs2').get(`/einvoices/bill/${orderId}`).expect(403);
+      await as('ql1_cs2')
+        .patch(`/einvoices/${draftId}`, { amount: 1, lines: [] })
+        .expect(403);
+      await as('tn1_cs1')
+        .post('/einvoices', {
+          orderId,
+          amount: 1,
+          lines: [{ ...beer, vatRate: 7 }],
+        })
+        .expect(400);
+      await as('tn1_cs1')
+        .post('/einvoices', {
+          orderId,
+          amount: 1,
+          buyerTaxCode: '123',
+          lines: [],
+        })
+        .expect(400);
+    });
+
+    it('shows a bill with its invoices and how much is split', async () => {
+      const detail = (
+        await as('tn1_cs1').get(`/einvoices/bill/${orderId}`).expect(200)
+      ).body as Json;
+      expect(detail.allocated).toBe(1000000);
+      expect((detail.einvoices as Json[]).map((e) => e.id)).toEqual([draftId]);
+      expect((detail.order as Json).items).toHaveLength(1);
+      const res = await as('tn1_cs1').get('/einvoices/bills').expect(200);
+      expect(res.headers['x-total-count']).toBeDefined();
+      expect(
+        (res.body as Json[]).find((b) => b.orderId === orderId),
+      ).toMatchObject({
+        allocated: 1000000,
+        einvoiceCount: 1,
+      });
+    });
+
+    it('lists drafts whatever their day, and counts them', async () => {
+      const drafts = (
+        await as('hdqt_hddt')
+          .get('/einvoices?branch=cs1&status=DRAFT')
+          .expect(200)
+      ).body as Json[];
+      expect(drafts.map((d) => d.id)).toContain(draftId);
+      const old = (
+        await as('tn1_cs1')
+          .get('/einvoices?from=2020-01-01&to=2020-01-02')
+          .expect(200)
+      ).body as Json[];
+      expect(old).toHaveLength(0);
+      const summary = (
+        await as('tn1_cs1')
+          .get('/einvoices/summary?from=2020-01-01&to=2020-01-02')
+          .expect(200)
+      ).body as Json;
+      expect(summary).toMatchObject({
+        draftCount: 1,
+        errorCount: 0,
+        uncertainCount: 0,
+        issuedCount: 0,
+        issuedAmount: 0,
+      });
+    });
+
+    it('refuses a day that does not exist', async () => {
+      await as('tn1_cs1').get('/einvoices?from=2026-13-01').expect(400);
+      await as('tn1_cs1').get('/einvoices/summary?to=2026-02-30').expect(400);
+      await as('tn1_cs1')
+        .get('/einvoices/bills?businessDate=2026-02-30')
+        .expect(400);
+      await as('tn1_cs1')
+        .get('/einvoices?from=2026-05-02&to=2026-05-01')
+        .expect(400);
+    });
+
+    it('deletes a draft', async () => {
+      const extra = (
+        await as('tn1_cs1')
+          .post('/einvoices', { orderId, amount: 5000, lines: [] })
+          .expect(201)
+      ).body as Json;
+      await as('tn1_cs1')
+        .delete(`/einvoices/${extra.id as number}`)
+        .expect(200);
+      await as('tn1_cs1')
+        .delete(`/einvoices/${extra.id as number}`)
+        .expect(404);
+    });
+
+    it('tells the bill sheet how many e-invoices a bill has', async () => {
+      const order = (await as('admin').get(`/orders/${orderId}`).expect(200))
+        .body as Json;
+      expect(order._count).toEqual({ einvoices: 1 });
+      expect(order.einvoices).toEqual([]);
+      // An open session skips the lookup: the room page polls this route.
+      const room = (
+        await as('ql1_cs1')
+          .post('/rooms', { name: 'HĐĐT-3', pricePerHour: 100000 })
+          .expect(201)
+      ).body as Json;
+      const session = (
+        await as('tn1_cs1').post('/orders', { roomId: room.id }).expect(201)
+      ).body as Json;
+      const open = (
+        await as('admin')
+          .get(`/orders/${session.id as number}`)
+          .expect(200)
+      ).body as Json;
+      expect(open._count).toEqual({ einvoices: 0 });
+      expect(open.einvoices).toEqual([]);
     });
   });
 });

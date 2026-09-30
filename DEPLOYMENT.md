@@ -528,6 +528,11 @@ Sau khi cập nhật:
 - Nhân viên được gán làm **phục vụ** của phòng gọi món, gán PR/KTV và chốt giờ cho phòng đó. Nhân viên sàn chỉ đăng nhập được khi có mật khẩu, nên sau khi cập nhật hãy đặt mật khẩu cho các tài khoản phục vụ muốn dùng chức năng này (Quản trị → Tài khoản).
 - "Xóa dữ liệu" của HĐQT giờ xóa cả yêu cầu giảm giá và nhật ký mở khóa giờ của phạm vi đã chọn.
 
+### 6.17. Cập nhật tức thời cho màn hình thu ngân và quản lý (WebSocket, không có migration)
+
+- Màn hình thu ngân và quản lý mở một kết nối WebSocket tới `/api/ws` (cùng tên miền) để biết ngay khi phòng, hóa đơn hay yêu cầu giảm giá đổi; điện thoại nhân viên không dùng. Không có kết nối này app vẫn chạy như trước (tự tải lại định kỳ), chỉ chậm hơn vài chục giây.
+- Không cần đổi `.env` hay `docker-compose.yml`. Kiểm tra sau khi cập nhật theo [mục 3.2](#32-cloudflare-tunnel-không-dùng-nginx) điểm 7 (Cloudflare) hoặc [mục 3](#3-tên-miền-nginx-và-https) (Nginx: hai dòng `Upgrade`/`Connection` đã có trong mẫu cấu hình).
+
 ## 7. Xử lý sự cố
 
 | Hiện tượng | Nguyên nhân / cách xử lý |

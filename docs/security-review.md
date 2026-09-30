@@ -11,6 +11,7 @@ Phạm vi: backend NestJS (`502-backend`), frontend Next.js (`502-frontend`), c�
 - Dữ liệu vào được kiểm tra bằng `ValidationPipe` (`whitelist`, bỏ trường lạ). SQL đi qua Prisma hoặc `$queryRaw` dạng template (có tham số), không có `queryRawUnsafe`, nên không bị SQL injection.
 - Giao diện không chèn HTML từ dữ liệu người dùng (`dangerouslySetInnerHTML` chỉ dùng cho CSS của biểu đồ).
 - Secret JWT là bắt buộc khi `NODE_ENV=production`. Database không mở cổng ra ngoài; container chạy bằng user `node` (không phải root).
+- WebSocket `/api/ws`: token gửi trong tin nhắn đầu, không trên URL (không vào log proxy); kiểm tra chữ ký, hạn, nạp lại user (active) như REST; chỉ vai trò bán hàng; trần 100 socket / 5 mỗi user; tin nhắn chỉ có id nên nghe lén không lộ dữ liệu nghiệp vụ; CSP `connect-src 'self'` bao `wss://` cùng origin.
 
 ## 2. Vấn đề đã tìm thấy và đã sửa
 
@@ -48,3 +49,4 @@ Kiểm tra: 113 unit test và 49 e2e test backend đều qua (5 test mới cho p
 - Chưa có nhật ký bảo mật (đăng nhập thất bại, đổi quyền, đặt lại mật khẩu, khoá tài khoản). Nên ghi lại để điều tra khi có sự cố.
 - CSP vẫn cho phép script inline (Next.js và next-themes cần). Muốn chặt hơn thì dùng nonce qua middleware, nhưng khi đó mọi trang phải render động.
 - Tự đăng xuất sau 15 giờ không thao tác chỉ được kiểm tra ở trình duyệt. Giới hạn 24 giờ thì do máy chủ bắt buộc.
+- Socket WebSocket đã xác thực không thấy ngay việc khóa tài khoản hay đổi mật khẩu: nó chỉ kiểm tra lại khi máy khách gửi `auth` mới (mỗi 15 phút theo access token) và bị đóng 60 giây sau khi token hết hạn; trong khoảng đó tài khoản bị khóa vẫn nhận được tín hiệu "id đã đổi" (không có dữ liệu). Chấp nhận được; muốn chặt hơn thì `UsersService.lock/updatePassword` gọi `LiveEventsService` đóng các socket của user đó.

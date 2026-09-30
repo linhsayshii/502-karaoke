@@ -24,12 +24,25 @@ export async function assertNoPendingRequest(tx: Db, orderId: number) {
   }
 }
 
-// Closing a session (checkout, cancel) drops a request still waiting.
-export function expirePendingRequests(tx: Db, orderId: number, at: Date) {
-  return tx.discountRequest.updateMany({
+// Closing a session (checkout, cancel) drops a request still waiting and
+// returns its id (normally none or one) so the caller can signal `decided`
+// after commit. The caller holds the order's row lock, so the ids selected
+// are the ones expired. Uses the DiscountRequest(orderId) index.
+export async function expirePendingRequests(
+  tx: Db,
+  orderId: number,
+  at: Date,
+): Promise<number[]> {
+  const pending = await tx.discountRequest.findMany({
+    where: { orderId, status: DiscountRequestStatus.PENDING },
+    select: { id: true },
+  });
+  if (pending.length === 0) return [];
+  await tx.discountRequest.updateMany({
     where: { orderId, status: DiscountRequestStatus.PENDING },
     data: { status: DiscountRequestStatus.EXPIRED, decidedAt: at },
   });
+  return pending.map((r) => r.id);
 }
 
 export interface AdjustmentLogEntry {

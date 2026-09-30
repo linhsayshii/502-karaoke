@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  DiscountRequestStatus,
   DiscountSource,
   OrderEventType,
   OrderStatus,
@@ -488,46 +489,58 @@ export class OrdersService {
   // Managers only: drop an open session without billing it. It still takes
   // the next bill number, so the day's numbers show every closed session.
   async cancel(user: AuthUser, id: number, reason?: string) {
-    const cancelled = await this.prisma.$transaction(async (tx) => {
-      const order = await this.lockOrder(
-        tx,
-        user,
-        id,
-        OrderStatus.PENDING,
-        'Chỉ hủy được hóa đơn đang mở',
-      );
-      const now = new Date();
-      await expirePendingRequests(tx, id, now);
-      const number = await nextBillNumber(
-        tx,
-        order.branchId,
-        now,
-        order.room?.name,
-      );
-      await tx.order.update({
-        where: { id },
-        data: {
-          status: OrderStatus.CANCELLED,
-          endTime: now,
-          ...number,
-          cancelledAt: now,
-          cancelledById: user.id,
-          cancelReason: reason?.trim() || null,
-        },
-      });
-      await closeOpenPrSessions(tx, id, now);
-      if (order.roomId) {
-        await tx.room.update({
-          where: { id: order.roomId },
-          data: { status: RoomStatus.AVAILABLE },
+    const { cancelled, expiredIds } = await this.prisma.$transaction(
+      async (tx) => {
+        const order = await this.lockOrder(
+          tx,
+          user,
+          id,
+          OrderStatus.PENDING,
+          'Chỉ hủy được hóa đơn đang mở',
+        );
+        const now = new Date();
+        const expiredIds = await expirePendingRequests(tx, id, now);
+        const number = await nextBillNumber(
+          tx,
+          order.branchId,
+          now,
+          order.room?.name,
+        );
+        await tx.order.update({
+          where: { id },
+          data: {
+            status: OrderStatus.CANCELLED,
+            endTime: now,
+            ...number,
+            cancelledAt: now,
+            cancelledById: user.id,
+            cancelReason: reason?.trim() || null,
+          },
         });
-      }
-      return tx.order.findUniqueOrThrow({
-        where: { id },
-        include: orderDetailInclude,
-      });
-    });
+        await closeOpenPrSessions(tx, id, now);
+        if (order.roomId) {
+          await tx.room.update({
+            where: { id: order.roomId },
+            data: { status: RoomStatus.AVAILABLE },
+          });
+        }
+        const cancelled = await tx.order.findUniqueOrThrow({
+          where: { id },
+          include: orderDetailInclude,
+        });
+        return { cancelled, expiredIds };
+      },
+    );
     this.emitClosed(cancelled);
+    // The managers' queue drops the request that expired with the session.
+    for (const requestId of expiredIds) {
+      this.live.discountDecided(
+        cancelled.branchId,
+        cancelled.id,
+        requestId,
+        DiscountRequestStatus.EXPIRED,
+      );
+    }
     return cancelled;
   }
 

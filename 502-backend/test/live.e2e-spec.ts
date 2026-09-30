@@ -309,5 +309,32 @@ describe('Live events (e2e)', () => {
         'room.changed',
       ]);
     });
+
+    it('cancelling a session with a pending request sends discount.decided EXPIRED', async () => {
+      const order = (
+        await as('tn1_cs1').post('/orders', { roomId: roomIds[1] }).expect(201)
+      ).body as Json;
+      const orderId2 = order.id as number;
+      const res = await as('tn1_cs1')
+        .post(`/orders/${orderId2}/adjustments`, {
+          discountPercent: 10,
+          note: 'khách quen',
+        })
+        .expect(201);
+      const pending = ((res.body as Json).discountRequests as Json[])[0];
+      const ql1 = await connectAs('ql1_cs1');
+      await as('ql1_cs1').post(`/orders/${orderId2}/cancel`, {}).expect(200);
+      expect(await ql1.drain()).toEqual(
+        expect.arrayContaining([
+          {
+            type: 'discount.decided',
+            branchId: anyNumber,
+            orderId: orderId2,
+            requestId: pending.id,
+            status: 'EXPIRED',
+          },
+        ]),
+      );
+    });
   });
 });

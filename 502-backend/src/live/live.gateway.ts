@@ -1,4 +1,4 @@
-import { Logger } from '@nestjs/common';
+import { Logger, OnModuleDestroy } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import {
   OnGatewayConnection,
@@ -23,6 +23,8 @@ export const HEARTBEAT_MS = 30_000;
 // 401, refreshes, and re-sends `auth` (spec: close at token/session end).
 export const EXPIRY_GRACE_MS = 60_000;
 const MAX_MISSED_PONGS = 2;
+// Refused `auth` frames one socket may send before it is closed.
+export const MAX_FAILED_AUTHS = 3;
 
 interface AuthMessage {
   type: 'auth';
@@ -38,13 +40,20 @@ interface AuthMessage {
 // pings. Nothing per message is logged.
 @WebSocketGateway({ path: '/api/ws', maxPayload: 4096 })
 export class LiveGateway
-  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+  implements
+    OnGatewayInit,
+    OnGatewayConnection,
+    OnGatewayDisconnect,
+    OnModuleDestroy
 {
   private readonly logger = new Logger(LiveGateway.name);
   // The one periodic timer of the backend (resource rules §1.12 allow no
   // setInterval jobs): it belongs to the sockets, not to a schedule, and
   // stops with them.
   private heartbeat?: ReturnType<typeof setInterval>;
+  // Sockets whose `auth` is being checked: further `auth` frames are dropped
+  // meanwhile, so one socket costs at most one database lookup at a time.
+  private readonly authInFlight = new WeakSet<WebSocket>();
   private readonly authTimers = new WeakMap<
     WebSocket,
     ReturnType<typeof setTimeout>
@@ -92,7 +101,8 @@ export class LiveGateway
       const entry = this.events.registry.entry(socket);
       if (entry) entry.missedPongs = 0;
     });
-    socket.on('error', (err) => this.logger.error(`socket: ${err.message}`));
+    // No 'error' listener here: WsAdapter.bindErrorHandler already logs every
+    // socket error (and keeps it from becoming an unhandled 'error' event).
   }
 
   handleDisconnect(socket: WebSocket) {
@@ -102,18 +112,30 @@ export class LiveGateway
   }
 
   private async onMessage(socket: WebSocket, data: RawData) {
+    // Frames can still arrive after close() was called on the socket.
+    if (socket.readyState !== WebSocket.OPEN) return;
     const message = parseAuth(data);
     if (!message) return; // anything but `auth` is ignored (spec §7)
+    if (this.authInFlight.has(socket)) return;
+    this.authInFlight.add(socket);
+    try {
+      await this.authenticate(socket, message.token);
+    } finally {
+      this.authInFlight.delete(socket);
+    }
+  }
+
+  private async authenticate(socket: WebSocket, token: string) {
     let payload: { sub: number; exp: number };
     try {
-      payload = this.jwt.verify<{ sub: number; exp: number }>(message.token);
+      payload = this.jwt.verify<{ sub: number; exp: number }>(token);
     } catch {
-      socket.close(CLOSE_AUTH, 'Phiên đăng nhập không hợp lệ');
+      this.refuse(socket, 'Phiên đăng nhập không hợp lệ');
       return;
     }
     const user = await this.users.findAuthUser(payload.sub);
     if (!user || !SALES.includes(user.role)) {
-      socket.close(CLOSE_AUTH, 'Tài khoản không dùng được kênh này');
+      this.refuse(socket, 'Tài khoản không dùng được kênh này');
       return;
     }
     const result = this.events.registry.authenticate(
@@ -129,6 +151,17 @@ export class LiveGateway
     clearTimeout(this.authTimers.get(socket));
     this.authTimers.delete(socket);
     socket.send(JSON.stringify({ type: 'ready', userId: user.id }));
+  }
+
+  // A refused `auth`. A socket that never authenticated is closed at once
+  // (nothing to keep; the client reconnects). One that is signed in may try a
+  // renewed token again, but is closed at the MAX_FAILED_AUTHS-th failure.
+  private refuse(socket: WebSocket, reason: string) {
+    const entry = this.events.registry.entry(socket);
+    if (entry) entry.failedAuths += 1;
+    if (!entry || !entry.user || entry.failedAuths >= MAX_FAILED_AUTHS) {
+      socket.close(CLOSE_AUTH, reason);
+    }
   }
 
   // Every HEARTBEAT_MS: ping everyone, drop the silent and the expired.

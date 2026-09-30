@@ -1,5 +1,10 @@
 import { Role } from '@prisma/client';
-import { LiveRegistry, MAX_PER_USER, MAX_SOCKETS } from './live-registry';
+import {
+  LiveRegistry,
+  MAX_PENDING_SOCKETS,
+  MAX_PER_USER,
+  MAX_SOCKETS,
+} from './live-registry';
 
 const cashier = (id: number, branchId: number) => ({
   id,
@@ -26,11 +31,62 @@ describe('LiveRegistry', () => {
   it('counts every open socket against the cap, authenticated or not', () => {
     const reg = new LiveRegistry<object>();
     const sockets = Array.from({ length: MAX_SOCKETS }, sock);
-    for (const s of sockets) expect(reg.open(s)).toBe(true);
+    // Signed in one by one, so the cap of unauthenticated sockets (below)
+    // does not get in the way.
+    sockets.forEach((s, i) => {
+      expect(reg.open(s)).toBe(true);
+      reg.authenticate(s, cashier(100 + i, 1), 9e12);
+    });
     expect(reg.size).toBe(MAX_SOCKETS);
     expect(reg.open(sock())).toBe(false);
     expect(reg.size).toBe(MAX_SOCKETS);
     reg.close(sockets[0]);
+    expect(reg.open(sock())).toBe(true);
+  });
+
+  it('caps the sockets that have not authenticated, apart from the total cap', () => {
+    const reg = new LiveRegistry<object>();
+    const pending = Array.from({ length: MAX_PENDING_SOCKETS }, sock);
+    for (const s of pending) expect(reg.open(s)).toBe(true);
+    // MAX_SOCKETS is far from reached, yet the 21st unauthenticated is refused
+    expect(reg.size).toBeLessThan(MAX_SOCKETS);
+    expect(reg.open(sock())).toBe(false);
+    expect(reg.size).toBe(MAX_PENDING_SOCKETS);
+  });
+
+  it('frees a pending slot when a socket authenticates or an unauthenticated one closes', () => {
+    const reg = new LiveRegistry<object>();
+    const pending = Array.from({ length: MAX_PENDING_SOCKETS }, sock);
+    for (const s of pending) reg.open(s);
+    expect(reg.open(sock())).toBe(false);
+    expect(reg.authenticate(pending[0], cashier(1, 1), 9e12)).toBe('ok');
+    const a = sock();
+    expect(reg.open(a)).toBe(true); // took the slot freed by authenticating
+    expect(reg.open(sock())).toBe(false);
+    reg.close(pending[1]); // unauthenticated close frees one
+    expect(reg.open(sock())).toBe(true);
+    expect(reg.open(sock())).toBe(false);
+    // closing an authenticated socket does not give a pending slot back
+    reg.close(pending[0]);
+    expect(reg.open(sock())).toBe(false);
+  });
+
+  it('counts a refused (too-many) socket as unauthenticated again', () => {
+    const reg = new LiveRegistry<object>();
+    const mine = Array.from({ length: MAX_PER_USER + 1 }, sock);
+    for (const s of mine) reg.open(s);
+    for (let i = 0; i < MAX_PER_USER; i++) {
+      reg.authenticate(mine[i], cashier(7, 1), 9e12);
+    }
+    expect(reg.authenticate(mine[MAX_PER_USER], cashier(7, 1), 9e12)).toBe(
+      'too-many',
+    );
+    // 1 pending (the refused one); 19 more fill the cap, the 20th is refused
+    for (let i = 0; i < MAX_PENDING_SOCKETS - 1; i++) {
+      expect(reg.open(sock())).toBe(true);
+    }
+    expect(reg.open(sock())).toBe(false);
+    reg.close(mine[MAX_PER_USER]);
     expect(reg.open(sock())).toBe(true);
   });
 

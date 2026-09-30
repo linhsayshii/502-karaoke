@@ -6,6 +6,10 @@ import { LiveEvent, LiveUser } from './live-events';
 // a few hundred KB whatever happens on the network.
 export const MAX_SOCKETS = 100;
 export const MAX_PER_USER = 5;
+// Sockets that have not authenticated yet (each holds a slot for at most the
+// gateway's 5 s auth timeout). Capped apart so an outsider opening
+// connections cannot take the slots of the signed-in screens.
+export const MAX_PENDING_SOCKETS = 20;
 
 export interface LiveEntry {
   // null until the socket has sent a valid `auth` message.
@@ -15,6 +19,9 @@ export interface LiveEntry {
   // Pings without a pong since the last one; the gateway closes at 2.
   missedPongs: number;
   connectedAt: number;
+  // `auth` frames of this socket that were refused; the gateway closes it
+  // after a few.
+  failedAuths: number;
 }
 
 // Who holds a socket, by branch and for the chain managers, plus how many
@@ -26,21 +33,26 @@ export class LiveRegistry<S extends object> {
   private readonly byBranch = new Map<number, Set<S>>();
   private readonly chainManagers = new Set<S>();
   private readonly perUser = new Map<number, number>();
+  // Entries with user === null, kept as a counter (no scans).
+  private pending = 0;
 
   get size() {
     return this.entries.size;
   }
 
-  // Registers a new connection; false when the cap is reached (the caller
-  // closes it with 1013).
+  // Registers a new connection; false when the cap or the cap of not yet
+  // authenticated sockets is reached (the caller closes it with 1013).
   open(socket: S, now = Date.now()): boolean {
     if (this.entries.size >= MAX_SOCKETS) return false;
+    if (this.pending >= MAX_PENDING_SOCKETS) return false;
     this.entries.set(socket, {
       user: null,
       exp: null,
       missedPongs: 0,
       connectedAt: now,
+      failedAuths: 0,
     });
+    this.pending += 1;
     return true;
   }
 
@@ -62,13 +74,18 @@ export class LiveRegistry<S extends object> {
       this.place(socket, user);
       return 'ok';
     }
+    const wasPending = entry.user === null;
     if (entry.user) this.unplace(socket, entry.user);
     if ((this.perUser.get(user.id) ?? 0) >= MAX_PER_USER) {
       entry.user = null;
       entry.exp = null;
+      // A socket that was signed in and is refused as another user falls back
+      // to unauthenticated (the gateway closes it right away).
+      if (!wasPending) this.pending += 1;
       return 'too-many';
     }
     this.perUser.set(user.id, (this.perUser.get(user.id) ?? 0) + 1);
+    if (wasPending) this.pending -= 1;
     entry.user = user;
     entry.exp = exp;
     this.place(socket, user);
@@ -79,6 +96,7 @@ export class LiveRegistry<S extends object> {
     const entry = this.entries.get(socket);
     if (!entry) return;
     if (entry.user) this.unplace(socket, entry.user);
+    else this.pending -= 1;
     this.entries.delete(socket);
   }
 

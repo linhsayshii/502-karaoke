@@ -1,7 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { AuthUser } from '../auth/auth-user';
-import { toDateString, toDbDate } from '../common/dates';
+import { businessDateOf, toDateString, toDbDate } from '../common/dates';
 import type { IssueConfig } from './einvoice-config.service';
 import type { SendOutcome } from './einvoice-sender';
 import { EinvoicesService, STALE_SENDING_MS } from './einvoices.service';
@@ -745,5 +745,79 @@ describe('EinvoicesService pending "Không rõ" work', () => {
     expect(count).toHaveBeenCalledWith({
       where: { branchId: 1, status: pending },
     });
+  });
+});
+
+// A service whose prisma creates and updates drafts (create, update).
+const creating = () => {
+  const einvoice = {
+    create: jest.fn().mockResolvedValue({ id: 40 }),
+    updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    findUnique: jest.fn().mockResolvedValue({
+      id: 40,
+      branchId: 1,
+      status: 'DRAFT',
+      invoiceDate: null,
+    }),
+  };
+  const order = { findUnique: jest.fn() };
+  const scope = {
+    resolveBranchId: jest.fn().mockResolvedValue(3),
+    assertBranchAccess: jest.fn(),
+  };
+  const service = new EinvoicesService(
+    { einvoice, order } as never,
+    {} as never,
+    scope as never,
+    {} as never,
+    {} as never,
+  );
+  return { service, einvoice, order, scope };
+};
+// The `data` of the n-th call of a prisma create/update mock.
+const dataOf = (mock: jest.Mock, call = 0) =>
+  (mock.mock.calls[call] as [{ data: Record<string, unknown> }])[0].data;
+
+describe('EinvoicesService free invoices', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it("are created in the branch of the page, on today's business day", async () => {
+    const { service, einvoice, order, scope } = creating();
+    await service.create(user, { amount: 0, lines: [] }, 'cs3');
+    expect(scope.resolveBranchId).toHaveBeenCalledWith(user, 'cs3');
+    expect(order.findUnique).not.toHaveBeenCalled();
+    expect(dataOf(einvoice.create)).toMatchObject({
+      branchId: 3,
+      orderId: null,
+      businessDate: toDbDate(businessDateOf(new Date())),
+      amount: 0,
+    });
+  });
+
+  it('are issued without a bill to check', async () => {
+    const { service, einvoice, sender } = setup(issued);
+    einvoice.findUnique.mockResolvedValueOnce({ ...draftRow(), order: null });
+    await service.issue(user, 12, dto);
+    expect(sender.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('are listed apart', async () => {
+    const einvoice = {
+      findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
+    };
+    const service = new EinvoicesService(
+      { einvoice } as never,
+      {} as never,
+      { resolveBranchId: jest.fn().mockResolvedValue(1) } as never,
+      {} as never,
+      {} as never,
+    );
+    await service.list(user, { free: true, status: 'DRAFT' });
+    expect(einvoice.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { branchId: 1, status: 'DRAFT', lastError: null, orderId: null },
+      }),
+    );
   });
 });

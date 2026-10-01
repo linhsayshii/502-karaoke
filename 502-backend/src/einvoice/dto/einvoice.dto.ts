@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
@@ -111,9 +111,13 @@ export class EinvoiceDraftDto {
 }
 
 export class CreateEinvoiceDto extends EinvoiceDraftDto {
-  @ApiProperty({ description: 'Bill đã thanh toán' })
+  @ApiProperty({
+    required: false,
+    description: 'Bill đã thanh toán; bỏ trống là hóa đơn không theo bill',
+  })
+  @IsOptional()
   @IsInt()
-  orderId: number;
+  orderId?: number;
 }
 
 export class EinvoiceListQuery {
@@ -147,6 +151,15 @@ export class EinvoiceListQuery {
   @IsOptional()
   @Matches(BILL_NUMBER_RE, { message: 'Số bill chỉ gồm chữ số' })
   billNumber?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'Chỉ hóa đơn không theo bill (1 / true)',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true' || value === '1')
+  @IsBoolean()
+  free?: boolean;
 }
 
 export class EinvoiceBillsQuery {

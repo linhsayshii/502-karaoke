@@ -449,7 +449,28 @@ export class EinvoicesService implements OnApplicationBootstrap {
     return toEinvoiceRow(row);
   }
 
-  async create(user: AuthUser, dto: CreateEinvoiceDto) {
+  async create(user: AuthUser, dto: CreateEinvoiceDto, branch?: string) {
+    const written = {
+      createdById: user.id,
+      updatedById: user.id,
+      ...draftData(dto),
+    };
+    if (dto.orderId === undefined) {
+      // A free invoice: no bill, the branch of the page, and the business day
+      // it is made on for the list filters (spec
+      // 2026-10-01-hddt-bo-cuc-va-hd-tu-do §4).
+      const branchId = await this.scope.resolveBranchId(user, branch);
+      const created = await this.prisma.einvoice.create({
+        data: {
+          branchId,
+          orderId: null,
+          businessDate: toDbDate(businessDateOf(new Date())),
+          ...written,
+        },
+        select: { id: true },
+      });
+      return this.findOne(user, created.id);
+    }
     const order = await this.prisma.order.findUnique({
       where: { id: dto.orderId },
       select: { id: true, branchId: true, status: true, businessDate: true },
@@ -466,9 +487,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
         branchId: order.branchId,
         orderId: order.id,
         businessDate: order.businessDate,
-        createdById: user.id,
-        updatedById: user.id,
-        ...draftData(dto),
+        ...written,
       },
       select: { id: true },
     });
@@ -529,7 +548,8 @@ export class EinvoicesService implements OnApplicationBootstrap {
           : 'Hóa đơn đang được gửi',
       );
     }
-    if (row.order.status !== OrderStatus.COMPLETED) {
+    // A free invoice has no bill that could have been voided.
+    if (row.order && row.order.status !== OrderStatus.COMPLETED) {
       throw new BadRequestException('Bill đã hủy, không xuất được hóa đơn');
     }
     const draft = parseDraft(row.draft);
@@ -1113,6 +1133,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
     } else if (query.status) {
       where.status = query.status;
     }
+    if (query.free) where.orderId = null;
     // Pending work (drafts, errors, uncertain) is listed whatever its day.
     const dated = !query.status || query.status === 'ISSUED';
     if (query.billNumber) {

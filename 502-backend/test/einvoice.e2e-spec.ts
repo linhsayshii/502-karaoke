@@ -1085,6 +1085,47 @@ describe('E-invoices (e2e)', () => {
       expect(fake.posts).toBe(posts);
     });
 
+    it('creates, lists and issues an invoice without a bill', async () => {
+      const free = { amount: 0, lines: [] };
+      await as('tn1_cs1').post('/einvoices?branch=cs2', free).expect(403);
+      await as('admin').post('/einvoices', free).expect(400);
+      await as('hdqt_hddt').post('/einvoices?branch=cs1', free).expect(403);
+      const drafts = async () =>
+        (
+          (await as('tn1_cs1').get('/einvoices/summary').expect(200))
+            .body as Json
+        ).draftCount as number;
+      const before = await drafts();
+      const created = (
+        await as('tn1_cs1').post('/einvoices?branch=cs1', free).expect(201)
+      ).body as Json;
+      expect(created).toMatchObject({
+        status: 'DRAFT',
+        orderId: null,
+        order: null,
+      });
+      expect(await drafts()).toBe(before + 1);
+      const id = created.id as number;
+      await as('tn1_cs1')
+        .patch(`/einvoices/${id}`, {
+          amount: 1000000,
+          ...buyer,
+          lines: [filler(909091)],
+        })
+        .expect(200);
+      const listed = (
+        await as('tn1_cs1').get('/einvoices?free=1&status=DRAFT').expect(200)
+      ).body as Json[];
+      expect(listed.map((e) => e.id)).toEqual([id]);
+      const body = (await issue(id).expect(200)).body as Json;
+      expect(body).toMatchObject({
+        status: 'ISSUED',
+        orderId: null,
+        draft: null,
+      });
+      expect(body.invoiceNumber).toEqual(expect.any(Number));
+    });
+
     it('is wiped with the data of its branch', async () => {
       const res = await as('hdqt_hddt')
         .post('/admin/purge', {

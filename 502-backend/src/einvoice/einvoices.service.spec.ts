@@ -794,6 +794,17 @@ describe('EinvoicesService free invoices', () => {
     });
   });
 
+  it('are also made by an orderId that is null', async () => {
+    const { service, einvoice, order } = creating();
+    await service.create(
+      user,
+      { orderId: null, amount: 0, lines: [] } as never,
+      'cs3',
+    );
+    expect(order.findUnique).not.toHaveBeenCalled();
+    expect(dataOf(einvoice.create)).toMatchObject({ orderId: null });
+  });
+
   it('are issued without a bill to check', async () => {
     const { service, einvoice, sender } = setup(issued);
     einvoice.findUnique.mockResolvedValueOnce({ ...draftRow(), order: null });

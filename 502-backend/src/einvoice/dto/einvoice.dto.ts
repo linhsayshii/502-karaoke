@@ -117,7 +117,7 @@ export class CreateEinvoiceDto extends EinvoiceDraftDto {
   })
   @IsOptional()
   @IsInt()
-  orderId?: number;
+  orderId?: number | null;
 }
 
 export class EinvoiceListQuery {

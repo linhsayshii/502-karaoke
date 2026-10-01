@@ -455,9 +455,10 @@ export class EinvoicesService implements OnApplicationBootstrap {
       updatedById: user.id,
       ...draftData(dto),
     };
-    if (dto.orderId === undefined) {
-      // A free invoice: no bill, the branch of the page, and the business day
-      // it is made on for the list filters (spec
+    if (dto.orderId == null) {
+      // A free invoice (no orderId, or a null one: @IsOptional lets both
+      // through): no bill, the branch of the page, and the business day it
+      // is made on for the list filters (spec
       // 2026-10-01-hddt-bo-cuc-va-hd-tu-do §4).
       const branchId = await this.scope.resolveBranchId(user, branch);
       const created = await this.prisma.einvoice.create({

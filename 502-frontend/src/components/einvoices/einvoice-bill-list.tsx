@@ -47,6 +47,7 @@ const TABS: { value: EinvoiceTab; label: string; count?: keyof EinvoiceSummary }
 // classes are container variants.
 export function EinvoiceBillList({
   version,
+  revealFreeDraft,
   openOrderId,
   openBill,
   openBillLoading,
@@ -65,6 +66,8 @@ export function EinvoiceBillList({
 }: {
   // Bumped after every write: the lists and counts reload.
   version: number;
+  // Bumped when a free draft was made elsewhere (Gửi lại): the list moves to show it.
+  revealFreeDraft: number;
   openOrderId: number | null;
   // The open bill once loaded (null meanwhile), and whether it is being read.
   openBill: EinvoiceBillDetail | null;
@@ -140,18 +143,27 @@ export function EinvoiceBillList({
         ? "Không có hóa đơn đã xuất trong khoảng ngày này."
         : "Không có hóa đơn nào ở trạng thái này.";
 
-  const createFree = () => {
-    // The new draft is dated today's business day. It shows in the Nháp tab,
-    // and in the Bill tab while its range holds today; no other tab or range
-    // lists it, and a bill-number search hides the free group altogether, so
-    // the list moves to Nháp and the search is cleared (its box empties at
-    // once, the list follows after the debounce).
+  // A new free draft is dated today's business day. It shows in the Nháp tab,
+  // and in the Bill tab while its range holds today; no other tab or range
+  // lists it, and a bill-number search hides the free group altogether, so
+  // the list moves to Nháp and the search is cleared (its box empties at
+  // once, the list follows after the debounce).
+  const showFreeDraft = () => {
     const today = businessDate();
     const shown = tab === "DRAFT" || (tab === "BILLS" && range.from <= today && today <= range.to);
     if (!shown) setTab("DRAFT");
     if (search) setSearch("");
+  };
+  const createFree = () => {
+    showFreeDraft();
     onCreate(null, 0);
   };
+  // One made by the panel (Gửi lại) moves the list too (adjusted during render).
+  const [revealSeen, setRevealSeen] = useState(revealFreeDraft);
+  if (revealSeen !== revealFreeDraft) {
+    setRevealSeen(revealFreeDraft);
+    showFreeDraft();
+  }
 
   return (
     <div className="flex min-w-0 flex-col gap-3">

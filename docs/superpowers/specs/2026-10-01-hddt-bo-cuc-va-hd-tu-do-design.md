@@ -145,7 +145,7 @@ Spec này sửa spec gốc `2026-10-01-hoa-don-dien-tu-design.md`. Những gì k
 
 - **Đầu panel:** "HĐ n · Bill <số> · <phòng>" hoặc "HĐ tự do #id", badge trạng thái, và dòng "Số tiền (đã gồm VAT): X" kèm chú thích nhỏ "sửa ở cột trái".
 - **Theo trạng thái:**
-  - `ISSUED`: `issued-view.tsx`.
+  - `ISSUED`: `issued-view.tsx`. Nút **Gửi lại** (quyền `einvoices.write`, không có trên bill đã hủy) hỏi xác nhận rồi tạo một nháp mới cùng bill (hoặc HĐ tự do mới) với số tiền, MST, tên người mua của hóa đơn đã xuất và ngày hôm nay; dòng hàng, địa chỉ, email phải nhập lại vì nháp đã bị xóa khi xuất. Hóa đơn đã xuất giữ nguyên, nên phần đã chia của bill tính cả hai; nháp tự do mới thì cột trái chuyển sang tab Nháp.
   - `UNCERTAIN`: `uncertain-box.tsx`, với `billCompleted` là true khi hóa đơn không có bill.
   - `SENDING`: dòng "Đang gửi…" và nút Tải lại.
   - Còn lại: editor.

@@ -16,6 +16,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
+import { toDateInput } from "@/lib/format";
 import { can } from "@/lib/permissions";
 import type { EinvoiceBillDetail, EinvoiceConfigView, EinvoiceDetail } from "@/lib/types";
 
@@ -23,6 +24,13 @@ import type { EinvoiceBillDetail, EinvoiceConfigView, EinvoiceDetail } from "@/l
 interface Selection {
   orderId: number | null;
   einvoiceId: number;
+}
+
+// What a new draft may carry besides its amount (Gửi lại of an issued one).
+interface DraftExtra {
+  buyerTaxCode?: string;
+  buyerName?: string;
+  invoiceDate?: string;
 }
 
 // The invoice a bill opens on: the first of the tab it was opened from, else
@@ -64,6 +72,8 @@ export default function EinvoicesPage() {
   const [creating, setCreating] = useState<Creating>(null);
   // Bumped after every write so the lists and counts reload.
   const [listVersion, setListVersion] = useState(0);
+  // Bumped when a free draft was made outside the list: it moves to show it.
+  const [revealFreeDraft, setRevealFreeDraft] = useState(0);
   // Unsaved edits in the panel. Closing or reloading the tab asks through
   // beforeunload, and every switch inside the page through run(); leaving
   // through the sidebar is not guarded.
@@ -165,14 +175,14 @@ export default function EinvoicesPage() {
   // + makes a draft at once, many in a row if wanted (spec §5.2). The panel
   // follows it unless it holds unsaved edits; + on a bill other than the open
   // one is a switch of bill, so that one asks first.
-  const create = (orderId: number | null, amount: number) => {
+  const create = (orderId: number | null, amount: number, extra: DraftExtra = {}) => {
     const switching = orderId !== null && orderId !== openOrderId;
     const go = async () => {
       setCreating(orderId ?? "free");
       try {
         const res = await api.post<EinvoiceDetail>(
           "/einvoices",
-          { ...(orderId === null ? {} : { orderId }), amount, lines: [] },
+          { ...(orderId === null ? {} : { orderId }), amount, lines: [], ...extra },
           { params: { branch } },
         );
         const row = res.data;
@@ -186,14 +196,32 @@ export default function EinvoicesPage() {
           }
         }
         if (!dirty || switching) setSelected({ orderId, einvoiceId: row.id });
+        return true;
       } catch (error) {
         notify.error(error, "Không tạo được hóa đơn");
+        return false;
       } finally {
         setCreating(null);
       }
     };
-    if (switching) run(() => void go());
-    else void go();
+    if (!switching) return go();
+    run(() => void go());
+    return Promise.resolve(true);
+  };
+
+  // Gửi lại of an issued invoice: its draft went when it was issued, so a new
+  // draft of the same bill (or a free one) takes its amount and buyer, dated
+  // today; the issued one stays. The panel shows an issued invoice, so it
+  // holds no unsaved edits and is on the open bill: never a switch.
+  const resend = async (row: EinvoiceDetail) => {
+    const ok = await create(row.orderId, Number(row.amount), {
+      ...(row.buyerTaxCode ? { buyerTaxCode: row.buyerTaxCode } : {}),
+      ...(row.buyerName ? { buyerName: row.buyerName } : {}),
+      invoiceDate: toDateInput(),
+    });
+    // The Đã xuất tab does not list a free draft: the list moves to where it is.
+    if (ok && row.orderId === null) setRevealFreeDraft((n) => n + 1);
+    return ok;
   };
 
   const deleted = (orderId: number | null, einvoiceId: number) => {
@@ -233,6 +261,7 @@ export default function EinvoicesPage() {
         config={config.data}
         busy={panelLocked}
         onChanged={panelChanged}
+        onResend={resend}
         onReload={() => (shown.orderId === null ? free.reload() : bill.reload())}
         onDirtyChange={setDirty}
         onWorkingChange={setPanelWorking}
@@ -274,6 +303,7 @@ export default function EinvoicesPage() {
         <div ref={gridRef} className="grid items-start gap-4 @4xl/main:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
           <EinvoiceBillList
             version={listVersion}
+            revealFreeDraft={revealFreeDraft}
             openOrderId={openOrderId}
             openBill={billDetail}
             openBillLoading={bill.loading}

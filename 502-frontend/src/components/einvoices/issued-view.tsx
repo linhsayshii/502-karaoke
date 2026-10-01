@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { PencilIcon, TriangleAlertIcon } from "lucide-react";
+import { PencilIcon, RotateCcwIcon, TriangleAlertIcon } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { EditNumberDialog } from "@/components/einvoices/edit-number-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -13,17 +14,30 @@ import type { EinvoiceDetail } from "@/lib/types";
 // An issued invoice: only its header is kept (spec §4). One that still has a
 // lastError was issued but Minvoice's number clashed with one of ours, so its
 // number is empty until the chain manager types the one shown on Minvoice.
+// Gửi lại makes a new draft from it (its own draft went when it was issued);
+// the issued one stays as it is, here and on Minvoice.
 // Rendered inside the panel's @container/einvoice.
 export function IssuedView({
   einvoice,
+  billCompleted,
+  busy,
   onChanged,
+  onResend,
 }: {
   einvoice: EinvoiceDetail;
+  // A voided bill takes no new invoice.
+  billCompleted: boolean;
+  // The panel is reloading after a write.
+  busy: boolean;
   onChanged: (row: EinvoiceDetail) => void;
+  // Creates the new draft and shows it; false when that failed.
+  onResend: (einvoice: EinvoiceDetail) => Promise<boolean>;
 }) {
   const { user } = useAuth();
   const [editOpen, setEditOpen] = useState(false);
+  const [resendOpen, setResendOpen] = useState(false);
   const canEditNumber = can(user, "einvoices.issue");
+  const canResend = can(user, "einvoices.write") && billCompleted;
   return (
     <div className="flex flex-col gap-3">
       {einvoice.lastError && (
@@ -78,7 +92,21 @@ export function IssuedView({
         )}
       </dl>
       <p className="text-xs text-muted-foreground">Chi tiết dòng hàng xem trên Minvoice.</p>
+      {canResend && (
+        <Button size="sm" variant="outline" className="self-start" disabled={busy} onClick={() => setResendOpen(true)}>
+          <RotateCcwIcon data-icon="inline-start" />
+          Gửi lại
+        </Button>
+      )}
       <EditNumberDialog einvoice={einvoice} open={editOpen} onOpenChange={setEditOpen} onSaved={onChanged} />
+      <ConfirmDialog
+        open={resendOpen}
+        onOpenChange={setResendOpen}
+        title={`Gửi lại hóa đơn${einvoice.invoiceNumber ? ` số ${einvoice.invoiceNumber}` : ""}?`}
+        description={`Hóa đơn này giữ nguyên, ở đây và trên Minvoice. Hệ thống tạo một nháp mới${einvoice.orderId === null ? "" : " của cùng bill"} với số tiền ${formatMoney(einvoice.amount)}, MST và tên người mua, ngày hôm nay. Dòng hàng, địa chỉ và email không còn lưu sau khi xuất nên cần nhập lại trước khi Xuất.${einvoice.orderId === null ? "" : " Phần đã chia của bill tính cả hai hóa đơn."}`}
+        confirmLabel="Tạo nháp mới"
+        onConfirm={() => onResend(einvoice)}
+      />
     </div>
   );
 }

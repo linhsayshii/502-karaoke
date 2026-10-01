@@ -42,6 +42,7 @@ export function EinvoiceIssuePanel({
   config,
   busy,
   onChanged,
+  onResend,
   onReload,
   onDirtyChange,
   onWorkingChange,
@@ -55,6 +56,8 @@ export function EinvoiceIssuePanel({
   config: EinvoiceConfigView | null;
   busy: boolean;
   onChanged: (row: EinvoiceDetail) => void;
+  // Gửi lại of an issued invoice: a new draft from it.
+  onResend: (row: EinvoiceDetail) => Promise<boolean>;
   onReload: () => void;
   onDirtyChange: (dirty: boolean) => void;
   onWorkingChange: (working: boolean) => void;
@@ -80,7 +83,13 @@ export function EinvoiceIssuePanel({
         </Badge>
       </div>
       {einvoice.status === "ISSUED" ? (
-        <IssuedView einvoice={einvoice} onChanged={onChanged} />
+        <IssuedView
+          einvoice={einvoice}
+          billCompleted={!bill || bill.status === "COMPLETED"}
+          busy={busy}
+          onChanged={onChanged}
+          onResend={onResend}
+        />
       ) : einvoice.status === "UNCERTAIN" ? (
         <UncertainBox
           einvoice={einvoice}

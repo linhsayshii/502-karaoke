@@ -7,6 +7,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
+import { PrismaService } from '../src/prisma/prisma.service';
 import { FakeMinvoice } from './fake-minvoice';
 
 // Trang báo cáo (spec 2026-10-02-trang-bao-cao-hddt) against a fake Minvoice
@@ -163,6 +164,64 @@ describe('Report site (e2e)', () => {
       ).body as Json;
       expect(moved.reportAccess).toBe(false);
       await login('qlbc_tam', 'report').expect(403);
+    });
+  });
+
+  describe('e-invoices of a bill thêm tay', () => {
+    let manualBillId: number;
+    let draftId: number;
+
+    it('are made only on the report site, in the branch of the bill', async () => {
+      // Task 6 adds the route that makes bills thêm tay; one is written here,
+      // on a day far in the past so no later test's day can meet it.
+      manualBillId = (
+        await app.get(PrismaService).manualBill.create({
+          data: {
+            branchId: cs1Id,
+            businessDate: new Date('2025-01-15T00:00:00Z'),
+            billSeq: 900,
+            billNumber: '15010000900',
+          },
+          select: { id: true },
+        })
+      ).id;
+      const body = { manualBillId, amount: 110000, lines: [] };
+      for (const name of ['tn1_cs1', 'ql1_cs1']) {
+        const res = await as(name).post('/einvoices', body).expect(403);
+        expect((res.body as Json).message).toBe(
+          'Hóa đơn của bill thêm tay chỉ mở được ở trang báo cáo',
+        );
+      }
+      await as('qlbc_cs2').post('/einvoices', body).expect(403);
+      await as('hdqt_bc').post('/einvoices', body).expect(403);
+      const created = (
+        await as('qlbc_cs1').post('/einvoices', body).expect(201)
+      ).body as Json;
+      expect(created).toMatchObject({
+        orderId: null,
+        manualBillId,
+        status: 'DRAFT',
+        invoiceDate: '2025-01-15',
+        vatAmount: '10000',
+      });
+      draftId = created.id as number;
+    });
+
+    it('are out of reach of the main site’s accounts', async () => {
+      for (const name of ['tn1_cs1', 'ql1_cs1'])
+        await as(name).get(`/einvoices/${draftId}`).expect(403);
+      await as('tn1_cs1')
+        .patch(`/einvoices/${draftId}`, { amount: 1, lines: [] })
+        .expect(403);
+      await as('tn1_cs1').delete(`/einvoices/${draftId}`).expect(403);
+      await as('qlbc_cs1').get(`/einvoices/${draftId}`).expect(200);
+      await as('hdqt_bc').get(`/einvoices/${draftId}`).expect(200);
+    });
+
+    it('are not counted on the main site', async () => {
+      const main = (await as('tn1_cs1').get('/einvoices/summary').expect(200))
+        .body as Json;
+      expect(main.draftCount).toBe(0);
     });
   });
 });

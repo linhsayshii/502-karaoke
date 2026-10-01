@@ -274,8 +274,8 @@ describe('E-invoices (e2e)', () => {
       expect(created).toMatchObject({
         status: 'DRAFT',
         amount: '1000000',
-        // Its lines' 35.000 + the 10% of the 615.000 they do not cover yet
-        // (spec 2026-10-02 §4.4).
+        // Its lines' 35.000 + the VAT inside the 615.000 they do not cover yet
+        // (615.000 / 11 = 55.909; spec 2026-10-02 §4.4).
         vatAmount: '90909',
         buyerName: 'CÔNG TY HOÀNG GIA',
         draft: {
@@ -421,16 +421,10 @@ describe('E-invoices (e2e)', () => {
     it('lists drafts whatever their day, and counts them', async () => {
       const drafts = (
         await as('hdqt_hddt')
-          .get('/einvoices?branch=cs1&status=DRAFT')
+          .get('/einvoices/bills?branch=cs1&status=DRAFT')
           .expect(200)
       ).body as Json[];
-      expect(drafts.map((d) => d.id)).toContain(draftId);
-      const old = (
-        await as('tn1_cs1')
-          .get('/einvoices?from=2020-01-01&to=2020-01-02')
-          .expect(200)
-      ).body as Json[];
-      expect(old).toHaveLength(0);
+      expect(drafts.map((b) => b.orderId)).toContain(orderId);
       const summary = (
         await as('tn1_cs1')
           .get('/einvoices/summary?from=2020-01-01&to=2020-01-02')
@@ -446,14 +440,10 @@ describe('E-invoices (e2e)', () => {
     });
 
     it('refuses a day that does not exist', async () => {
-      await as('tn1_cs1').get('/einvoices?from=2026-13-01').expect(400);
       await as('tn1_cs1').get('/einvoices/summary?to=2026-02-30').expect(400);
       await as('tn1_cs1').get('/einvoices/bills?from=2026-02-30').expect(400);
       await as('tn1_cs1')
         .get('/einvoices/bills?from=2026-05-02&to=2026-05-01')
-        .expect(400);
-      await as('tn1_cs1')
-        .get('/einvoices?from=2026-05-02&to=2026-05-01')
         .expect(400);
     });
 
@@ -483,10 +473,10 @@ describe('E-invoices (e2e)', () => {
       const prefix = (order.billNumber as string).slice(0, 6);
       const found = (
         await as('tn1_cs1')
-          .get(`/einvoices?status=DRAFT&billNumber=${prefix}`)
+          .get(`/einvoices/bills?status=DRAFT&billNumber=${prefix}`)
           .expect(200)
       ).body as Json[];
-      expect(found.map((e) => e.id)).toContain(created.id);
+      expect(found.map((b) => b.orderId)).toContain(orderId);
       await as('tn1_cs1')
         .delete(`/einvoices/${created.id as number}`)
         .expect(200);
@@ -715,9 +705,9 @@ describe('E-invoices (e2e)', () => {
       expect((body.draft as Json).lines).toHaveLength(1);
       expect(fake.posts).toBe(posts + 2);
       const errors = (
-        await as('tn1_cs1').get('/einvoices?status=ERROR').expect(200)
+        await as('tn1_cs1').get('/einvoices/bills?status=ERROR').expect(200)
       ).body as Json[];
-      expect(errors.map((e) => e.id)).toContain(id);
+      expect(errors.map((b) => b.orderId)).toContain(orderId);
       await as('tn1_cs1').delete(`/einvoices/${id}`).expect(200);
     });
 
@@ -1123,13 +1113,12 @@ describe('E-invoices (e2e)', () => {
           .status,
       ).toBe('SENDING');
       await stuck();
-      // Not opened yet, still SENDING: listed and counted as "Không rõ".
+      // Not opened yet, still SENDING: its bill is listed and the row is
+      // counted as "Không rõ" (opening the bill would sweep the row).
       const listed = (
-        await as('tn1_cs1').get('/einvoices?status=UNCERTAIN').expect(200)
+        await as('tn1_cs1').get('/einvoices/bills?status=UNCERTAIN').expect(200)
       ).body as Json[];
-      expect(listed.find((e) => e.id === id)).toMatchObject({
-        status: 'SENDING',
-      });
+      expect(listed.map((b) => b.orderId)).toContain(orderId);
       const summary = (
         await as('tn1_cs1').get('/einvoices/summary').expect(200)
       ).body as Json;
@@ -1179,54 +1168,14 @@ describe('E-invoices (e2e)', () => {
       expect(fake.posts).toBe(posts);
     });
 
-    it('creates, lists and issues an invoice without a bill', async () => {
-      const free = { amount: 0, lines: [] };
-      await as('tn1_cs1').post('/einvoices?branch=cs2', free).expect(403);
-      await as('admin').post('/einvoices', free).expect(400);
-      await as('hdqt_hddt').post('/einvoices?branch=cs1', free).expect(403);
-      const drafts = async () =>
-        (
-          (await as('tn1_cs1').get('/einvoices/summary').expect(200))
-            .body as Json
-        ).draftCount as number;
-      const before = await drafts();
-      const created = (
-        await as('tn1_cs1').post('/einvoices?branch=cs1', free).expect(201)
-      ).body as Json;
-      expect(created).toMatchObject({
-        status: 'DRAFT',
-        orderId: null,
-        order: null,
-      });
-      expect(await drafts()).toBe(before + 1);
-      const id = created.id as number;
-      await as('tn1_cs1')
-        .patch(`/einvoices/${id}`, {
-          amount: 1000000,
-          ...buyer,
-          lines: [filler(909091)],
-        })
-        .expect(200);
-      // A second free draft goes away again (spec §7: edit and delete).
-      const second = (
-        await as('tn1_cs1').post('/einvoices?branch=cs1', free).expect(201)
-      ).body as Json;
-      expect(await drafts()).toBe(before + 2);
-      await as('tn1_cs1')
-        .delete(`/einvoices/${second.id as number}`)
-        .expect(200);
-      expect(await drafts()).toBe(before + 1);
-      const listed = (
-        await as('tn1_cs1').get('/einvoices?free=1&status=DRAFT').expect(200)
-      ).body as Json[];
-      expect(listed.map((e) => e.id)).toEqual([id]);
-      const body = (await issue(id).expect(200)).body as Json;
-      expect(body).toMatchObject({
-        status: 'ISSUED',
-        orderId: null,
-        draft: null,
-      });
-      expect(body.invoiceNumber).toEqual(expect.any(Number));
+    it('refuses an invoice without a bill (spec 2026-10-02 §6.2)', async () => {
+      for (const body of [
+        { amount: 0, lines: [] },
+        { orderId, manualBillId: 1, amount: 0, lines: [] },
+      ]) {
+        const res = await as('tn1_cs1').post('/einvoices', body).expect(400);
+        expect((res.body as Json).message).toBe('Chọn bill cho hóa đơn');
+      }
     });
 
     it('is wiped with the data of its branch', async () => {

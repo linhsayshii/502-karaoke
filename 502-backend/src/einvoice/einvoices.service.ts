@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -8,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { EinvoiceStatus, OrderStatus, Prisma } from '@prisma/client';
 import type { AuthUser } from '../auth/auth-user';
+import { canUseReportSite } from '../auth/roles';
 import { BranchScopeService } from '../common/branch-scope.service';
 import {
   businessDateOf,
@@ -23,8 +25,8 @@ import {
   CreateEinvoiceDto,
   EinvoiceBillsQuery,
   EinvoiceDraftDto,
-  EinvoiceListQuery,
   EinvoiceNumberDto,
+  EinvoiceSummaryQuery,
   IssueEinvoiceDto,
   ResolveEinvoiceDto,
 } from './dto/einvoice.dto';
@@ -34,11 +36,7 @@ import {
 } from './einvoice-config.service';
 import { draftData, issuedDraft, parseDraft } from './einvoice-draft';
 import { issueProblem, totalsOf } from './einvoice-math';
-import {
-  einvoiceDetailSelect,
-  einvoiceListSelect,
-  toEinvoiceRow,
-} from './einvoice-select';
+import { einvoiceDetailSelect, toEinvoiceRow } from './einvoice-select';
 import { EinvoiceSender, type SendOutcome } from './einvoice-sender';
 import type { EinvoiceDraft, EinvoiceLine } from './einvoice-types';
 import {
@@ -96,6 +94,14 @@ const NOT_UNCERTAIN = 'Hóa đơn không ở trạng thái "Không rõ"';
 const MANUAL_CHECK = 'kiểm tra trên Minvoice rồi đối chiếu bằng tay';
 const UNKNOWN_SEND_ERROR =
   'Lỗi không xác định khi gửi, hãy đối chiếu trên Minvoice';
+const REPORT_SITE_ONLY =
+  'Hóa đơn của bill thêm tay chỉ mở được ở trang báo cáo';
+
+// What a new draft writes besides its bill.
+type Written = ReturnType<typeof draftData> & {
+  createdById: number;
+  updatedById: number;
+};
 
 const messageOf = (error: unknown) =>
   error instanceof Error ? error.message : 'lỗi không xác định';
@@ -229,43 +235,34 @@ export class EinvoicesService implements OnApplicationBootstrap {
     });
   }
 
-  // Newest bills first, the newest 500 (spec §7.3).
-  async list(user: AuthUser, query: EinvoiceListQuery) {
-    const where = await this.listWhere(user, query);
-    const [rows, total] = await Promise.all([
-      this.prisma.einvoice.findMany({
-        where,
-        select: einvoiceListSelect,
-        orderBy: [{ businessDate: 'desc' }, { orderId: 'desc' }, { id: 'asc' }],
-        take: 500,
-      }),
-      this.prisma.einvoice.count({ where }),
-    ]);
-    const mapped = rows.map(toEinvoiceRow);
-    return [mapped, total] as [typeof mapped, number];
-  }
-
   // Pending work counts every day; issued ones the chosen days. Summed in SQL
-  // on the report pool.
-  async summary(user: AuthUser, query: EinvoiceListQuery) {
+  // on the report pool. The main site counts the invoices of its own bills
+  // only, the report site every invoice of the branch (spec 2026-10-02 §6.2).
+  async summary(
+    user: AuthUser,
+    query: EinvoiceSummaryQuery,
+    site: 'main' | 'report' = 'main',
+  ) {
     const branchId = await this.scope.resolveBranchId(user, query.branch);
     const businessDate = dateRange(query.from, query.to);
+    const own: Prisma.EinvoiceWhereInput =
+      site === 'main' ? { branchId, orderId: { not: null } } : { branchId };
     const [draftCount, errorCount, uncertainCount, issued] = await Promise.all([
       this.reportDb.einvoice.count({
-        where: { branchId, status: EinvoiceStatus.DRAFT, lastError: null },
+        where: { ...own, status: EinvoiceStatus.DRAFT, lastError: null },
       }),
       this.reportDb.einvoice.count({
         where: {
-          branchId,
+          ...own,
           status: EinvoiceStatus.DRAFT,
           lastError: { not: null },
         },
       }),
       this.reportDb.einvoice.count({
-        where: { branchId, status: NOT_SETTLED },
+        where: { ...own, status: NOT_SETTLED },
       }),
       this.reportDb.einvoice.aggregate({
-        where: { branchId, status: EinvoiceStatus.ISSUED, businessDate },
+        where: { ...own, status: EinvoiceStatus.ISSUED, businessDate },
         _count: { _all: true },
         _sum: { amount: true, vatAmount: true },
       }),
@@ -439,7 +436,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
       });
     let row = await read();
     if (!row) throw new NotFoundException('Không tìm thấy hóa đơn điện tử');
-    this.scope.assertBranchAccess(user, row.branchId);
+    this.assertRowAccess(user, row);
     if (
       row.status === EinvoiceStatus.SENDING &&
       (await this.sweepStaleSending({ id }))
@@ -449,33 +446,24 @@ export class EinvoicesService implements OnApplicationBootstrap {
     return toEinvoiceRow(row);
   }
 
-  async create(user: AuthUser, dto: CreateEinvoiceDto, branch?: string) {
-    const written = {
+  async create(user: AuthUser, dto: CreateEinvoiceDto) {
+    // Every invoice belongs to exactly one bill (spec 2026-10-02 §4.2): a paid
+    // bill, or a bill thêm tay of the report site.
+    if ((dto.orderId == null) === (dto.manualBillId == null)) {
+      throw new BadRequestException('Chọn bill cho hóa đơn');
+    }
+    const written: Written = {
       createdById: user.id,
       updatedById: user.id,
       ...draftData(dto),
     };
-    if (dto.orderId == null) {
-      // A free invoice (no orderId, or a null one: @IsOptional lets both
-      // through): no bill, the branch of the page, and the business day it
-      // is made on for the list filters (spec
-      // 2026-10-01-hddt-bo-cuc-va-hd-tu-do §4).
-      const branchId = await this.scope.resolveBranchId(user, branch);
-      const created = await this.prisma.einvoice.create({
-        data: {
-          branchId,
-          orderId: null,
-          businessDate: toDbDate(businessDateOf(new Date())),
-          // The calendar day, never the business day (spec §2).
-          invoiceDate: dbDay(
-            dto.invoiceDate ?? toDateString(new Date()),
-            INVALID_INVOICE_DATE,
-          ),
-          ...written,
-        },
-        select: { id: true },
-      });
-      return this.findOne(user, created.id);
+    if (dto.manualBillId != null) {
+      return this.createForManualBill(
+        user,
+        dto.manualBillId,
+        written,
+        dto.invoiceDate,
+      );
     }
     const order = await this.prisma.order.findUnique({
       where: { id: dto.orderId },
@@ -510,6 +498,45 @@ export class EinvoicesService implements OnApplicationBootstrap {
       select: { id: true },
     });
     return this.findOne(user, created.id);
+  }
+
+  // A draft of a bill thêm tay. The bill's row is locked while the draft is
+  // inserted, so it never lands on a bill being cancelled (the cancel deletes
+  // the drafts under the same lock, ManualBillsService.cancel).
+  private async createForManualBill(
+    user: AuthUser,
+    manualBillId: number,
+    written: Written,
+    invoiceDate?: string,
+  ) {
+    if (!canUseReportSite(user)) throw new ForbiddenException(REPORT_SITE_ONLY);
+    const id = await this.prisma.$transaction(async (tx) => {
+      const [bill] = await tx.$queryRaw<
+        { branchId: number; businessDate: Date; cancelledAt: Date | null }[]
+      >`SELECT "branchId", "businessDate", "cancelledAt" FROM "ManualBill"
+        WHERE "id" = ${manualBillId} FOR UPDATE`;
+      if (!bill) throw new NotFoundException('Không tìm thấy bill');
+      this.scope.assertBranchAccess(user, bill.branchId);
+      if (bill.cancelledAt) {
+        throw new BadRequestException('Bill đã hủy, không thêm được hóa đơn');
+      }
+      const created = await tx.einvoice.create({
+        data: {
+          branchId: bill.branchId,
+          manualBillId,
+          businessDate: bill.businessDate,
+          // The day of the bill, unless the draft says otherwise (spec §4.2).
+          invoiceDate: dbDay(
+            invoiceDate ?? fromDbDate(bill.businessDate),
+            INVALID_INVOICE_DATE,
+          ),
+          ...written,
+        },
+        select: { id: true },
+      });
+      return created.id;
+    });
+    return this.findOne(user, id);
   }
 
   async update(user: AuthUser, id: number, dto: EinvoiceDraftDto) {
@@ -547,6 +574,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
       where: { id },
       select: {
         branchId: true,
+        manualBillId: true,
         status: true,
         amount: true,
         buyerTaxCode: true,
@@ -564,7 +592,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
       },
     });
     if (!row) throw new NotFoundException('Không tìm thấy hóa đơn điện tử');
-    this.scope.assertBranchAccess(user, row.branchId);
+    this.assertRowAccess(user, row);
     // An uncertain invoice is looked up before anything is sent (spec §9.2).
     const recheck = row.status === EinvoiceStatus.UNCERTAIN;
     if (row.status !== EinvoiceStatus.DRAFT && !recheck) {
@@ -574,7 +602,8 @@ export class EinvoicesService implements OnApplicationBootstrap {
           : 'Hóa đơn đang được gửi',
       );
     }
-    // A free invoice has no bill that could have been voided.
+    // A bill thêm tay has no order: it is never voided (a cancelled one has no
+    // invoice left).
     if (row.order && row.order.status !== OrderStatus.COMPLETED) {
       throw new BadRequestException('Bill đã hủy, không xuất được hóa đơn');
     }
@@ -791,6 +820,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
       where: { id },
       select: {
         branchId: true,
+        manualBillId: true,
         status: true,
         draft: true,
         sellerTaxCode: true,
@@ -800,8 +830,9 @@ export class EinvoicesService implements OnApplicationBootstrap {
       },
     });
     if (!row) throw new NotFoundException('Không tìm thấy hóa đơn điện tử');
-    this.scope.assertBranchAccess(user, row.branchId);
-    // Before the draft is read: an issued row has none.
+    this.assertRowAccess(user, row);
+    // Before the draft is read: an invoice issued before spec 2026-10-02 §4.3
+    // has none (those issued since keep their lines).
     if (row.status !== EinvoiceStatus.UNCERTAIN) {
       throw new ConflictException(NOT_UNCERTAIN);
     }
@@ -878,13 +909,14 @@ export class EinvoicesService implements OnApplicationBootstrap {
       where: { id },
       select: {
         branchId: true,
+        manualBillId: true,
         sellerTaxCode: true,
         symbolCode: true,
         invoiceNumber: true,
       },
     });
     if (!row) throw new NotFoundException('Không tìm thấy hóa đơn điện tử');
-    this.scope.assertBranchAccess(user, row.branchId);
+    this.assertRowAccess(user, row);
     let count: number;
     try {
       ({ count } = await this.prisma.einvoice.updateMany({
@@ -944,13 +976,15 @@ export class EinvoicesService implements OnApplicationBootstrap {
       where: { id },
       select: { status: true },
     });
-    if (now?.status === EinvoiceStatus.DRAFT) {
+    // Gone meanwhile: its bill thêm tay was cancelled with its drafts.
+    if (!now) return new NotFoundException('Không tìm thấy hóa đơn điện tử');
+    if (now.status === EinvoiceStatus.DRAFT) {
       return new ConflictException(
         'Hóa đơn vừa được sửa, kiểm tra lại rồi xuất',
       );
     }
     return new ConflictException(
-      now?.status === EinvoiceStatus.UNCERTAIN
+      now.status === EinvoiceStatus.UNCERTAIN
         ? 'Hóa đơn vừa được kiểm tra lại, tải lại rồi thử lại'
         : 'Hóa đơn đang được gửi hoặc đã xuất',
     );
@@ -1051,7 +1085,8 @@ export class EinvoicesService implements OnApplicationBootstrap {
       });
       return;
     }
-    // Issued: the header and the lines stay, the buyer's details go (spec 2026-10-02 §4.3).
+    // Issued: the header and the lines stay, the buyer's details go (spec
+    // 2026-10-02 §4.3).
     const header = {
       status: EinvoiceStatus.ISSUED,
       minvoiceId: outcome.minvoiceId,
@@ -1144,35 +1179,25 @@ export class EinvoicesService implements OnApplicationBootstrap {
     );
   }
 
-  private async listWhere(
-    user: AuthUser,
-    query: EinvoiceListQuery,
-  ): Promise<Prisma.EinvoiceWhereInput> {
-    const branchId = await this.scope.resolveBranchId(user, query.branch);
-    const where: Prisma.EinvoiceWhereInput = {
-      branchId,
-      ...(query.status ? statusWhere(query.status) : {}),
-    };
-    if (query.free) where.orderId = null;
-    // Pending work (drafts, errors, uncertain) is listed whatever its day.
-    const dated = !query.status || query.status === 'ISSUED';
-    if (query.billNumber) {
-      // (branchId, billNumber) index of Order.
-      where.order = {
-        is: { branchId, billNumber: billNumberPrefixRange(query.billNumber) },
-      };
-    } else if (dated) {
-      where.businessDate = dateRange(query.from, query.to);
-    }
-    return where;
-  }
-
   private async assertAccess(user: AuthUser, id: number) {
     const row = await this.prisma.einvoice.findUnique({
       where: { id },
-      select: { branchId: true },
+      select: { branchId: true, manualBillId: true },
     });
     if (!row) throw new NotFoundException('Không tìm thấy hóa đơn điện tử');
+    this.assertRowAccess(user, row);
+  }
+
+  // The branch of an invoice, and for one of a bill thêm tay the report site
+  // too (spec 2026-10-02 §8): invoice ids are easy to guess, so every route
+  // reaching one by id checks both.
+  private assertRowAccess(
+    user: AuthUser,
+    row: { branchId: number; manualBillId?: number | null },
+  ) {
     this.scope.assertBranchAccess(user, row.branchId);
+    if (row.manualBillId != null && !canUseReportSite(user)) {
+      throw new ForbiddenException(REPORT_SITE_ONLY);
+    }
   }
 }

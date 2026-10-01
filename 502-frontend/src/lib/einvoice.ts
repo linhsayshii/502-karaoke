@@ -65,7 +65,8 @@ export function issueProblem(amount: number, lines: EinvoiceLine[]): string | nu
 }
 
 // A line that brings the total up by `missing` at `rate`. Rounding means some
-// totals cannot be reached by one price; then its VAT takes the one đồng left.
+// totals cannot be reached by one price; then its VAT takes the one đồng left
+// (the real Minvoice accepts that, 01/10/2026).
 export function fillerLine(missing: number, rate: VatRate): EinvoiceLine | null {
   if (missing <= 0) return null;
   const base = roundToDong(missing / (1 + rate / 100));

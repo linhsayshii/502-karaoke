@@ -697,7 +697,7 @@ describe('E-invoices (e2e)', () => {
       try {
         const { id, created } = await lostAnswer();
         const posts = fake.posts;
-        // The fake's list, like the real one, does not show orderNumber: its
+        // The fake's list does not show orderNumber (the real one does): its
         // single row counts once the filter is trusted.
         service.markerSearchConfirmed = true;
         // A stale stored session: the search logs in again by itself.

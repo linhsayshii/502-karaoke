@@ -260,7 +260,8 @@ describe('MinvoiceClient', () => {
     };
 
     it('asks the invoice list of the symbol for our reference', async () => {
-      // The real list does not show orderNumber: a candidate, not proof.
+      // A row without orderNumber (the real list shows it, 01/10/2026; this
+      // is the defensive case): a candidate, not proof.
       await expect(find({ items: [row()], totalCount: 1 })).resolves.toEqual({
         kind: 'found',
         id: 'inv-9',

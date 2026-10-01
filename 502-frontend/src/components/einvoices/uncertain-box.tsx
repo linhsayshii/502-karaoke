@@ -181,9 +181,10 @@ export function UncertainBox({
         open={recheckOpen}
         onOpenChange={setRecheckOpen}
         title="Kiểm tra lại trên Minvoice?"
-        // The server never sends again from a search while its automatic
-        // search is unconfirmed (MARKER_SEARCH_CONFIRMED, real-Minvoice check):
-        // reword this when that changes.
+        // The server never sends again from a search while
+        // MARKER_SEARCH_CONFIRMED is off (on purpose, although the search
+        // itself was confirmed on the real Minvoice, 01/10/2026): reword this
+        // when that changes.
         description="Hệ thống tìm hóa đơn theo mã đối chiếu trên Minvoice và ghi số nếu chắc chắn đó là hóa đơn này. Cách tìm tự động chưa được kiểm chứng: nếu không thấy, hóa đơn vẫn ở Không rõ và không được gửi lại; khi đó hãy tự tìm trên Minvoice."
         confirmLabel="Kiểm tra lại"
         onConfirm={recheck}

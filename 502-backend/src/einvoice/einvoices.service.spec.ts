@@ -300,8 +300,9 @@ describe('EinvoicesService.issue of an uncertain invoice', () => {
     ]);
   });
 
-  // The web app's list does not show orderNumber: a single row is ours only
-  // if Minvoice really filtered by it.
+  // A row that does not show orderNumber (the real list does, 01/10/2026;
+  // this is the defensive case): a single row is ours only if Minvoice really
+  // filtered by it.
   it.each([false, true])(
     'takes a row that does not show our reference only when the search is confirmed (%s)',
     async (confirmed) => {

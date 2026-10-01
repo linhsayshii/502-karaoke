@@ -566,10 +566,11 @@ export class EinvoicesService implements OnApplicationBootstrap {
   // Spec §9.2: a send whose answer was lost is looked up by our reference
   // before anything goes out again, as a duplicate tax invoice must never be
   // made. Only a sure answer moves it on: found (its row shows our
-  // reference, or MARKER_SEARCH_CONFIRMED shows Minvoice filters by it) with
-  // a number none of our rows holds -> issued with that number; nothing
-  // found -> sent again, only when confirmed too and the lost send started at
-  // least STALE_SENDING_MS ago. Anything else leaves it uncertain, draft
+  // reference, or MARKER_SEARCH_CONFIRMED says to trust the filter alone)
+  // with a number none of our rows holds -> issued with that number; nothing
+  // found -> sent again, only when MARKER_SEARCH_CONFIRMED is on (it is off:
+  // that resend is the human's "Chưa có — gửi lại") and the lost send started
+  // at least STALE_SENDING_MS ago. Anything else leaves it uncertain, draft
   // kept, for a manual check.
   private async recheck(
     user: AuthUser,
@@ -625,8 +626,9 @@ export class EinvoicesService implements OnApplicationBootstrap {
       );
     }
     if (result.kind === 'found') {
-      // The web app's list does not show orderNumber: a row that does not
-      // is ours only if Minvoice filtered by it (MARKER_SEARCH_CONFIRMED).
+      // Rows of the real list show orderNumber (`markerSeen`); a row that
+      // does not is ours only if Minvoice filtered by it
+      // (MARKER_SEARCH_CONFIRMED).
       if (!result.markerSeen && !this.markerSearchConfirmed) {
         return uncertain(
           `Có thể là hóa đơn số ${result.invoiceNumber} ngày ${dmy(result.invoiceDate)} trên Minvoice (chưa chắc Minvoice lọc theo mã ${marker}); ${MANUAL_CHECK}`,

@@ -469,6 +469,13 @@ Cả hai nhánh đều đã được đặc tả, nên không phải sửa spec.
 - `invoiceNumber` trả về;
 - Minvoice chấp nhận VAT lệch 1 đồng ở dòng bù. Nếu không chấp nhận, dòng bù bỏ `vatAmount`, và trường hợp đó panel báo "không khớp được đến từng đồng với một dòng, thêm hoặc sửa dòng khác".
 
+**Kết quả** (kiểm tra với Minvoice thật ngày 01/10/2026, MST `0107811836`, ký hiệu `1C26MTT`):
+- Chuỗi đăng nhập, `tenant-company`, `register-invoice/using-list` (3 ký hiệu) và loại tiền chạy đúng như đã cài; `GET /einvoice/config` không trả bí mật nào.
+- Đã xuất hai hóa đơn thật từ app: 10.000 đ (dòng bù 9.091 + VAT 909) được số 1434, và 10.004 đ (dòng bù 9.095 + VAT 909, lệch 1 đồng so với 10% tính ra) được số 1435. Vậy Minvoice **chấp nhận VAT dòng bù lệch 1 đồng**; `fillerLine` giữ nguyên.
+- `orderNumber` (`MARKER_FIELD`) được Minvoice lưu lại; danh sách `GET /api/api/app/invoice?invoiceSerial=…&orderNumber=…&loadAll=true…` lọc theo nó và các dòng trả về có `orderNumber`. Kiểm tra lại hóa đơn 1434 thấy đúng hóa đơn đó (cùng id Minvoice, `markerSeen`), còn mã chưa từng gửi thì không ra dòng nào. Chưa phân biệt được khớp đúng hay khớp một phần của chuỗi; không sao, vì dòng có `orderNumber` khác mã đối chiếu chỉ thành "không rõ", không bao giờ thành "tìm thấy".
+- §9.2 đi nhánh "tìm được", nhưng `MARKER_SEARCH_CONFIRMED` vẫn `false` có chủ ý. Hóa đơn đã tạo mà mất câu trả lời được nhận ra tự động (dòng có mã đối chiếu), còn cờ chỉ quyết định việc **tự gửi lại khi tìm không thấy**; việc đó vẫn do người quyết định bằng **Chưa có — gửi lại** (cho phép sau 3 phút kể từ lần gửi). Bật cờ còn phải sửa lời trên giao diện và đẩy "tìm + gửi lại" tới sát giới hạn 95 giây của proxy.
+- Chưa kiểm tra: số CCCD 12 chữ số làm `buyerTaxCode` (cần thêm một hóa đơn thật thứ ba).
+
 ## 13. Tài nguyên (`docs/resource-rules.md` §5)
 
 - **Danh sách và tổng:**

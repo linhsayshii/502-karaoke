@@ -65,7 +65,8 @@ export function issueProblem(
 
 // A line that brings the total up by `missing` at `rate`. Rounding means
 // some totals cannot be reached by one price; then its VAT takes the one
-// đồng left (spec §5).
+// đồng left (spec §5). The real Minvoice accepts that (01/10/2026: a filler
+// with VAT one đồng off the computed 10% was issued), so it stays.
 export function fillerLine(
   missing: number,
   rate: VatRate,

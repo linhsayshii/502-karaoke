@@ -178,8 +178,9 @@ export class FakeMinvoice {
         ],
       });
     }
-    // The invoice list, filtered by column name like the web app's table;
-    // its rows do not show orderNumber (plan Task 0).
+    // The invoice list, filtered by column name like the web app's table. Its
+    // rows leave orderNumber out, unlike the real list (01/10/2026), so the
+    // e2e suite exercises the case where only the filter vouches for a row.
     if (path === '/api/api/app/invoice' && req.method === 'GET') {
       const serial = url.searchParams.get('invoiceSerial');
       const marker = url.searchParams.get('orderNumber');

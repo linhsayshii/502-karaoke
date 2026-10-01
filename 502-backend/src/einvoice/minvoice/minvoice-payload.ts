@@ -3,8 +3,10 @@ import type { EinvoiceLine, SellerProfile } from '../einvoice-types';
 import { numberToVietnameseCurrency } from './vietnamese-words';
 
 // Payload field that carries our K502-<id> reference so an invoice whose
-// send had no answer can be found again (plan Task 0); unconfirmed until
-// the real-Minvoice check.
+// send had no answer can be found again. Confirmed on the real Minvoice
+// (01/10/2026): it stores orderNumber, its invoice list filters by it and
+// its rows show it (see MARKER_SEARCH_CONFIRMED for what that does not
+// decide).
 export const MARKER_FIELD: string | null = 'orderNumber';
 
 export interface PayloadInput {

@@ -52,16 +52,25 @@ const LOGIN_REFUSALS: Record<number, [MinvoiceLoginReason, string]> = {
   ],
 };
 
-// Invoice list of the Minvoice web app, filtered by column name (plan Task 0:
-// no generic filter exists). SEARCH_PARAM is the payload's MARKER_FIELD.
+// Invoice list of the Minvoice web app, filtered by column name (no generic
+// filter exists). SEARCH_PARAM is the payload's MARKER_FIELD. Real Minvoice,
+// 01/10/2026: the filter works (an issued invoice was found again by its
+// reference, a reference never sent gave no rows) and the rows carry
+// orderNumber, which findByMarker reads as `markerSeen`. Not told apart: an
+// exact match from a substring match; harmless, since a row whose
+// orderNumber differs from the reference is never `found`.
 export const SEARCH_PATH = '/api/api/app/invoice';
 export const SEARCH_PARAM = 'orderNumber';
 
 // Whether "no invoice carries K502-<id>" may be trusted enough to send again.
-// Stays false until the real-Minvoice check shows that Minvoice keeps
-// orderNumber and filters its list by it: a wrong guess would post duplicate
-// tax invoices. While false, a search that finds nothing leaves the invoice
-// "Không rõ" for a manual check.
+// False on purpose, although the real-Minvoice check of 01/10/2026 confirmed
+// that Minvoice keeps orderNumber and filters its list by it: a lost answer
+// whose invoice was created is already recognised without this flag (the row
+// shows our reference, `markerSeen`), so the flag only gates the automatic
+// resend after "none". That resend stays a human decision ("Chưa có — gửi
+// lại", allowed STALE_SENDING_MS after the send): a wrong guess would post
+// duplicate tax invoices, and turning it on would also need new UI copy and
+// puts search + send close to the 95 s request budget (docs/resource-rules.md).
 export const MARKER_SEARCH_CONFIRMED = false;
 
 // What was sent under our reference: the symbol and date of that send.
@@ -73,9 +82,9 @@ export interface MarkerQuery {
 
 // `found` and `none` are only given when the answer leaves no doubt about
 // what Minvoice listed; any other answer is `ambiguous`, never a guess.
-// `markerSeen` tells whether the row itself shows our reference: the list of
-// the web app does not, so otherwise the match rests on Minvoice having
-// filtered by it (MARKER_SEARCH_CONFIRMED), and the caller decides.
+// `markerSeen` tells whether the row itself shows our reference: the real list
+// does, so a row is ours on its own word; a row that does not rests on Minvoice
+// having filtered by it (MARKER_SEARCH_CONFIRMED), and the caller decides.
 export type MarkerSearch =
   | {
       kind: 'found';

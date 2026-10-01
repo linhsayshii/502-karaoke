@@ -18,6 +18,7 @@ import { TaxPayerService } from './tax-payer.service';
     EinvoiceSender,
     EinvoicesService,
   ],
+  exports: [EinvoicesService],
 })
 export class EinvoiceModule implements OnModuleInit {
   // Production refuses to start without a valid EINVOICE_SECRET (spec §11).

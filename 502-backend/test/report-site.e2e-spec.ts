@@ -7,6 +7,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
+import { businessDateOf, toDateString } from '../src/common/dates';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { FakeMinvoice } from './fake-minvoice';
 
@@ -14,6 +15,8 @@ import { FakeMinvoice } from './fake-minvoice';
 // (test/fake-minvoice.ts). The `it`s build on each other: run the whole file.
 
 type Json = Record<string, unknown>;
+const TAX_CODE = '0107811836';
+const DAY_MS = 86_400_000;
 
 describe('Report site (e2e)', () => {
   let app: INestApplication<App>;
@@ -47,6 +50,50 @@ describe('Report site (e2e)', () => {
     tokens[username] = body.access_token as string;
     ids[username] = (body.user as Json).id as number;
   };
+  // A bill of cs1 paid now, in a room of that name; as GET /orders/:id.
+  const paidBill = async (roomName: string) => {
+    const room = (
+      await as('ql1_cs1')
+        .post('/rooms', { name: roomName, pricePerHour: 100000 })
+        .expect(201)
+    ).body as Json;
+    const order = (
+      await as('tn1_cs1').post('/orders', { roomId: room.id }).expect(201)
+    ).body as Json;
+    const products = (await as('tn1_cs1').get('/products').expect(200))
+      .body as Json[];
+    await as('tn1_cs1')
+      .patch(`/orders/${order.id as number}`, {
+        items: [{ productId: products[0].id, quantity: 2 }],
+      })
+      .expect(200);
+    await as('tn1_cs1')
+      .post(`/orders/${order.id as number}/checkout`, { paymentMethod: 'CASH' })
+      .expect(200);
+    return (
+      await as('admin')
+        .get(`/orders/${order.id as number}`)
+        .expect(200)
+    ).body as Json;
+  };
+  // DDMM + room (4) + sequence.
+  const seqOf = (billNumber: string) => Number(billNumber.slice(8));
+  const today = () => businessDateOf(new Date());
+  const daysAgo = (n: number) =>
+    toDateString(new Date(Date.now() - n * DAY_MS));
+  const filler = (unitPrice: number) => ({
+    name: 'Dịch vụ karaoke',
+    unit: 'Lần',
+    quantity: 1,
+    unitPrice,
+    vatRate: 10,
+  });
+  const issueToday = (einvoiceId: number) =>
+    as('admin')
+      .post(`/einvoices/${einvoiceId}/issue`, {
+        invoiceDate: toDateString(new Date()),
+      })
+      .expect(200);
 
   beforeAll(async () => {
     process.env.MINVOICE_URL_TEMPLATE = await fake.start();
@@ -87,6 +134,23 @@ describe('Report site (e2e)', () => {
         .expect(201);
       await signIn(username);
     }
+    await as('admin')
+      .patch(`/branches/${cs1Id}`, { taxCode: TAX_CODE })
+      .expect(200);
+    await as('admin')
+      .post('/einvoice/config/login?branch=cs1', {
+        username: 'admin',
+        password: fake.password,
+      })
+      .expect(200);
+    const { symbols } = (
+      await as('admin').get('/einvoice/config/symbols?branch=cs1').expect(200)
+    ).body as { symbols: Json[] };
+    await as('admin')
+      .put('/einvoice/config/symbol?branch=cs1', {
+        registerInvoiceId: symbols[0].registerInvoiceId,
+      })
+      .expect(200);
   });
 
   afterAll(async () => {
@@ -222,6 +286,224 @@ describe('Report site (e2e)', () => {
       const main = (await as('tn1_cs1').get('/einvoices/summary').expect(200))
         .body as Json;
       expect(main.draftCount).toBe(0);
+    });
+  });
+
+  describe('bills thêm tay', () => {
+    let roomId: number;
+    const add = (name: string, body: Json) =>
+      as(name).post('/report-site/manual-bills?branch=cs1', body);
+
+    it('take the next number of their day, shared with the paid bills', async () => {
+      const first = await paidBill('BC 401');
+      roomId = first.roomId as number;
+      const added = (
+        await add('qlbc_cs1', {
+          businessDate: today(),
+          roomId,
+          amount: 110000,
+        }).expect(201)
+      ).body as Json;
+      const second = await paidBill('BC 402');
+      expect(seqOf(added.billNumber as string)).toBe(
+        seqOf(first.billNumber as string) + 1,
+      );
+      expect(seqOf(second.billNumber as string)).toBe(
+        seqOf(added.billNumber as string) + 1,
+      );
+      expect((added.billNumber as string).slice(4, 8)).toBe('4010');
+      const detail = (
+        await as('qlbc_cs1')
+          .get(`/report-site/manual-bills/${added.id as number}`)
+          .expect(200)
+      ).body as { bill: Json; einvoices: Json[]; allocated: number };
+      expect(detail.bill).toMatchObject({
+        billNumber: added.billNumber,
+        businessDate: today(),
+        cancelledAt: null,
+        room: { name: 'BC 401' },
+      });
+      expect(detail.einvoices).toHaveLength(1);
+      expect(detail.einvoices[0]).toMatchObject({
+        id: added.einvoiceId,
+        amount: '110000',
+        status: 'DRAFT',
+        invoiceDate: today(),
+      });
+      expect(detail.allocated).toBe(110000);
+    });
+
+    it('take a past day, never a future one, and a room of their branch', async () => {
+      const past = daysAgo(40);
+      const added = (
+        await add('qlbc_cs1', {
+          businessDate: past,
+          roomId,
+          amount: 1000,
+        }).expect(201)
+      ).body as Json;
+      expect((added.billNumber as string).slice(0, 4)).toBe(
+        `${past.slice(8, 10)}${past.slice(5, 7)}`,
+      );
+      const future = toDateString(new Date(Date.now() + 2 * DAY_MS));
+      const res = await add('qlbc_cs1', {
+        businessDate: future,
+        roomId,
+        amount: 1000,
+      }).expect(400);
+      expect((res.body as Json).message).toBe(
+        'Không thêm bill cho ngày sau hôm nay',
+      );
+      const cs2Room = (
+        await as('ql1_cs2')
+          .post('/rooms', { name: 'BC2 101', pricePerHour: 100000 })
+          .expect(201)
+      ).body as Json;
+      await add('qlbc_cs1', {
+        businessDate: past,
+        roomId: cs2Room.id,
+        amount: 1000,
+      }).expect(400);
+      await add('qlbc_cs1', {
+        businessDate: '2026-02-30',
+        roomId,
+        amount: 1000,
+      }).expect(400);
+    });
+
+    it('are added by the report site’s managers only', async () => {
+      const body = { businessDate: today(), roomId, amount: 1000 };
+      for (const name of ['tn1_cs1', 'ql1_cs1', 'hdqt_bc'])
+        await add(name, body).expect(403);
+      await add('qlbc_cs2', body).expect(403);
+      await as('tn1_cs1').get('/report-site/manual-bills/1').expect(403);
+      await as('ql1_cs1').get('/report-site/manual-bills/1').expect(403);
+    });
+
+    // Spec §8: every other kind of account on every route of a bill thêm
+    // tay and of its draft; HĐQT reads, never writes.
+    it('are read by HĐQT and out of reach of every other account', async () => {
+      const bill = (
+        await add('qlbc_cs1', {
+          businessDate: today(),
+          roomId,
+          amount: 20000,
+        }).expect(201)
+      ).body as Json;
+      const detail = `/report-site/manual-bills/${bill.id as number}`;
+      const draft = `/einvoices/${bill.einvoiceId as number}`;
+      const before = (await as('qlbc_cs1').get(draft).expect(200)).body as Json;
+      for (const name of ['tn1_cs1', 'ql1_cs1', 'qlbc_cs2']) {
+        await as(name).get(detail).expect(403);
+        await as(name).get(draft).expect(403);
+        await as(name).patch(draft, { amount: 1, lines: [] }).expect(403);
+        await as(name).delete(draft).expect(403);
+      }
+      for (const name of ['tn1_cs1', 'ql1_cs1', 'qlbc_cs2', 'hdqt_bc'])
+        await as(name)
+          .post(`${detail}/cancel`, { reason: 'Nhập nhầm' })
+          .expect(403);
+      await as('hdqt_bc').get(detail).expect(200);
+      await as('hdqt_bc').get(draft).expect(200);
+      await as('hdqt_bc').patch(draft, { amount: 1, lines: [] }).expect(403);
+      await as('hdqt_bc').delete(draft).expect(403);
+      const after = (await as('qlbc_cs1').get(detail).expect(200)).body as {
+        bill: Json;
+        einvoices: Json[];
+      };
+      expect(after.bill.cancelledAt).toBeNull();
+      expect(after.einvoices).toEqual([before]);
+    });
+
+    it('are cancelled with their drafts, never with an issued invoice', async () => {
+      const drafts = (
+        await add('qlbc_cs1', {
+          businessDate: today(),
+          roomId,
+          amount: 50000,
+        }).expect(201)
+      ).body as Json;
+      const cancel = (id: number, reason: string) =>
+        as('qlbc_cs1').post(`/report-site/manual-bills/${id}/cancel`, {
+          reason,
+        });
+      await cancel(drafts.id as number, '  ').expect(400);
+      await cancel(drafts.id as number, 'Nhập nhầm').expect(200);
+      const cancelled = (
+        await as('qlbc_cs1')
+          .get(`/report-site/manual-bills/${drafts.id as number}`)
+          .expect(200)
+      ).body as { bill: Json; einvoices: Json[] };
+      expect(cancelled.bill).toMatchObject({ cancelReason: 'Nhập nhầm' });
+      expect(cancelled.einvoices).toHaveLength(0);
+      await cancel(drafts.id as number, 'Lần hai').expect(409);
+      await as('qlbc_cs1')
+        .post('/einvoices', { manualBillId: drafts.id, amount: 1, lines: [] })
+        .expect(400);
+
+      const issued = (
+        await add('qlbc_cs1', {
+          businessDate: today(),
+          roomId,
+          amount: 110000,
+        }).expect(201)
+      ).body as Json;
+      const einvoiceId = issued.einvoiceId as number;
+      await as('qlbc_cs1')
+        .patch(`/einvoices/${einvoiceId}`, {
+          amount: 110000,
+          lines: [filler(100000)],
+        })
+        .expect(200);
+      await issueToday(einvoiceId);
+      const res = await cancel(issued.id as number, 'Nhập nhầm').expect(409);
+      expect((res.body as Json).message).toBe(
+        'Bill có hóa đơn đã gửi hoặc đã xuất, không hủy được',
+      );
+      const kept = (
+        await as('qlbc_cs1')
+          .get(`/report-site/manual-bills/${issued.id as number}`)
+          .expect(200)
+      ).body as { bill: Json; einvoices: Json[] };
+      expect(kept.bill.cancelledAt).toBeNull();
+      expect(kept.einvoices[0]).toMatchObject({ status: 'ISSUED' });
+    });
+
+    it('keep the rooms they are numbered with', async () => {
+      const room = (
+        await as('ql1_cs1')
+          .post('/rooms', { name: 'BC 499', pricePerHour: 100000 })
+          .expect(201)
+      ).body as Json;
+      await add('qlbc_cs1', {
+        businessDate: today(),
+        roomId: room.id,
+        amount: 1000,
+      }).expect(201);
+      const res = await as('ql1_cs1')
+        .delete(`/rooms/${room.id as number}`)
+        .expect(409);
+      expect((res.body as Json).message).toMatch(/lịch sử hóa đơn/);
+    });
+  });
+
+  describe('data purge', () => {
+    it('wipes the bills thêm tay of the branch', async () => {
+      const res = await as('hdqt_bc')
+        .post('/admin/purge', {
+          scope: 'branch',
+          branch: 'cs1',
+          password: '12345678',
+        })
+        .expect(200);
+      expect(
+        ((res.body as Json).deleted as Record<string, number>).manualBills,
+      ).toBeGreaterThan(0);
+      expect(
+        await app
+          .get(PrismaService)
+          .manualBill.count({ where: { branchId: cs1Id } }),
+      ).toBe(0);
     });
   });
 });

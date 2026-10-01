@@ -20,6 +20,7 @@ import { PrModule } from './pr/pr.module';
 import { DiscountsModule } from './discounts/discounts.module';
 import { LiveModule } from './live/live.module';
 import { EinvoiceModule } from './einvoice/einvoice.module';
+import { ReportSiteModule } from './report-site/report-site.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { EinvoiceModule } from './einvoice/einvoice.module';
     PrModule,
     DiscountsModule,
     EinvoiceModule,
+    ReportSiteModule,
     LiveModule,
   ],
   controllers: [AppController],

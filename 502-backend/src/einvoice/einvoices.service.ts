@@ -19,6 +19,7 @@ import {
 } from '../common/dates';
 import { billNumberPrefixRange } from '../orders/bill-number';
 import { billedHoursOf } from '../orders/billing';
+import { staffRef } from '../orders/order-include';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReportPrismaService } from '../prisma/report-prisma.service';
 import {
@@ -35,6 +36,7 @@ import {
   type IssueConfig,
 } from './einvoice-config.service';
 import { draftData, issuedDraft, parseDraft } from './einvoice-draft';
+import { dateRange, dbDay, NOT_SETTLED, statusWhere } from './einvoice-filters';
 import { issueProblem, totalsOf } from './einvoice-math';
 import { einvoiceDetailSelect, toEinvoiceRow } from './einvoice-select';
 import { EinvoiceSender, type SendOutcome } from './einvoice-sender';
@@ -45,35 +47,7 @@ import {
 } from './minvoice/minvoice-client';
 import { buildMinvoicePayload } from './minvoice/minvoice-payload';
 
-// A YYYY-MM-DD as a @db.Date value. The DTO only checks the shape: a day that
-// does not exist (2026-13-01 fails in Prisma, 2026-02-30 rolls into March) is
-// refused here.
-function dbDay(
-  value: string,
-  message = 'Ngày không hợp lệ (định dạng YYYY-MM-DD)',
-): Date {
-  const date = toDbDate(value);
-  if (isNaN(date.getTime()) || fromDbDate(date) !== value) {
-    throw new BadRequestException(message);
-  }
-  return date;
-}
-
 const INVALID_INVOICE_DATE = 'Ngày hóa đơn không hợp lệ';
-
-function dateRange(
-  from?: string,
-  to?: string,
-): Prisma.DateTimeFilter | undefined {
-  if (!from && !to) return undefined;
-  if (from && to && from > to) {
-    throw new BadRequestException('Ngày bắt đầu phải trước ngày kết thúc');
-  }
-  return {
-    ...(from ? { gte: dbDay(from) } : {}),
-    ...(to ? { lte: dbDay(to) } : {}),
-  };
-}
 
 const dmy = (ymd: string) => ymd.split('-').reverse().join('/');
 
@@ -147,26 +121,6 @@ export const STALE_SENDING_MS = 3 * 60_000;
 // saving it. Apart from STALE_SENDING_MS, which must outlast our own sends.
 export const RESEND_WAIT_MS = 60_000;
 const STALE_SENDING_ERROR = 'Lần gửi bị cắt ngang, hãy đối chiếu trên Minvoice';
-
-// Pending "Không rõ" work: a SENDING row whose send was cut off stays SENDING
-// until it is opened (sweepStaleSending), so it is listed and counted with
-// the uncertain ones. (branchId, status, createdAt) index.
-const NOT_SETTLED = { in: [EinvoiceStatus.SENDING, EinvoiceStatus.UNCERTAIN] };
-
-// The invoices of a tab: "Lỗi" is a draft with an error, "Không rõ" also
-// holds sends still in flight or cut off.
-function statusWhere(
-  status: 'DRAFT' | 'ERROR' | 'UNCERTAIN' | 'ISSUED',
-): Prisma.EinvoiceWhereInput {
-  if (status === 'DRAFT') {
-    return { status: EinvoiceStatus.DRAFT, lastError: null };
-  }
-  if (status === 'ERROR') {
-    return { status: EinvoiceStatus.DRAFT, lastError: { not: null } };
-  }
-  if (status === 'UNCERTAIN') return { status: NOT_SETTLED };
-  return { status: EinvoiceStatus.ISSUED };
-}
 
 const twoDigits = (n: number) => String(n).padStart(2, '0');
 // HH:mm in the server's time zone (the venue's, TZ).
@@ -381,27 +335,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
       throw new BadRequestException('Phòng chưa thanh toán');
     }
 
-    // A bill split into more than 200 invoices is not a real case; the cap
-    // keeps the answer bounded.
-    const readInvoices = () =>
-      this.prisma.einvoice.findMany({
-        where: { orderId },
-        select: einvoiceDetailSelect,
-        orderBy: { id: 'asc' },
-        take: 200,
-      });
-    const [listed, allocated] = await Promise.all([
-      readInvoices(),
-      this.prisma.einvoice.aggregate({
-        where: { orderId },
-        _sum: { amount: true },
-      }),
-    ]);
-    const einvoices =
-      listed.some((e) => e.status === EinvoiceStatus.SENDING) &&
-      (await this.sweepStaleSending({ orderId }))
-        ? await readInvoices()
-        : listed;
+    const { einvoices, allocated } = await this.invoicesOf({ orderId });
     const minutes =
       order.startTime && order.endTime
         ? Math.max(
@@ -423,6 +357,62 @@ export class EinvoicesService implements OnApplicationBootstrap {
           price: item.price,
         })),
       },
+      einvoices,
+      allocated,
+    };
+  }
+
+  // A bill thêm tay with its e-invoices, for the report site's panel (spec
+  // 2026-10-02 §6.1); ReportSiteGuard let the caller in. On the main pool,
+  // not the report one: reading may sweep a stale send (a write), as in
+  // billDetail.
+  async manualBillDetail(user: AuthUser, id: number) {
+    const bill = await this.prisma.manualBill.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        branchId: true,
+        billNumber: true,
+        businessDate: true,
+        cancelledAt: true,
+        cancelReason: true,
+        createdAt: true,
+        room: { select: { name: true } },
+        createdBy: staffRef,
+      },
+    });
+    if (!bill) throw new NotFoundException('Không tìm thấy bill');
+    this.scope.assertBranchAccess(user, bill.branchId);
+    return {
+      bill: { ...bill, businessDate: fromDbDate(bill.businessDate) },
+      ...(await this.invoicesOf({ manualBillId: id })),
+    };
+  }
+
+  // The invoices of one bill (with their drafts) and what they add up to,
+  // for its panel. A bill split into more than 200 invoices is not a real
+  // case; the cap keeps the answer bounded. A send cut off long ago is swept
+  // first, then the invoices are read again.
+  private async invoicesOf(
+    bill: { orderId: number } | { manualBillId: number },
+  ) {
+    const readInvoices = () =>
+      this.prisma.einvoice.findMany({
+        where: bill,
+        select: einvoiceDetailSelect,
+        orderBy: { id: 'asc' },
+        take: 200,
+      });
+    const [listed, allocated] = await Promise.all([
+      readInvoices(),
+      this.prisma.einvoice.aggregate({ where: bill, _sum: { amount: true } }),
+    ]);
+    const einvoices =
+      listed.some((e) => e.status === EinvoiceStatus.SENDING) &&
+      (await this.sweepStaleSending(bill))
+        ? await readInvoices()
+        : listed;
+    return {
       einvoices: einvoices.map(toEinvoiceRow),
       allocated: Number(allocated._sum.amount ?? 0),
     };
@@ -994,7 +984,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
   // failed) becomes UNCERTAIN; a send still running here is left alone.
   // record() still writes by id, so a result that arrives later lands over it.
   private async sweepStaleSending(
-    target: { id: number } | { orderId: number },
+    target: { id: number } | { orderId: number } | { manualBillId: number },
   ) {
     let where: Prisma.EinvoiceWhereInput;
     if ('id' in target) {
@@ -1002,7 +992,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
       where = { id: target.id };
     } else {
       where = {
-        orderId: target.orderId,
+        ...target,
         ...(this.sending.size ? { id: { notIn: [...this.sending] } } : {}),
       };
     }

@@ -3,6 +3,8 @@
 Ngày: 01/10/2026. Trạng thái: đã duyệt thiết kế từng phần, chờ duyệt spec.
 
 > Bố cục trang (§10.1–10.3), hóa đơn không theo bill, số tiền 0 của nháp và ngày hóa đơn lưu cùng nháp đã được sửa bởi `2026-10-01-hddt-bo-cuc-va-hd-tu-do-design.md`; đọc spec đó cho các mục này.
+>
+> Hóa đơn không theo bill đã bị bỏ, và dòng hàng nay được giữ lại sau khi xuất: xem `2026-10-02-trang-bao-cao-hddt-design.md`.
 
 ## 1. Bối cảnh và mục tiêu
 

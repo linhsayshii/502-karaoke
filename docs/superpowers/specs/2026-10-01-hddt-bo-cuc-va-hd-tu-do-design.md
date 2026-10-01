@@ -2,6 +2,8 @@
 
 Ngày: 01/10/2026. Trạng thái: đã duyệt thiết kế trong chat, chờ duyệt spec.
 
+> Hóa đơn tự do (không theo bill) đã bị bỏ, thay bằng bill thêm tay trên trang báo cáo: xem `2026-10-02-trang-bao-cao-hddt-design.md`.
+
 Spec này sửa spec gốc `2026-10-01-hoa-don-dien-tu-design.md`. Những gì không nhắc tới ở đây vẫn giữ như spec gốc: tiền, luồng gửi, Không rõ, sửa số, Minvoice, tra MST, bảo mật. Các mục bị thay thế:
 - ở §2: dòng "Nơi làm việc", "Bill và hóa đơn", "Ngày hóa đơn", và mục "hóa đơn không gắn bill" trong phần ngoài phạm vi;
 - §10.1–10.3.

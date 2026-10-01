@@ -274,7 +274,9 @@ describe('E-invoices (e2e)', () => {
       expect(created).toMatchObject({
         status: 'DRAFT',
         amount: '1000000',
-        vatAmount: '35000',
+        // Its lines' 35.000 + the 10% of the 615.000 they do not cover yet
+        // (spec 2026-10-02 §4.4).
+        vatAmount: '90909',
         buyerName: 'CÔNG TY HOÀNG GIA',
         draft: {
           buyerAddress: 'Số 26, phố Nhổn',
@@ -609,7 +611,7 @@ describe('E-invoices (e2e)', () => {
       await as('tn1_cs1').delete(`/einvoices/${id}`).expect(200);
     });
 
-    it('issues: Minvoice number kept, details deleted', async () => {
+    it('issues: Minvoice number kept, lines kept, buyer details deleted', async () => {
       const body = (await issue(draftId).expect(200)).body as Json;
       expect(body).toMatchObject({
         status: 'ISSUED',
@@ -617,9 +619,14 @@ describe('E-invoices (e2e)', () => {
         symbolCode: fake.symbolCode(),
         sellerTaxCode: TAX_CODE,
         invoiceDate: today(),
-        draft: null,
         lastError: null,
       });
+      const kept = body.draft as { lines: Json[] };
+      expect(kept.lines.map((l) => l.name)).toEqual([
+        'Bia Heineken',
+        'Dịch vụ karaoke',
+      ]);
+      expect(kept).not.toHaveProperty('buyerAddress');
       noSecrets(body);
       expect(fake.invoices.at(-1)).toMatchObject({
         paymentMethod: 'TM/CK',
@@ -785,7 +792,7 @@ describe('E-invoices (e2e)', () => {
       expect(found).toMatchObject({
         status: 'ISSUED',
         invoiceNumber: 1500,
-        draft: null,
+        draft: { lines: [filler(909091)] },
         invoiceDate: today(),
       });
     });
@@ -831,7 +838,7 @@ describe('E-invoices (e2e)', () => {
           symbolCode: fake.symbolCode(),
           sellerTaxCode: TAX_CODE,
           invoiceDate: today(),
-          draft: null,
+          draft: { lines: [filler(909091)] },
           lastError: null,
         });
         expect(fake.posts).toBe(posts);

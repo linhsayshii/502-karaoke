@@ -32,7 +32,7 @@ import {
   EinvoiceConfigService,
   type IssueConfig,
 } from './einvoice-config.service';
-import { parseDraft } from './einvoice-draft';
+import { draftData, issuedDraft, parseDraft } from './einvoice-draft';
 import { issueProblem, totalsOf } from './einvoice-math';
 import {
   einvoiceDetailSelect,
@@ -46,42 +46,6 @@ import {
   type MarkerSearch,
 } from './minvoice/minvoice-client';
 import { buildMinvoicePayload } from './minvoice/minvoice-payload';
-
-const clean = (value: string | null | undefined) => value?.trim() || null;
-
-// The columns a saved draft writes (spec §4.1): the details go in `draft`,
-// only in a shape parseDraft reads back (a blank name is refused, a null
-// vatAmount is left out).
-function draftData(dto: EinvoiceDraftDto) {
-  const lines: EinvoiceLine[] = dto.lines.map((line, index) => {
-    const name = line.name.trim();
-    if (!name) {
-      throw new BadRequestException(
-        `Dòng ${index + 1}: tên hàng không được để trống`,
-      );
-    }
-    return {
-      name,
-      unit: line.unit.trim(),
-      quantity: line.quantity,
-      unitPrice: line.unitPrice,
-      vatRate: line.vatRate,
-      ...(line.vatAmount == null ? {} : { vatAmount: line.vatAmount }),
-    };
-  });
-  const draft: EinvoiceDraft = {
-    buyerAddress: clean(dto.buyerAddress),
-    buyerEmail: clean(dto.buyerEmail),
-    lines,
-  };
-  return {
-    amount: dto.amount,
-    vatAmount: totalsOf(lines).vatAmount,
-    buyerTaxCode: clean(dto.buyerTaxCode),
-    buyerName: clean(dto.buyerName),
-    draft: draft as unknown as Prisma.InputJsonObject,
-  };
-}
 
 // A YYYY-MM-DD as a @db.Date value. The DTO only checks the shape: a day that
 // does not exist (2026-13-01 fails in Prisma, 2026-02-30 rolls into March) is
@@ -845,12 +809,14 @@ export class EinvoicesService implements OnApplicationBootstrap {
     const recent = dto.found ? null : tooRecent(row);
     if (recent) throw new ConflictException(recent);
     const cutoff = new Date(Date.now() - RESEND_WAIT_MS);
+    // An issued row keeps its lines (spec 2026-10-02 §4.3).
+    const lines = dto.found ? parseDraft(row.draft).lines : [];
     const data: Prisma.EinvoiceUncheckedUpdateManyInput = dto.found
       ? {
           status: EinvoiceStatus.ISSUED,
           invoiceNumber: dto.invoiceNumber,
-          vatAmount: totalsOf(parseDraft(row.draft).lines).vatAmount,
-          draft: Prisma.DbNull,
+          vatAmount: totalsOf(lines).vatAmount,
+          draft: issuedDraft(lines),
           issuedById: user.id,
           issuedAt: new Date(),
           lastError: null,
@@ -1085,7 +1051,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
       });
       return;
     }
-    // Issued: the header stays, the details go (spec §4).
+    // Issued: the header and the lines stay, the buyer's details go (spec 2026-10-02 §4.3).
     const header = {
       status: EinvoiceStatus.ISSUED,
       minvoiceId: outcome.minvoiceId,
@@ -1094,7 +1060,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
       registerInvoiceId: outcome.config.registerInvoiceId,
       ...(extra.foundDate ? { invoiceDate: toDbDate(extra.foundDate) } : {}),
       vatAmount: totalsOf(lines).vatAmount,
-      draft: Prisma.DbNull,
+      draft: issuedDraft(lines),
       issuedById: user.id,
       issuedAt: new Date(),
       sendingAt: null,

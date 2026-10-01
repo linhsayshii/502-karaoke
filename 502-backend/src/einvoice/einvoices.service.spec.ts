@@ -293,7 +293,7 @@ describe('EinvoicesService.issue of an uncertain invoice', () => {
         symbolCode: sentSymbol,
         registerInvoiceId: 'range-0',
         invoiceDate: toDbDate(sentDate),
-        draft: Prisma.DbNull,
+        draft: { lines: [line] },
         lastError: null,
         sendingAt: null,
       }),

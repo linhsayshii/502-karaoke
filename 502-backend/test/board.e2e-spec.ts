@@ -178,6 +178,7 @@ describe('Board role (e2e)', () => {
     expect(deleted.orderItems).toBe(1);
     expect(deleted.stockDocuments).toBe(1);
     expect(deleted.fundTransactions).toBe(2);
+    expect(deleted.einvoices).toBe(0);
     expect(deleted.stockMovements).toBe(2);
     expect(deleted.discountRequests).toBe(0);
     expect(deleted.orderEvents).toBe(0);

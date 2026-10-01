@@ -34,3 +34,12 @@ export function corsOrigins(): string[] | boolean {
 export const swaggerEnabled = () =>
   process.env.NODE_ENV !== 'production' ||
   process.env.SWAGGER_ENABLED === 'true';
+
+// Key of the Minvoice passwords and sessions (AES-256-GCM): 32 bytes, base64,
+// e.g. `openssl rand -base64 32`. Required in production; dev and test use a
+// fixed key so a fresh checkout runs without setup.
+const DEV_EINVOICE_SECRET = Buffer.alloc(32, 7).toString('base64');
+export const einvoiceSecret = () =>
+  process.env.NODE_ENV === 'production'
+    ? requireEnv('EINVOICE_SECRET')
+    : process.env.EINVOICE_SECRET || DEV_EINVOICE_SECRET;

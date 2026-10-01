@@ -95,3 +95,8 @@ export function businessDatesBetween(
   }
   return dates;
 }
+
+// @db.Date columns: Prisma reads and writes the UTC date part, so a
+// YYYY-MM-DD is stored as UTC midnight and read back with toISOString().
+export const toDbDate = (date: string) => new Date(`${date}T00:00:00Z`);
+export const fromDbDate = (date: Date) => date.toISOString().slice(0, 10);

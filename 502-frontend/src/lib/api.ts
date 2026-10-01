@@ -128,6 +128,9 @@ export async function refreshSession(): Promise<boolean> {
   }
 }
 
+// A 400: the server refused the request itself, before doing anything.
+export const isBadRequest = (error: unknown) => axios.isAxiosError(error) && error.response?.status === 400;
+
 // Message from a failed API call (backend messages are Vietnamese).
 export function apiErrorMessage(error: unknown, fallback: string): string {
   if (axios.isAxiosError(error)) {

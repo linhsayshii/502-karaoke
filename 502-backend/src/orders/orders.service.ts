@@ -8,6 +8,7 @@ import {
 import {
   DiscountRequestStatus,
   DiscountSource,
+  EinvoiceStatus,
   OrderEventType,
   OrderStatus,
   PaymentMethod,
@@ -261,7 +262,23 @@ export class OrdersService {
     });
     if (!order) throw new NotFoundException('Không tìm thấy hóa đơn');
     this.assertCanView(user, order);
-    return order;
+    // How many e-invoices the bill has, and how many of them are issued, for
+    // the warning of the edit / void dialogs (Einvoice(orderId) index; counts,
+    // so the answer stays the same size). An open session has none and the
+    // room page polls this route, so it skips the two queries.
+    if (order.status === OrderStatus.PENDING) {
+      return { ...order, _count: { einvoices: 0, issuedEinvoices: 0 } };
+    }
+    const [count, issued] = await Promise.all([
+      this.prisma.einvoice.count({ where: { orderId: id } }),
+      this.prisma.einvoice.count({
+        where: { orderId: id, status: EinvoiceStatus.ISSUED },
+      }),
+    ]);
+    return {
+      ...order,
+      _count: { einvoices: count, issuedEinvoices: issued },
+    };
   }
 
   async update(user: AuthUser, id: number, dto: UpdateOrderDto) {

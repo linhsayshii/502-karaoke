@@ -70,11 +70,14 @@ export function EditPaidBillDialog({
   open,
   onOpenChange,
   onSaved,
+  warning,
 }: {
   order: Order;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: (order: Order) => void;
+  // Shown under the description, e.g. that the bill has e-invoices this edit leaves alone.
+  warning?: string | null;
 }) {
   const [submitting, setSubmitting] = useState(false);
   return (
@@ -84,6 +87,7 @@ export function EditPaidBillDialog({
           <EditForm
             key={order.updatedAt}
             order={order}
+            warning={warning}
             submitting={submitting}
             setSubmitting={setSubmitting}
             onCancel={() => onOpenChange(false)}
@@ -100,12 +104,14 @@ export function EditPaidBillDialog({
 
 function EditForm({
   order,
+  warning,
   submitting,
   setSubmitting,
   onCancel,
   onSaved,
 }: {
   order: Order;
+  warning?: string | null;
   submitting: boolean;
   setSubmitting: (value: boolean) => void;
   onCancel: () => void;
@@ -308,6 +314,7 @@ function EditForm({
           Phòng {order.room?.name ?? "—"} · đã thu {formatMoney(order.finalAmount)}. Kho, phiếu thu quỹ và doanh thu
           được cập nhật theo số tiền mới.
         </DialogDescription>
+        {warning && <p className="text-sm text-warning">{warning}</p>}
       </DialogHeader>
 
       <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto p-4 sm:p-6">

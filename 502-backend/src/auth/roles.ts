@@ -16,3 +16,8 @@ export const ALL_BRANCH_ROLES: Role[] = [Role.CHAIN_MANAGER, Role.BOARD];
 // Corrects or voids a paid bill (spec 2026-09-30): neither the branch manager
 // nor the cashier may touch a bill once it is paid.
 export const CHAIN_ONLY: Role[] = [Role.CHAIN_MANAGER];
+
+// Hóa đơn điện tử (spec 2026-10-01 §3): drafts by the sales roles, read by
+// them and HĐQT; issuing, numbers and the Minvoice account are CHAIN_ONLY.
+export const EINVOICE_WRITERS: Role[] = SALES;
+export const EINVOICE_READERS: Role[] = SALES_READERS;

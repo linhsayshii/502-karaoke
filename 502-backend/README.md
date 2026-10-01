@@ -40,6 +40,8 @@ TZ=Asia/Ho_Chi_Minh
 | `DATABASE_URL` | Prisma đọc trực tiếp từ `.env`. Muốn chạy với DB khác thì truyền qua shell: `DATABASE_URL=... npm run start:dev`. |
 | `JWT_SECRET`, `JWT_REFRESH_SECRET` | Bắt buộc khi `NODE_ENV=production`; khi phát triển, thiếu thì dùng giá trị cố định. |
 | `COOKIE_SECURE` | Cờ `secure` của cookie refresh token. `true` chỉ khi chạy qua HTTPS. |
+| `EINVOICE_SECRET` | Khóa mã hóa mật khẩu Minvoice (hóa đơn điện tử): 32 byte mã hóa base64, tạo bằng `openssl rand -base64 32`. Bắt buộc khi `NODE_ENV=production`; khi phát triển, thiếu thì dùng một khóa cố định. |
+| `MINVOICE_URL_TEMPLATE` | Chỉ để thử, ví dụ `http://127.0.0.1:4555/{taxCode}`: thay địa chỉ `https://<MST>.minvoice.net` bằng Minvoice giả (xem dưới). Bị bỏ qua khi `NODE_ENV=production`. |
 | `TZ` | Ngày kinh doanh (06:00 → 06:00 hôm sau) tính theo giờ máy chủ. Luôn để `Asia/Ho_Chi_Minh`. |
 
 ### 3. Cài đặt và chạy
@@ -63,6 +65,7 @@ npm run format             # prettier
 npm test                   # unit test (*.spec.ts trong src/)
 npx jest src/orders/billing.spec.ts   # một file test
 npm run test:e2e           # e2e, dùng DB trong test/e2e.env (karaoke_test) — DB này bị xoá sạch mỗi lần chạy
+npx ts-node test/fake-minvoice.ts 4555   # Minvoice giả để thử hóa đơn điện tử trên trình duyệt: chạy backend với MINVOICE_URL_TEMPLATE=http://127.0.0.1:4555/{taxCode}; lệnh in ra mật khẩu mà Minvoice giả chấp nhận
 ```
 
 ## Database và migration

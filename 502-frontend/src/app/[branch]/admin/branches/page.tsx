@@ -36,11 +36,14 @@ import type { Branch } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const CODE_RE = /^[a-z0-9-]{2,20}$/;
+// Same rule as the backend (CreateBranchDto.taxCode): the MST is part of the Minvoice host name.
+const TAX_CODE_RE = /^\d{10}(-\d{3})?$/;
 
 interface BranchForm {
   code: string;
   name: string;
   address: string;
+  taxCode: string;
 }
 
 // Chain manager manages branches; HĐQT sees them read only (route guard + backend @Roles).
@@ -49,7 +52,7 @@ export default function BranchesPage() {
   const canEdit = can(user, "branches");
   const notify = useNotify();
   const [editing, setEditing] = useState<Branch | "new" | null>(null);
-  const [form, setForm] = useState<BranchForm>({ code: "", name: "", address: "" });
+  const [form, setForm] = useState<BranchForm>({ code: "", name: "", address: "", taxCode: "" });
   const [submitted, setSubmitted] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deactivating, setDeactivating] = useState<Branch | null>(null);
@@ -57,21 +60,27 @@ export default function BranchesPage() {
   const isNew = editing === "new";
   const codeInvalid = submitted && isNew && !CODE_RE.test(form.code.trim().toLowerCase());
   const nameInvalid = submitted && !form.name.trim();
+  const taxCodeInvalid = submitted && !!form.taxCode.trim() && !TAX_CODE_RE.test(form.taxCode.trim());
 
   const openForm = (branch: Branch | "new") => {
     setEditing(branch);
     setSubmitted(false);
     setForm(
       branch === "new"
-        ? { code: "", name: "", address: "" }
-        : { code: branch.code, name: branch.name, address: branch.address ?? "" },
+        ? { code: "", name: "", address: "", taxCode: "" }
+        : { code: branch.code, name: branch.name, address: branch.address ?? "", taxCode: branch.taxCode ?? "" },
     );
   };
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitted(true);
-    if (!form.name.trim() || (isNew && !CODE_RE.test(form.code.trim().toLowerCase()))) return;
+    if (
+      !form.name.trim() ||
+      (isNew && !CODE_RE.test(form.code.trim().toLowerCase())) ||
+      (!!form.taxCode.trim() && !TAX_CODE_RE.test(form.taxCode.trim()))
+    )
+      return;
     setSaving(true);
     try {
       if (isNew) {
@@ -79,10 +88,16 @@ export default function BranchesPage() {
           code: form.code.trim().toLowerCase(),
           name: form.name.trim(),
           address: form.address.trim() || undefined,
+          taxCode: form.taxCode.trim() || undefined,
         });
         notify.success(`Đã thêm ${form.name.trim()}`);
       } else if (editing) {
-        await api.patch(`/branches/${editing.id}`, { name: form.name.trim(), address: form.address.trim() });
+        // null clears the MST: the backend's pattern refuses "".
+        await api.patch(`/branches/${editing.id}`, {
+          name: form.name.trim(),
+          address: form.address.trim(),
+          taxCode: form.taxCode.trim() || null,
+        });
         notify.success(`Đã cập nhật ${form.name.trim()}`);
       }
       setEditing(null);
@@ -237,6 +252,21 @@ export default function BranchesPage() {
                   value={form.address}
                   onChange={(e) => setForm({ ...form, address: e.target.value })}
                 />
+              </Field>
+              <Field data-invalid={taxCodeInvalid || undefined}>
+                <FieldLabel htmlFor="branch-tax-code">Mã số thuế</FieldLabel>
+                <Input
+                  id="branch-tax-code"
+                  placeholder="vd: 0107811836"
+                  value={form.taxCode}
+                  aria-invalid={taxCodeInvalid || undefined}
+                  onChange={(e) => setForm({ ...form, taxCode: e.target.value })}
+                />
+                {taxCodeInvalid ? (
+                  <FieldError>10 số, hoặc 10 số kèm -3 số (MST chi nhánh)</FieldError>
+                ) : (
+                  <FieldDescription>Dùng cho hóa đơn điện tử. Đổi MST thì phải đăng nhập Minvoice lại.</FieldDescription>
+                )}
               </Field>
             </FieldGroup>
             <DialogFooter>

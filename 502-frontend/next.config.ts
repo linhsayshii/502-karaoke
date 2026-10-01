@@ -46,6 +46,15 @@ const nextConfig: NextConfig = {
   // Self-contained server (.next/standalone) for the Docker image
   output: 'standalone',
   poweredByHeader: false,
+  experimental: {
+    // Every API call goes browser → Cloudflare → this rewrite → backend, and
+    // Next's proxy cuts a rewritten request after 30 s by default (a 500
+    // "Internal Server Error" while the backend carries on): too short for a
+    // slow report or an e-invoice send (up to ~80 s of Minvoice timeouts).
+    // Kept just below Cloudflare's own limit (100 s, then a 524), so this
+    // proxy is never the first to give up.
+    proxyTimeout: 95_000,
+  },
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }];
   },

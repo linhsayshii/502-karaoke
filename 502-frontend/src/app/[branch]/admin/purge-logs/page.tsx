@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 // DataPurgeService).
 const DELETED_LABELS: [string, string][] = [
   ["orders", "hóa đơn"],
+  ["einvoices", "hóa đơn điện tử"],
   ["stockDocuments", "phiếu kho"],
   ["fundTransactions", "phiếu thu/chi"],
   ["products", "mặt hàng"],

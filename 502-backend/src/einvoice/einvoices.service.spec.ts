@@ -1,7 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { AuthUser } from '../auth/auth-user';
-import { toDateString, toDbDate } from '../common/dates';
+import { businessDateOf, toDateString, toDbDate } from '../common/dates';
 import type { IssueConfig } from './einvoice-config.service';
 import type { SendOutcome } from './einvoice-sender';
 import { EinvoicesService, STALE_SENDING_MS } from './einvoices.service';
@@ -601,6 +601,8 @@ describe('EinvoicesService.resolve', () => {
       ],
     });
     expect(data).toMatchObject({ status: 'DRAFT', sendingAt: null });
+    // The date stays: on a draft it is the date planned.
+    expect(data).not.toHaveProperty('invoiceDate');
   });
 
   it('goes by the last write when the time of the send is unknown', async () => {
@@ -745,5 +747,228 @@ describe('EinvoicesService pending "Không rõ" work', () => {
     expect(count).toHaveBeenCalledWith({
       where: { branchId: 1, status: pending },
     });
+  });
+});
+
+// A service whose prisma creates and updates drafts (create, update).
+const creating = () => {
+  const einvoice = {
+    create: jest.fn().mockResolvedValue({ id: 40 }),
+    updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    findUnique: jest.fn().mockResolvedValue({
+      id: 40,
+      branchId: 1,
+      status: 'DRAFT',
+      invoiceDate: null,
+    }),
+  };
+  const order = { findUnique: jest.fn() };
+  const scope = {
+    resolveBranchId: jest.fn().mockResolvedValue(3),
+    assertBranchAccess: jest.fn(),
+  };
+  const service = new EinvoicesService(
+    { einvoice, order } as never,
+    {} as never,
+    scope as never,
+    {} as never,
+    {} as never,
+  );
+  return { service, einvoice, order, scope };
+};
+// The `data` of the n-th call of a prisma create/update mock.
+const dataOf = (mock: jest.Mock, call = 0) =>
+  (mock.mock.calls[call] as [{ data: Record<string, unknown> }])[0].data;
+
+describe('EinvoicesService free invoices', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it("are created in the branch of the page, on today's business day", async () => {
+    const { service, einvoice, order, scope } = creating();
+    await service.create(user, { amount: 0, lines: [] }, 'cs3');
+    expect(scope.resolveBranchId).toHaveBeenCalledWith(user, 'cs3');
+    expect(order.findUnique).not.toHaveBeenCalled();
+    expect(dataOf(einvoice.create)).toMatchObject({
+      branchId: 3,
+      orderId: null,
+      businessDate: toDbDate(businessDateOf(new Date())),
+      amount: 0,
+    });
+  });
+
+  it('are also made by an orderId that is null', async () => {
+    const { service, einvoice, order } = creating();
+    await service.create(
+      user,
+      { orderId: null, amount: 0, lines: [] } as never,
+      'cs3',
+    );
+    expect(order.findUnique).not.toHaveBeenCalled();
+    expect(dataOf(einvoice.create)).toMatchObject({ orderId: null });
+  });
+
+  it('are issued without a bill to check', async () => {
+    const { service, einvoice, sender } = setup(issued);
+    einvoice.findUnique.mockResolvedValueOnce({ ...draftRow(), order: null });
+    await service.issue(user, 12, dto);
+    expect(sender.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('are listed apart', async () => {
+    const einvoice = {
+      findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
+    };
+    const service = new EinvoicesService(
+      { einvoice } as never,
+      {} as never,
+      { resolveBranchId: jest.fn().mockResolvedValue(1) } as never,
+      {} as never,
+      {} as never,
+    );
+    await service.list(user, { free: true, status: 'DRAFT' });
+    expect(einvoice.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { branchId: 1, status: 'DRAFT', lastError: null, orderId: null },
+      }),
+    );
+  });
+});
+
+describe('EinvoicesService invoice dates', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('dates a new draft by the calendar day its bill was paid, not its business day', async () => {
+    const { service, einvoice, order } = creating();
+    order.findUnique.mockResolvedValue({
+      id: 5,
+      branchId: 1,
+      status: 'COMPLETED',
+      businessDate: toDbDate('2026-09-29'),
+      endTime: new Date(2026, 8, 30, 0, 24),
+    });
+    await service.create(user, { orderId: 5, amount: 0, lines: [] });
+    expect(dataOf(einvoice.create)).toMatchObject({
+      businessDate: toDbDate('2026-09-29'),
+      invoiceDate: toDbDate('2026-09-30'),
+    });
+  });
+
+  it('dates a free invoice today, or as asked', async () => {
+    const { service, einvoice } = creating();
+    await service.create(user, { amount: 0, lines: [] }, 'cs1');
+    await service.create(
+      user,
+      { amount: 0, lines: [], invoiceDate: '2026-12-31' },
+      'cs1',
+    );
+    expect(dataOf(einvoice.create, 0).invoiceDate).toEqual(
+      toDbDate(toDateString(new Date())),
+    );
+    expect(dataOf(einvoice.create, 1).invoiceDate).toEqual(
+      toDbDate('2026-12-31'),
+    );
+  });
+
+  it('changes the date of a draft only when one is sent', async () => {
+    const { service, einvoice } = creating();
+    await service.update(user, 40, {
+      amount: 0,
+      lines: [],
+      invoiceDate: '2026-10-02',
+    });
+    await service.update(user, 40, { amount: 0, lines: [] });
+    expect(dataOf(einvoice.updateMany, 0).invoiceDate).toEqual(
+      toDbDate('2026-10-02'),
+    );
+    expect(dataOf(einvoice.updateMany, 1)).not.toHaveProperty('invoiceDate');
+    await expect(
+      service.update(user, 40, {
+        amount: 0,
+        lines: [],
+        invoiceDate: '2026-02-30',
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('keeps the date of a send that ends as a draft', async () => {
+    const { service, einvoice } = setup({
+      kind: 'failed',
+      message: 'Minvoice từ chối',
+    });
+    await service.issue(user, 12, dto);
+    const data = dataOf(einvoice.update);
+    expect(data).toMatchObject({ status: 'DRAFT', symbolCode: null });
+    expect(data).not.toHaveProperty('invoiceDate');
+  });
+});
+
+describe('EinvoicesService.bills', () => {
+  const listing = () => {
+    const order = {
+      findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
+    };
+    const service = new EinvoicesService(
+      { order, einvoice: { groupBy: jest.fn() } } as never,
+      {} as never,
+      { resolveBranchId: jest.fn().mockResolvedValue(1) } as never,
+      {} as never,
+      {} as never,
+    );
+    const whereOf = () =>
+      (order.findMany.mock.calls[0] as [{ where: unknown }])[0].where;
+    return { service, whereOf };
+  };
+  const september = {
+    gte: toDbDate('2026-09-01'),
+    lte: toDbDate('2026-09-30'),
+  };
+
+  it('lists the paid bills of a range of days', async () => {
+    const { service, whereOf } = listing();
+    await service.bills(user, { from: '2026-09-01', to: '2026-09-30' });
+    expect(whereOf()).toEqual({
+      branchId: 1,
+      status: 'COMPLETED',
+      businessDate: september,
+    });
+  });
+
+  it('lists the bills holding pending work whatever their day, voided ones too', async () => {
+    const { service, whereOf } = listing();
+    await service.bills(user, {
+      status: 'UNCERTAIN',
+      from: '2026-09-01',
+      to: '2026-09-30',
+    });
+    expect(whereOf()).toEqual({
+      branchId: 1,
+      einvoices: {
+        some: { branchId: 1, status: { in: ['SENDING', 'UNCERTAIN'] } },
+      },
+    });
+  });
+
+  it('dates issued invoices, not their bills', async () => {
+    const { service, whereOf } = listing();
+    await service.bills(user, {
+      status: 'ISSUED',
+      from: '2026-09-01',
+      to: '2026-09-30',
+    });
+    expect(whereOf()).toEqual({
+      branchId: 1,
+      einvoices: {
+        some: { branchId: 1, status: 'ISSUED', businessDate: september },
+      },
+    });
+  });
+
+  it('refuses a range that ends before it starts', async () => {
+    const { service } = listing();
+    await expect(
+      service.bills(user, { from: '2026-09-30', to: '2026-09-01' }),
+    ).rejects.toMatchObject({ status: 400 });
   });
 });

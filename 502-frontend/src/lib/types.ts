@@ -634,7 +634,7 @@ export interface EinvoiceDraft {
 export interface EinvoiceRow {
   id: number;
   branchId: number;
-  orderId: number;
+  orderId: number | null; // null: a free invoice, made without a bill
   status: EinvoiceStatus;
   amount: string;
   vatAmount: string;
@@ -656,7 +656,7 @@ export interface EinvoiceRow {
     cancelledAt: string | null;
     editedAt: string | null;
     room: { name: string } | null;
-  };
+  } | null;
 }
 
 // One invoice with its draft (null once issued).
@@ -672,12 +672,13 @@ export interface EinvoiceDetail extends EinvoiceRow {
   numberEditedBy: StaffRef | null;
 }
 
-// GET /einvoices/bills: paid bills of a day for the picker.
+// GET /einvoices/bills: the bills of the left column.
 export interface EinvoiceBill {
   orderId: number;
   billNumber: string | null;
   roomName: string | null;
   endTime: string | null;
+  cancelledAt: string | null;
   finalAmount: string;
   allocated: number;
   einvoiceCount: number;

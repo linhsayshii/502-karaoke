@@ -569,6 +569,20 @@ Sau khi cập nhật:
    - Hóa đơn "Không rõ" nghĩa là không biết Minvoice đã tạo hay chưa (mất kết nối sau khi gửi, hoặc backend khởi động lại khi đang gửi). Hệ thống không bao giờ tự gửi lại: quản lý hệ thống mở Minvoice xem rồi chọn **Đã có — nhập số** hoặc **Chưa có — gửi lại**. **Chưa có — gửi lại** chỉ bấm được từ 3 phút sau lần gửi (Minvoice có thể vẫn đang lưu lần gửi đó); trước giờ đó server cũng từ chối và nói giờ được kiểm tra lại. Nút **Kiểm tra lại** tìm hóa đơn theo mã đối chiếu `K502-<số>` trên Minvoice: chỉ tự ghi số khi chính dòng hóa đơn tìm được hiện đúng mã đó (Minvoice thật lưu mã này và trả về trong dòng, đã kiểm tra ngày 01/10/2026); thấy một hóa đơn mà dòng không có mã thì chỉ gợi ý số trong thông báo. Việc tự gửi lại khi không thấy gì vẫn tắt có chủ ý (`MARKER_SEARCH_CONFIRMED = false` trong `minvoice-client.ts`): không thấy hóa đơn thì hệ thống vẫn để "Không rõ" và chỉ quản lý hệ thống mới chọn **Chưa có — gửi lại**.
    - "Xóa dữ liệu" của HĐQT giờ xóa cả hóa đơn điện tử của phạm vi đã chọn trong database (không xóa gì trên Minvoice); cấu hình đăng nhập Minvoice của cơ sở được giữ lại.
 
+### 6.19. Hóa đơn điện tử: bố cục hai cột, hóa đơn không theo bill (migration `20261004000000_free_einvoices`)
+
+- **Migration** tự chạy khi backend khởi động: cột `Einvoice.orderId` được để trống, để có hóa đơn không theo bill. Không đụng dữ liệu cũ, chạy trong tích tắc. Không đổi `.env` hay `docker-compose.yml`.
+- **Trang Hóa đơn điện tử** đổi bố cục:
+  - Cột trái là danh sách bill. Bấm **+** trên một bill là có ngay một hóa đơn nhỏ, bấm nhiều lần thì có nhiều. Số tiền nhập ngay trên dòng hóa đơn. Nháp xóa bằng thùng rác.
+  - **+** cạnh ô tìm số bill tạo hóa đơn không theo bill.
+  - Cột phải để điền ngày hóa đơn, người mua, dòng hàng và xuất.
+  - Mọi dòng hàng mới có VAT 10%.
+- **Ngày hóa đơn** giờ lưu cùng nháp. Mặc định là ngày (theo lịch, không phải ngày kinh doanh) bill được thanh toán.
+  - Nháp tạo trước bản cập nhật chưa có ngày: trang chỉ hiện ngày thanh toán bill, chưa ghi vào database. Ngày được ghi ở lần **Lưu nháp** tiếp theo có lưu một thay đổi (lưu số tiền ngay trên dòng hóa đơn thì chưa ghi). **Xuất** luôn gửi đúng ngày đang hiện trên trang, nên hóa đơn mang ngày đó dù nháp chưa được lưu lại.
+  - Bấm **Xuất** khi ngày hóa đơn khác hôm nay thì trang hỏi có đổi về hôm nay không (**Giữ** ngày cũ hoặc **Đổi về hôm nay**).
+  - Một lần xuất bị Minvoice từ chối thì nháp giữ ngày đã chọn.
+- **Rollback cẩn thận:** khi đã có hóa đơn không theo bill (cột `orderId` để trống), quay lại bản backend cũ làm trang Hóa đơn điện tử báo lỗi 500, vì code cũ coi hóa đơn nào cũng có bill. Trước khi rollback hãy xóa các hóa đơn đó (nháp xóa được trên trang; hóa đơn đã xuất thì không), hoặc ngừng dùng trang Hóa đơn điện tử cho tới khi lên lại bản mới.
+
 ## 7. Xử lý sự cố
 
 | Hiện tượng | Nguyên nhân / cách xử lý |

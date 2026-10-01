@@ -20,6 +20,7 @@ import type { AuthUser } from '../auth/auth-user';
 import { CHAIN_ONLY, EINVOICE_READERS, EINVOICE_WRITERS } from '../auth/roles';
 import { SharedRequestInterceptor } from '../common/shared-request.interceptor';
 import { withTotalCount } from '../common/total-count';
+import { EinvoiceBranchQuery } from './dto/config.dto';
 import {
   CreateEinvoiceDto,
   EinvoiceBillsQuery,
@@ -58,7 +59,7 @@ export class EinvoicesController {
   }
 
   @Get('bills')
-  @Roles(...EINVOICE_WRITERS)
+  @Roles(...EINVOICE_READERS)
   bills(
     @CurrentUser() user: AuthUser,
     @Query() query: EinvoiceBillsQuery,
@@ -87,8 +88,12 @@ export class EinvoicesController {
 
   @Post()
   @Roles(...EINVOICE_WRITERS)
-  create(@CurrentUser() user: AuthUser, @Body() dto: CreateEinvoiceDto) {
-    return this.einvoices.create(user, dto);
+  create(
+    @CurrentUser() user: AuthUser,
+    @Query() query: EinvoiceBranchQuery,
+    @Body() dto: CreateEinvoiceDto,
+  ) {
+    return this.einvoices.create(user, dto, query.branch);
   }
 
   @Patch(':id')

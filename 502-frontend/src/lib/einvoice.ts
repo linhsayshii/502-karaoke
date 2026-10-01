@@ -1,4 +1,5 @@
-import type { EinvoiceLine, VatRate } from "@/lib/types";
+import { formatDate, toDateInput } from "@/lib/format";
+import type { EinvoiceConfigView, EinvoiceDraft, EinvoiceLine, EinvoiceRow, VatRate } from "@/lib/types";
 
 // Mirror of the backend's src/einvoice/einvoice-math.ts (spec §5): keep the
 // two in sync. Rounded to the đồng with Math.round, unlike bills (billing.ts
@@ -45,9 +46,11 @@ export const STALE_SENDING_MS = 3 * 60_000;
 
 const dong = (value: number) => value.toLocaleString("vi-VN");
 
-// Why a draft cannot be issued yet, or null when it can: its lines must add
-// up to the amount typed, to the đồng.
+// Why a draft cannot be issued yet, or null when it can: it needs an amount
+// (a draft may keep 0 while it is being split), and its lines must add up to
+// that amount, to the đồng.
 export function issueProblem(amount: number, lines: EinvoiceLine[]): string | null {
+  if (!(amount >= 1)) return "Nhập số tiền của hóa đơn";
   if (lines.length === 0) return "Hóa đơn chưa có dòng hàng";
   if (lines.length > MAX_LINES) return `Tối đa ${MAX_LINES} dòng hàng`;
   for (const [index, line] of lines.entries()) {
@@ -77,6 +80,42 @@ export function fillerLine(missing: number, rate: VatRate): EinvoiceLine | null 
   return { ...filler, unitPrice: base, vatAmount: missing - base };
 }
 
-export function defaultVatRate(taxPercent: number): VatRate {
-  return (VAT_RATES as number[]).includes(taxPercent) ? (taxPercent as VatRate) : 10;
+// Every line made on the page carries the venue's VAT; there is no rate to
+// choose (spec 2026-10-01-hddt-bo-cuc-va-hd-tu-do §5.4).
+export const EINVOICE_VAT_RATE: VatRate = 10;
+
+// 1C26MTT: characters 3–4 are the year (Thông tư 78/2021), as the backend reads it.
+export function symbolYearOf(symbolCode: string): number | null {
+  const yy = Number(symbolCode.slice(2, 4));
+  return Number.isInteger(yy) ? 2000 + yy : null;
+}
+
+// Why the invoice date of a draft blocks its issue, or null. The server checks
+// the same when it is issued; a date after today is confirmed at Xuất.
+export function invoiceDateProblem(
+  date: string,
+  config: Pick<EinvoiceConfigView, "minInvoiceDate" | "symbolCode"> | null,
+): string | null {
+  if (config?.minInvoiceDate && date < config.minInvoiceDate) {
+    return `Ngày hóa đơn phải từ ${formatDate(config.minInvoiceDate)} trở đi`;
+  }
+  const year = config?.symbolCode ? symbolYearOf(config.symbolCode) : null;
+  if (year !== null && Number(date.slice(0, 4)) !== year) {
+    return `Ký hiệu ${config?.symbolCode} là của năm ${year}, ngày hóa đơn là ${formatDate(date)}`;
+  }
+  return null;
+}
+
+// The date shown for a draft saved before drafts kept one: the calendar day
+// its bill was paid (never the business day), or today without a bill.
+export function defaultInvoiceDate(billEndTime: string | null | undefined): string {
+  return toDateInput(billEndTime ? new Date(billEndTime) : new Date());
+}
+
+// Nothing typed in it yet (amount 0, no buyer, no line): deleted without
+// asking. A list row carries no lines; its VAT, 0 without a priced line,
+// stands in for them.
+export function isEmptyDraft(row: EinvoiceRow & { draft?: EinvoiceDraft | null }): boolean {
+  if (row.status !== "DRAFT" || Number(row.amount) !== 0 || row.buyerTaxCode || row.buyerName) return false;
+  return row.draft ? row.draft.lines.length === 0 : Number(row.vatAmount) === 0;
 }

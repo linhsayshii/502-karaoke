@@ -606,8 +606,13 @@ model Einvoice {
   id           Int            @id @default(autoincrement())
   branchId     Int
   branch       Branch         @relation(fields: [branchId], references: [id])
-  orderId      Int
-  order        Order          @relation(fields: [orderId], references: [id])
+  // Null for a free invoice, made without a bill
+  // (spec 2026-10-01-hddt-bo-cuc-va-hd-tu-do). Restrict keeps what the
+  // column did when it was required: a bill with invoices is never deleted
+  // (Prisma's default for an optional relation, SetNull, would turn its
+  // invoices into free ones).
+  orderId      Int?
+  order        Order?         @relation(fields: [orderId], references: [id], onDelete: Restrict)
   // Copied from Order.businessDate so the list filters on its own index.
   businessDate DateTime       @db.Date
   status       EinvoiceStatus @default(DRAFT)

@@ -1,4 +1,4 @@
-import { EinvoiceLine, VAT_RATES, VatRate } from './einvoice-types';
+import { EinvoiceLine, VatRate } from './einvoice-types';
 
 // Money of an e-invoice (spec 2026-10-01 §5). The frontend mirrors this file
 // in lib/einvoice.ts: keep them in sync. Rounded to the đồng (Math.round),
@@ -39,12 +39,14 @@ export function totalsOf(lines: EinvoiceLine[]): EinvoiceTotals {
 
 const dong = (value: number) => value.toLocaleString('vi-VN');
 
-// Why a draft cannot be issued yet, or null when it can: its lines must add
-// up to the amount typed, to the đồng.
+// Why a draft cannot be issued yet, or null when it can: it needs an amount
+// (a draft may keep 0 while it is being split), and its lines must add up to
+// that amount, to the đồng.
 export function issueProblem(
   amount: number,
   lines: EinvoiceLine[],
 ): string | null {
+  if (!(amount >= 1)) return 'Nhập số tiền của hóa đơn';
   if (lines.length === 0) return 'Hóa đơn chưa có dòng hàng';
   if (lines.length > MAX_LINES) return `Tối đa ${MAX_LINES} dòng hàng`;
   for (const [index, line] of lines.entries()) {
@@ -80,10 +82,4 @@ export function fillerLine(
     }
   }
   return { ...filler, unitPrice: base, vatAmount: missing - base };
-}
-
-export function defaultVatRate(taxPercent: number): VatRate {
-  return (VAT_RATES as readonly number[]).includes(taxPercent)
-    ? (taxPercent as VatRate)
-    : 10;
 }

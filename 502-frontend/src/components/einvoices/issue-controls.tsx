@@ -3,50 +3,64 @@
 import { useState } from "react";
 import { SendIcon } from "lucide-react";
 import { toast } from "sonner";
-import { ConfirmDialog } from "@/components/confirm-dialog";
-import { DatePicker } from "@/components/date-range-picker";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useNotify } from "@/hooks/use-notify";
 import api, { isBadRequest, isSessionEnded } from "@/lib/api";
-import { UNKNOWN_RESULT_MESSAGE } from "@/lib/einvoice";
+import { invoiceDateProblem, UNKNOWN_RESULT_MESSAGE } from "@/lib/einvoice";
 import { formatDate, toDateInput } from "@/lib/format";
 import type { EinvoiceConfigView, EinvoiceDetail } from "@/lib/types";
 
-// Ngày HĐ + Xuất (chain manager, spec §9.3): the date cannot be before the
-// newest invoice of the symbol, has no upper bound, and a date after today
-// is confirmed first. The answer is always the row: ISSUED, DRAFT with the
-// error, or UNCERTAIN. Rendered inside the panel's @container/einvoice.
+// Xuất (chain manager, spec 2026-10-01-hddt-bo-cuc-va-hd-tu-do §2, §5.3):
+// a draft dated today goes out at once; any other date first asks whether to
+// issue it today instead. Keeping a date after today is the confirmation the
+// server wants (confirmFutureDate). The answer is always the row: ISSUED,
+// DRAFT with the error, or UNCERTAIN. Rendered inside the panel's
+// @container/einvoice.
 export function IssueControls({
   einvoice,
+  invoiceDate,
   config,
   problem,
   busy,
   onIssued,
+  onIssuingChange,
 }: {
   einvoice: EinvoiceDetail;
+  // YYYY-MM-DD, the calendar day saved with the draft.
+  invoiceDate: string;
   config: EinvoiceConfigView | null;
   // Why the draft cannot go out yet (unsaved, lines not matching…), or null.
   problem: string | null;
   // The panel is reloading after a write: nothing more is sent meanwhile.
   busy: boolean;
   onIssued: (row: EinvoiceDetail) => void;
+  // Told while a send is running: the invoice's amount in the left column waits.
+  onIssuingChange: (issuing: boolean) => void;
 }) {
   const notify = useNotify();
-  // The calendar day, not the business day (plan decision 8).
+  // The calendar day, not the business day.
   const today = toDateInput();
-  const min = config?.minInvoiceDate ?? undefined;
-  // Nothing picked yet follows the config, which may arrive after this mounts,
-  // and a pick that the config has since outdated falls back to it.
-  const [picked, setPicked] = useState<string | null>(null);
-  const floor = min && today < min ? min : today;
-  const date = picked && (!min || picked >= min) ? picked : floor;
   const [issuing, setIssuing] = useState(false);
-  const [confirmFuture, setConfirmFuture] = useState(false);
+  const [asking, setAsking] = useState(false);
   const blocked = !config?.configured ? "Minvoice chưa được cấu hình cho cơ sở này" : problem;
+  // An answer whose date the server would refuse is not offered.
+  const keepProblem = invoiceDateProblem(invoiceDate, config);
+  const todayProblem = invoiceDateProblem(today, config);
 
-  const send = async () => {
+  const send = async (date: string) => {
     setIssuing(true);
+    onIssuingChange(true);
     try {
       const res = await api.post<EinvoiceDetail>(`/einvoices/${einvoice.id}/issue`, {
         invoiceDate: date,
@@ -74,32 +88,65 @@ export function IssueControls({
       return true;
     } finally {
       setIssuing(false);
+      onIssuingChange(false);
     }
+  };
+
+  // One answer of the question: a refusal before anything was sent (400)
+  // keeps it open, anything else closes it.
+  const answer = async (date: string) => {
+    if (await send(date)) setAsking(false);
   };
 
   return (
     <div className="flex w-full flex-col gap-1 @md/einvoice:ml-auto @md/einvoice:w-auto @md/einvoice:items-end">
-      <div className="flex flex-wrap items-center gap-2">
-        <DatePicker value={date} onChange={setPicked} min={min} today={today} label="Ngày hóa đơn" align="end" />
-        <Button onClick={() => (date > today ? setConfirmFuture(true) : void send())} disabled={issuing || busy || !!blocked}>
-          {issuing ? <Spinner data-icon="inline-start" /> : <SendIcon data-icon="inline-start" />}
-          Xuất
-        </Button>
-      </div>
-      {min && (
-        <span className="text-xs text-muted-foreground @md/einvoice:text-right">
-          Từ {formatDate(min)} trở đi (hóa đơn số {config?.latestInvoiceNumber ?? "?"} cùng ký hiệu mang ngày này)
-        </span>
-      )}
+      <Button
+        className="self-start @md/einvoice:self-end"
+        onClick={() => (invoiceDate === today ? void send(today) : setAsking(true))}
+        disabled={issuing || busy || !!blocked}
+      >
+        {issuing ? <Spinner data-icon="inline-start" /> : <SendIcon data-icon="inline-start" />}
+        Xuất
+      </Button>
       {blocked && <span className="text-xs text-muted-foreground @md/einvoice:text-right">{blocked}</span>}
-      <ConfirmDialog
-        open={confirmFuture}
-        onOpenChange={setConfirmFuture}
-        title="Xuất với ngày sau hôm nay?"
-        description={`Mọi hóa đơn sau cùng ký hiệu ${config?.symbolCode ?? ""} sẽ phải mang ngày từ ${formatDate(date)} trở đi.`}
-        confirmLabel="Xuất"
-        onConfirm={send}
-      />
+      <AlertDialog open={asking} onOpenChange={(open) => !issuing && setAsking(open)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Đổi ngày hóa đơn về hôm nay?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Ngày hóa đơn đang là {formatDate(invoiceDate)}, không phải hôm nay ({formatDate(today)}).
+              {keepProblem
+                ? ` Không giữ được ngày này: ${keepProblem}.`
+                : invoiceDate > today &&
+                  ` Giữ ngày này thì mọi hóa đơn sau cùng ký hiệu ${config?.symbolCode ?? ""} phải mang ngày từ ${formatDate(invoiceDate)} trở đi.`}
+              {todayProblem && ` Không đổi về hôm nay được: ${todayProblem}.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={issuing}>Hủy bỏ</AlertDialogCancel>
+            <AlertDialogAction
+              variant="outline"
+              disabled={issuing || !!keepProblem}
+              onClick={(e) => {
+                e.preventDefault();
+                void answer(invoiceDate);
+              }}
+            >
+              Giữ {formatDate(invoiceDate)}
+            </AlertDialogAction>
+            <AlertDialogAction
+              disabled={issuing || !!todayProblem}
+              onClick={(e) => {
+                e.preventDefault();
+                void answer(today);
+              }}
+            >
+              {issuing && <Spinner data-icon="inline-start" />}
+              Đổi về hôm nay
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

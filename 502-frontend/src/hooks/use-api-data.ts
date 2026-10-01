@@ -4,10 +4,12 @@ import { useCallback, useEffect, useState } from "react";
 import api, { totalCountOf } from "@/lib/api";
 import { useNotify } from "@/hooks/use-notify";
 
-// GET `url` with `params`, refetching when they change or on reload().
+// GET `url` with `params`, refetching when they change or on reload(). A null
+// `url` fetches nothing (a panel with nothing chosen): `data` keeps the last
+// answer, so a caller checks it belongs to what it asked for.
 // Failures show a toast with the server message (or `errorMessage`).
 export function useApiData<T>(
-  url: string,
+  url: string | null,
   params: Record<string, unknown>,
   initial: T,
   errorMessage: string,
@@ -22,11 +24,16 @@ export function useApiData<T>(
   // to the key of the request whose result last landed, so changing `url`/
   // `params` (or calling `reload()`) makes `loading` true again without
   // setting state synchronously inside the effect.
-  const requestKey = `${url}:${paramsKey}:${version}`;
+  const requestKey = url === null ? null : `${url}:${paramsKey}:${version}`;
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
-  const loading = loadedKey !== requestKey;
+  // A url that goes null forgets the last answer's key (adjusted during
+  // render), so when it comes back, even to the same url, params and version,
+  // `loading` is true until the refetch lands, not while stale data shows.
+  if (requestKey === null && loadedKey !== null) setLoadedKey(null);
+  const loading = requestKey !== null && loadedKey !== requestKey;
 
   useEffect(() => {
+    if (url === null || requestKey === null) return;
     let cancelled = false;
     api
       .get<T>(url, { params: JSON.parse(paramsKey) })

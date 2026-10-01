@@ -7,6 +7,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
+import { toDateString } from '../src/common/dates';
 import { EinvoiceConfigService } from '../src/einvoice/einvoice-config.service';
 import {
   EinvoicesService,
@@ -316,6 +317,33 @@ describe('E-invoices (e2e)', () => {
         .expect(400);
     });
 
+    it('keeps an invoice date of its own, the calendar day the bill was paid', async () => {
+      const today = toDateString(new Date());
+      const draft = (
+        await as('tn1_cs1').get(`/einvoices/${draftId}`).expect(200)
+      ).body as Json;
+      expect(draft.invoiceDate).toBe(today);
+      const body = { amount: 1000000, ...buyer, lines: [beer, filler] };
+      const moved = (
+        await as('tn1_cs1')
+          .patch(`/einvoices/${draftId}`, {
+            ...body,
+            invoiceDate: '2026-12-31',
+          })
+          .expect(200)
+      ).body as Json;
+      expect(moved.invoiceDate).toBe('2026-12-31');
+      const kept = (
+        await as('tn1_cs1').patch(`/einvoices/${draftId}`, body).expect(200)
+      ).body as Json;
+      expect(kept.invoiceDate).toBe('2026-12-31');
+      await as('tn1_cs1')
+        .patch(`/einvoices/${draftId}`, { ...body, invoiceDate: '2026-02-30' })
+        .expect(400);
+      await as('tn1_cs1')
+        .patch(`/einvoices/${draftId}`, { ...body, invoiceDate: today })
+        .expect(200);
+    });
     it('shows a bill with its invoices and how much is split', async () => {
       const detail = (
         await as('tn1_cs1').get(`/einvoices/bill/${orderId}`).expect(200)
@@ -331,6 +359,60 @@ describe('E-invoices (e2e)', () => {
         allocated: 1000000,
         einvoiceCount: 1,
       });
+    });
+
+    it('lists bills by day and by the status of their invoices', async () => {
+      const ids = async (query: string) =>
+        (
+          (await as('tn1_cs1').get(`/einvoices/bills${query}`).expect(200))
+            .body as Json[]
+        ).map((b) => b.orderId);
+      expect(await ids('')).toContain(orderId);
+      expect(await ids('?from=2020-01-01&to=2020-01-02')).toEqual([]);
+      expect(
+        await ids('?status=DRAFT&from=2020-01-01&to=2020-01-02'),
+      ).toContain(orderId);
+      expect(await ids('?status=ISSUED')).not.toContain(orderId);
+
+      // HĐQT reads the list of the page like every other reader, one branch at
+      // a time: with no branch it gets the usual "Vui lòng chọn cơ sở" (400).
+      const board = (
+        await as('hdqt_hddt').get('/einvoices/bills?branch=cs1').expect(200)
+      ).body as Json[];
+      expect(board.map((b) => b.orderId)).toContain(orderId);
+      await as('hdqt_hddt').get('/einvoices/bills').expect(400);
+
+      // A voided bill keeps its drafts in the pending tabs, not in the day's bills.
+      const room = (
+        await as('ql1_cs1')
+          .post('/rooms', { name: 'HĐĐT-4', pricePerHour: 100000 })
+          .expect(201)
+      ).body as Json;
+      const voided = (
+        (await as('tn1_cs1').post('/orders', { roomId: room.id }).expect(201))
+          .body as Json
+      ).id as number;
+      await as('tn1_cs1')
+        .post(`/orders/${voided}/checkout`, { paymentMethod: 'CASH' })
+        .expect(200);
+      const draft = (
+        (
+          await as('tn1_cs1')
+            .post('/einvoices', { orderId: voided, amount: 0, lines: [] })
+            .expect(201)
+        ).body as Json
+      ).id as number;
+      await as('admin')
+        .post(`/orders/${voided}/void`, { reason: 'Nhập nhầm phòng' })
+        .expect(200);
+      expect(await ids('')).not.toContain(voided);
+      const pending = (
+        await as('tn1_cs1').get('/einvoices/bills?status=DRAFT').expect(200)
+      ).body as Json[];
+      expect(pending.find((b) => b.orderId === voided)?.cancelledAt).toEqual(
+        expect.any(String),
+      );
+      await as('tn1_cs1').delete(`/einvoices/${draft}`).expect(200);
     });
 
     it('lists drafts whatever their day, and counts them', async () => {
@@ -363,8 +445,9 @@ describe('E-invoices (e2e)', () => {
     it('refuses a day that does not exist', async () => {
       await as('tn1_cs1').get('/einvoices?from=2026-13-01').expect(400);
       await as('tn1_cs1').get('/einvoices/summary?to=2026-02-30').expect(400);
+      await as('tn1_cs1').get('/einvoices/bills?from=2026-02-30').expect(400);
       await as('tn1_cs1')
-        .get('/einvoices/bills?businessDate=2026-02-30')
+        .get('/einvoices/bills?from=2026-05-02&to=2026-05-01')
         .expect(400);
       await as('tn1_cs1')
         .get('/einvoices?from=2026-05-02&to=2026-05-01')
@@ -418,6 +501,25 @@ describe('E-invoices (e2e)', () => {
       await as('tn1_cs1')
         .delete(`/einvoices/${extra.id as number}`)
         .expect(404);
+    });
+
+    it('takes empty drafts, one per click', async () => {
+      const ids: number[] = [];
+      for (let i = 0; i < 2; i++) {
+        const draft = (
+          await as('tn1_cs1')
+            .post('/einvoices', { orderId, amount: 0, lines: [] })
+            .expect(201)
+        ).body as Json;
+        expect(draft).toMatchObject({ status: 'DRAFT', amount: '0' });
+        ids.push(draft.id as number);
+      }
+      expect(ids[0]).not.toBe(ids[1]);
+      await as('tn1_cs1')
+        .post('/einvoices', { orderId, amount: -1, lines: [] })
+        .expect(400);
+      for (const id of ids)
+        await as('tn1_cs1').delete(`/einvoices/${id}`).expect(200);
     });
 
     it('tells the bill sheet how many e-invoices a bill has', async () => {
@@ -488,6 +590,20 @@ describe('E-invoices (e2e)', () => {
       const id = await newDraft(900000);
       expect(((await issue(id).expect(400)).body as Json).message).toBe(
         'Còn thiếu 10.000 đồng',
+      );
+      await as('tn1_cs1').delete(`/einvoices/${id}`).expect(200);
+    });
+
+    it('refuses a draft without an amount', async () => {
+      const id = (
+        (
+          await as('tn1_cs1')
+            .post('/einvoices', { orderId, amount: 0, lines: [filler(0)] })
+            .expect(201)
+        ).body as Json
+      ).id as number;
+      expect(((await issue(id).expect(400)).body as Json).message).toBe(
+        'Nhập số tiền của hóa đơn',
       );
       await as('tn1_cs1').delete(`/einvoices/${id}`).expect(200);
     });
@@ -581,10 +697,11 @@ describe('E-invoices (e2e)', () => {
       fake.behaviours = ['reject', 'reject'];
       const posts = fake.posts;
       const body = (await issue(id).expect(200)).body as Json;
+      // The header goes, the date planned stays.
       expect(body).toMatchObject({
         status: 'DRAFT',
         symbolCode: null,
-        invoiceDate: null,
+        invoiceDate: today(),
       });
       expect(body.lastError).toMatch(/ModelState/);
       expect((body.draft as Json).lines).toHaveLength(1);
@@ -602,6 +719,7 @@ describe('E-invoices (e2e)', () => {
       const posts = fake.posts;
       const body = (await issue(id).expect(200)).body as Json;
       expect(body.status).toBe('DRAFT');
+      expect(body.invoiceDate).toBe(today());
       expect(body.lastError).toMatch(/^Minvoice từ chối ngày hóa đơn/);
       expect(body.lastError).toContain('quy luật tăng dần');
       expect(fake.posts).toBe(posts + 1);
@@ -647,10 +765,11 @@ describe('E-invoices (e2e)', () => {
           .post(`/einvoices/${id}/resolve`, { found: false })
           .expect(200)
       ).body as Json;
+      // The header goes, the date planned stays.
       expect(back).toMatchObject({
         status: 'DRAFT',
         symbolCode: null,
-        invoiceDate: null,
+        invoiceDate: today(),
       });
       fake.behaviours = ['drop'];
       await issue(id).expect(200);
@@ -1050,6 +1169,56 @@ describe('E-invoices (e2e)', () => {
       expect(again.status).toBe('UNCERTAIN');
       expect(again.lastError).toMatch(/^Không rõ ký hiệu hoặc ngày/);
       expect(fake.posts).toBe(posts);
+    });
+
+    it('creates, lists and issues an invoice without a bill', async () => {
+      const free = { amount: 0, lines: [] };
+      await as('tn1_cs1').post('/einvoices?branch=cs2', free).expect(403);
+      await as('admin').post('/einvoices', free).expect(400);
+      await as('hdqt_hddt').post('/einvoices?branch=cs1', free).expect(403);
+      const drafts = async () =>
+        (
+          (await as('tn1_cs1').get('/einvoices/summary').expect(200))
+            .body as Json
+        ).draftCount as number;
+      const before = await drafts();
+      const created = (
+        await as('tn1_cs1').post('/einvoices?branch=cs1', free).expect(201)
+      ).body as Json;
+      expect(created).toMatchObject({
+        status: 'DRAFT',
+        orderId: null,
+        order: null,
+      });
+      expect(await drafts()).toBe(before + 1);
+      const id = created.id as number;
+      await as('tn1_cs1')
+        .patch(`/einvoices/${id}`, {
+          amount: 1000000,
+          ...buyer,
+          lines: [filler(909091)],
+        })
+        .expect(200);
+      // A second free draft goes away again (spec §7: edit and delete).
+      const second = (
+        await as('tn1_cs1').post('/einvoices?branch=cs1', free).expect(201)
+      ).body as Json;
+      expect(await drafts()).toBe(before + 2);
+      await as('tn1_cs1')
+        .delete(`/einvoices/${second.id as number}`)
+        .expect(200);
+      expect(await drafts()).toBe(before + 1);
+      const listed = (
+        await as('tn1_cs1').get('/einvoices?free=1&status=DRAFT').expect(200)
+      ).body as Json[];
+      expect(listed.map((e) => e.id)).toEqual([id]);
+      const body = (await issue(id).expect(200)).body as Json;
+      expect(body).toMatchObject({
+        status: 'ISSUED',
+        orderId: null,
+        draft: null,
+      });
+      expect(body.invoiceNumber).toEqual(expect.any(Number));
     });
 
     it('is wiped with the data of its branch', async () => {

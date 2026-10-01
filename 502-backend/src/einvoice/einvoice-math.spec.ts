@@ -1,6 +1,5 @@
 import {
   computedVatOf,
-  defaultVatRate,
   fillerLine,
   issueProblem,
   lineAmountOf,
@@ -83,9 +82,9 @@ describe('einvoice-math', () => {
     expect(issueProblem(1000004, [filler])).toBeNull();
   });
 
-  it('defaults a line to the VAT of the bill when it is a legal rate', () => {
-    expect(defaultVatRate(8)).toBe(8);
-    expect(defaultVatRate(0)).toBe(0);
-    expect(defaultVatRate(7)).toBe(10);
+  it('needs an amount before anything else', () => {
+    expect(issueProblem(0, [])).toBe('Nhập số tiền của hóa đơn');
+    // A line priced 0 adds up to an amount of 0: still nothing to issue.
+    expect(issueProblem(0, [line()])).toBe('Nhập số tiền của hóa đơn');
   });
 });

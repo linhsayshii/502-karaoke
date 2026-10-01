@@ -97,6 +97,8 @@ function dbDay(
   return date;
 }
 
+const INVALID_INVOICE_DATE = 'Ngày hóa đơn không hợp lệ';
+
 function dateRange(
   from?: string,
   to?: string,
@@ -176,6 +178,21 @@ const STALE_SENDING_ERROR = 'Lần gửi bị cắt ngang, hãy đối chiếu t
 // until it is opened (sweepStaleSending), so it is listed and counted with
 // the uncertain ones. (branchId, status, createdAt) index.
 const NOT_SETTLED = { in: [EinvoiceStatus.SENDING, EinvoiceStatus.UNCERTAIN] };
+
+// The invoices of a tab: "Lỗi" is a draft with an error, "Không rõ" also
+// holds sends still in flight or cut off.
+function statusWhere(
+  status: 'DRAFT' | 'ERROR' | 'UNCERTAIN' | 'ISSUED',
+): Prisma.EinvoiceWhereInput {
+  if (status === 'DRAFT') {
+    return { status: EinvoiceStatus.DRAFT, lastError: null };
+  }
+  if (status === 'ERROR') {
+    return { status: EinvoiceStatus.DRAFT, lastError: { not: null } };
+  }
+  if (status === 'UNCERTAIN') return { status: NOT_SETTLED };
+  return { status: EinvoiceStatus.ISSUED };
+}
 
 const twoDigits = (n: number) => String(n).padStart(2, '0');
 // HH:mm in the server's time zone (the venue's, TZ).
@@ -295,19 +312,32 @@ export class EinvoicesService implements OnApplicationBootstrap {
     };
   }
 
-  // Paid bills of a business day for the picker, with what is split already.
+  // The bills of the left column (spec 2026-10-01-hddt-bo-cuc-va-hd-tu-do §4):
+  // the paid ones of a range of business days, or those holding an invoice of
+  // a status. Pending work (drafts, errors, uncertain) is every day and keeps
+  // voided bills, so their uncertain invoices can still be settled.
   async bills(user: AuthUser, query: EinvoiceBillsQuery) {
     const branchId = await this.scope.resolveBranchId(user, query.branch);
-    const where: Prisma.OrderWhereInput = {
-      branchId,
-      status: OrderStatus.COMPLETED,
-    };
+    const today = toDbDate(businessDateOf(new Date()));
+    const days = dateRange(query.from, query.to) ?? { gte: today, lte: today };
+    const where: Prisma.OrderWhereInput = { branchId };
     if (query.billNumber) {
       where.billNumber = billNumberPrefixRange(query.billNumber);
+    }
+    if (query.status) {
+      // Einvoice(branchId, status, createdAt) or (branchId, businessDate).
+      where.einvoices = {
+        some: {
+          branchId,
+          ...statusWhere(query.status),
+          ...(query.status === 'ISSUED' && !query.billNumber
+            ? { businessDate: days }
+            : {}),
+        },
+      };
     } else {
-      where.businessDate = dbDay(
-        query.businessDate ?? businessDateOf(new Date()),
-      );
+      where.status = OrderStatus.COMPLETED;
+      if (!query.billNumber) where.businessDate = days;
     }
     const [orders, total] = await Promise.all([
       this.prisma.order.findMany({
@@ -317,6 +347,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
           billNumber: true,
           finalAmount: true,
           endTime: true,
+          cancelledAt: true,
           room: { select: { name: true } },
         },
         orderBy: { endTime: 'desc' },
@@ -340,6 +371,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
       billNumber: order.billNumber,
       roomName: order.room?.name ?? null,
       endTime: order.endTime,
+      cancelledAt: order.cancelledAt,
       finalAmount: order.finalAmount,
       allocated: Number(byOrder.get(order.id)?._sum.amount ?? 0),
       einvoiceCount: byOrder.get(order.id)?._count._all ?? 0,
@@ -449,10 +481,43 @@ export class EinvoicesService implements OnApplicationBootstrap {
     return toEinvoiceRow(row);
   }
 
-  async create(user: AuthUser, dto: CreateEinvoiceDto) {
+  async create(user: AuthUser, dto: CreateEinvoiceDto, branch?: string) {
+    const written = {
+      createdById: user.id,
+      updatedById: user.id,
+      ...draftData(dto),
+    };
+    if (dto.orderId == null) {
+      // A free invoice (no orderId, or a null one: @IsOptional lets both
+      // through): no bill, the branch of the page, and the business day it
+      // is made on for the list filters (spec
+      // 2026-10-01-hddt-bo-cuc-va-hd-tu-do §4).
+      const branchId = await this.scope.resolveBranchId(user, branch);
+      const created = await this.prisma.einvoice.create({
+        data: {
+          branchId,
+          orderId: null,
+          businessDate: toDbDate(businessDateOf(new Date())),
+          // The calendar day, never the business day (spec §2).
+          invoiceDate: dbDay(
+            dto.invoiceDate ?? toDateString(new Date()),
+            INVALID_INVOICE_DATE,
+          ),
+          ...written,
+        },
+        select: { id: true },
+      });
+      return this.findOne(user, created.id);
+    }
     const order = await this.prisma.order.findUnique({
       where: { id: dto.orderId },
-      select: { id: true, branchId: true, status: true, businessDate: true },
+      select: {
+        id: true,
+        branchId: true,
+        status: true,
+        businessDate: true,
+        endTime: true,
+      },
     });
     if (!order) throw new NotFoundException('Không tìm thấy hóa đơn');
     this.scope.assertBranchAccess(user, order.branchId);
@@ -466,9 +531,13 @@ export class EinvoicesService implements OnApplicationBootstrap {
         branchId: order.branchId,
         orderId: order.id,
         businessDate: order.businessDate,
-        createdById: user.id,
-        updatedById: user.id,
-        ...draftData(dto),
+        // The calendar day the bill was paid: a bill paid at 00:24 belongs
+        // to the business day before but is invoiced on its own date (spec §2).
+        invoiceDate: dbDay(
+          dto.invoiceDate ?? toDateString(order.endTime ?? new Date()),
+          INVALID_INVOICE_DATE,
+        ),
+        ...written,
       },
       select: { id: true },
     });
@@ -479,7 +548,15 @@ export class EinvoicesService implements OnApplicationBootstrap {
     await this.assertAccess(user, id);
     const { count } = await this.prisma.einvoice.updateMany({
       where: { id, status: EinvoiceStatus.DRAFT },
-      data: { ...draftData(dto), lastError: null, updatedById: user.id },
+      data: {
+        ...draftData(dto),
+        // Left out: the date planned stays (spec §4).
+        ...(dto.invoiceDate
+          ? { invoiceDate: dbDay(dto.invoiceDate, INVALID_INVOICE_DATE) }
+          : {}),
+        lastError: null,
+        updatedById: user.id,
+      },
     });
     if (count === 0) throw new ConflictException('Chỉ sửa được hóa đơn nháp');
     return this.findOne(user, id);
@@ -529,7 +606,8 @@ export class EinvoicesService implements OnApplicationBootstrap {
           : 'Hóa đơn đang được gửi',
       );
     }
-    if (row.order.status !== OrderStatus.COMPLETED) {
+    // A free invoice has no bill that could have been voided.
+    if (row.order && row.order.status !== OrderStatus.COMPLETED) {
       throw new BadRequestException('Bill đã hủy, không xuất được hóa đơn');
     }
     const draft = parseDraft(row.draft);
@@ -778,10 +856,10 @@ export class EinvoicesService implements OnApplicationBootstrap {
           status: EinvoiceStatus.DRAFT,
           lastError: null,
           sendingAt: null,
+          // The date stays: on a draft it is the date planned (spec §3).
           sellerTaxCode: null,
           symbolCode: null,
           registerInvoiceId: null,
-          invoiceDate: null,
         };
     let count: number;
     try {
@@ -866,7 +944,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
   // Spec §9.3: not before the newest invoice of the symbol, a future date
   // confirmed, and in the year of the symbol.
   private async assertInvoiceDate(ready: IssueConfig, dto: IssueEinvoiceDto) {
-    dbDay(dto.invoiceDate, 'Ngày hóa đơn không hợp lệ');
+    dbDay(dto.invoiceDate, INVALID_INVOICE_DATE);
     const latest = await this.config.latestIssued(
       ready.taxCode,
       ready.symbolCode,
@@ -982,10 +1060,10 @@ export class EinvoicesService implements OnApplicationBootstrap {
               : outcome.message,
           ),
           sendingAt: null,
+          // The date stays: on a draft it is the date planned (spec §3).
           sellerTaxCode: null,
           symbolCode: null,
           registerInvoiceId: null,
-          invoiceDate: null,
         },
       });
       return;
@@ -1101,18 +1179,11 @@ export class EinvoicesService implements OnApplicationBootstrap {
     query: EinvoiceListQuery,
   ): Promise<Prisma.EinvoiceWhereInput> {
     const branchId = await this.scope.resolveBranchId(user, query.branch);
-    const where: Prisma.EinvoiceWhereInput = { branchId };
-    if (query.status === 'DRAFT') {
-      where.status = EinvoiceStatus.DRAFT;
-      where.lastError = null;
-    } else if (query.status === 'ERROR') {
-      where.status = EinvoiceStatus.DRAFT;
-      where.lastError = { not: null };
-    } else if (query.status === 'UNCERTAIN') {
-      where.status = NOT_SETTLED;
-    } else if (query.status) {
-      where.status = query.status;
-    }
+    const where: Prisma.EinvoiceWhereInput = {
+      branchId,
+      ...(query.status ? statusWhere(query.status) : {}),
+    };
+    if (query.free) where.orderId = null;
     // Pending work (drafts, errors, uncertain) is listed whatever its day.
     const dated = !query.status || query.status === 'ISSUED';
     if (query.billNumber) {

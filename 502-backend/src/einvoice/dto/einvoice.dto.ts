@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
@@ -67,11 +67,22 @@ export class EinvoiceLineDto {
 
 // The whole draft: PATCH replaces it (like the items of an order).
 export class EinvoiceDraftDto {
-  @ApiProperty({ description: 'Số tiền đã gồm VAT, đồng' })
+  @ApiProperty({
+    description: 'Số tiền đã gồm VAT, đồng; nháp được để 0, xuất thì cần ≥ 1',
+  })
   @IsInt()
-  @Min(1)
+  @Min(0)
   @Max(100_000_000_000)
   amount: number;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Ngày hóa đơn dự kiến YYYY-MM-DD (ngày lịch, không phải ngày kinh doanh); bỏ trống khi sửa là giữ nguyên',
+  })
+  @IsOptional()
+  @Matches(DATE_RE, { message: DATE_MESSAGE })
+  invoiceDate?: string;
 
   @ApiProperty({ required: false, nullable: true })
   @IsOptional()
@@ -109,9 +120,13 @@ export class EinvoiceDraftDto {
 }
 
 export class CreateEinvoiceDto extends EinvoiceDraftDto {
-  @ApiProperty({ description: 'Bill đã thanh toán' })
+  @ApiProperty({
+    required: false,
+    description: 'Bill đã thanh toán; bỏ trống là hóa đơn không theo bill',
+  })
+  @IsOptional()
   @IsInt()
-  orderId: number;
+  orderId?: number | null;
 }
 
 export class EinvoiceListQuery {
@@ -145,6 +160,15 @@ export class EinvoiceListQuery {
   @IsOptional()
   @Matches(BILL_NUMBER_RE, { message: 'Số bill chỉ gồm chữ số' })
   billNumber?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'Chỉ hóa đơn không theo bill (1 / true)',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true' || value === '1')
+  @IsBoolean()
+  free?: boolean;
 }
 
 export class EinvoiceBillsQuery {
@@ -155,13 +179,30 @@ export class EinvoiceBillsQuery {
 
   @ApiProperty({
     required: false,
-    description: 'Ngày kinh doanh; mặc định hôm nay',
+    enum: ['DRAFT', 'ERROR', 'UNCERTAIN', 'ISSUED'],
+    description: 'Chỉ bill có hóa đơn ở trạng thái này',
+  })
+  @IsOptional()
+  @IsIn(['DRAFT', 'ERROR', 'UNCERTAIN', 'ISSUED'])
+  status?: 'DRAFT' | 'ERROR' | 'UNCERTAIN' | 'ISSUED';
+
+  @ApiProperty({
+    required: false,
+    description: 'Từ ngày kinh doanh; bỏ trống cả hai là hôm nay',
   })
   @IsOptional()
   @Matches(DATE_RE, { message: DATE_MESSAGE })
-  businessDate?: string;
+  from?: string;
 
-  @ApiProperty({ required: false })
+  @ApiProperty({ required: false, description: 'Đến ngày kinh doanh' })
+  @IsOptional()
+  @Matches(DATE_RE, { message: DATE_MESSAGE })
+  to?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'Tìm theo đầu số bill, mọi ngày',
+  })
   @IsOptional()
   @Matches(BILL_NUMBER_RE, { message: 'Số bill chỉ gồm chữ số' })
   billNumber?: string;

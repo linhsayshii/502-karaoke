@@ -11,6 +11,7 @@ import { toDateString } from '../src/common/dates';
 import { EinvoiceConfigService } from '../src/einvoice/einvoice-config.service';
 import {
   EinvoicesService,
+  RESEND_WAIT_MS,
   STALE_SENDING_MS,
 } from '../src/einvoice/einvoices.service';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -789,12 +790,12 @@ describe('E-invoices (e2e)', () => {
       });
     });
 
-    // Ages the lost send of an uncertain invoice past STALE_SENDING_MS, as
+    // Ages the lost send of an uncertain invoice past RESEND_WAIT_MS, as
     // if the manual check came minutes later.
     const sentLongAgo = (id: number) =>
       app.get(PrismaService).einvoice.update({
         where: { id },
-        data: { sendingAt: new Date(Date.now() - STALE_SENDING_MS - 1000) },
+        data: { sendingAt: new Date(Date.now() - RESEND_WAIT_MS - 1000) },
       });
 
     // A lost answer: the invoice exists on Minvoice under K502-<id>.
@@ -936,7 +937,7 @@ describe('E-invoices (e2e)', () => {
         // Well past it, an empty list is trusted: sent once more.
         await prisma.einvoice.update({
           where: { id },
-          data: { sendingAt: new Date(Date.now() - STALE_SENDING_MS - 1000) },
+          data: { sendingAt: new Date(Date.now() - RESEND_WAIT_MS - 1000) },
         });
         const body = (await issue(id).expect(200)).body as Json;
         const created = fake.invoices.at(-1)!;

@@ -39,7 +39,7 @@ export const einvoiceDetailSelect = {
   draft: true,
   sellerTaxCode: true,
   minvoiceId: true,
-  // When the last send started: "Chưa có — gửi lại" waits STALE_SENDING_MS.
+  // When the last send started: "Chưa có — gửi lại" waits RESEND_WAIT_MS.
   sendingAt: true,
   updatedAt: true,
   updatedBy: staffRef,

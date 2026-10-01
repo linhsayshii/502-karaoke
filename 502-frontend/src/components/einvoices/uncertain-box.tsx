@@ -12,14 +12,14 @@ import { Spinner } from "@/components/ui/spinner";
 import { useNotify } from "@/hooks/use-notify";
 import { useNow } from "@/hooks/use-now";
 import api, { isBadRequest, isSessionEnded } from "@/lib/api";
-import { STALE_SENDING_MS, UNKNOWN_RESULT_MESSAGE } from "@/lib/einvoice";
+import { RESEND_WAIT_MS, UNKNOWN_RESULT_MESSAGE } from "@/lib/einvoice";
 import { formatDate, formatDateTime, formatMoney, formatTime, toDateInput } from "@/lib/format";
 import { can } from "@/lib/permissions";
 import type { EinvoiceConfigView, EinvoiceDetail } from "@/lib/types";
 
 // "Không rõ" (spec §9.2): the send got no answer. The chain manager has
 // Minvoice searched again (Kiểm tra lại), or looks there and either types the
-// number found or sends the invoice back to draft, not before STALE_SENDING_MS
+// number found or sends the invoice back to draft, not before RESEND_WAIT_MS
 // after the lost send (Minvoice may still be saving it; the server refuses it
 // too). Rendered inside the panel's @container/einvoice.
 export function UncertainBox({
@@ -49,7 +49,7 @@ export function UncertainBox({
   // As on the server: from the start of the lost send (its last write when
   // that is unknown), rounded up to the minute its message names.
   const sentAt = new Date(einvoice.sendingAt ?? einvoice.updatedAt);
-  const backToDraftFrom = new Date(Math.ceil((sentAt.getTime() + STALE_SENDING_MS) / 60_000) * 60_000);
+  const backToDraftFrom = new Date(Math.ceil((sentAt.getTime() + RESEND_WAIT_MS) / 60_000) * 60_000);
   const now = useNow(10_000);
   const tooRecent = now < backToDraftFrom;
 

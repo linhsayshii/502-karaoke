@@ -69,7 +69,7 @@ export const SEARCH_PARAM = 'orderNumber';
 // whose invoice was created is already recognised without this flag (the row
 // shows our reference, `markerSeen`), so the flag only gates the automatic
 // resend after "none". That resend stays a human decision ("Chưa có — gửi
-// lại", allowed STALE_SENDING_MS after the send): a wrong guess would post
+// lại", allowed RESEND_WAIT_MS after the send): a wrong guess would post
 // duplicate tax invoices, and turning it on would also need new UI copy and
 // puts search + send close to the 95 s request budget (docs/resource-rules.md).
 export const MARKER_SEARCH_CONFIRMED = false;

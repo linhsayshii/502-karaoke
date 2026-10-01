@@ -172,6 +172,10 @@ function sentHeader(ready: IssueConfig, dto: IssueEinvoiceDto) {
 // restart (e.g. saving its outcome failed) and goes to the "Không rõ" flow
 // when it is read.
 export const STALE_SENDING_MS = 3 * 60_000;
+// How long after a lost send it may go back to draft ("Chưa có — gửi lại"),
+// or be resent after a search that found nothing: Minvoice may still be
+// saving it. Apart from STALE_SENDING_MS, which must outlast our own sends.
+export const RESEND_WAIT_MS = 60_000;
 const STALE_SENDING_ERROR = 'Lần gửi bị cắt ngang, hãy đối chiếu trên Minvoice';
 
 // Pending "Không rõ" work: a SENDING row whose send was cut off stays SENDING
@@ -201,7 +205,7 @@ const hhmm = (date: Date) =>
 
 // Why an uncertain send may not go back to draft yet, or null. Going back to
 // draft leads to a new POST, and Minvoice may still be saving the lost one
-// (our timeout is not its own) until STALE_SENDING_MS after it started.
+// (our timeout is not its own) until RESEND_WAIT_MS after it started.
 // Every path to UNCERTAIN keeps sendingAt (the lock stamps it, the outcome
 // and the sweeps keep it, a recheck puts the lost send's back); a row without
 // it is timed from its last write, which never comes before its last send.
@@ -210,10 +214,10 @@ function tooRecent(
   now = Date.now(),
 ): string | null {
   const since = row.sendingAt ?? row.updatedAt;
-  if (now - since.getTime() >= STALE_SENDING_MS) return null;
+  if (now - since.getTime() >= RESEND_WAIT_MS) return null;
   // Rounded up to the minute, so the time named is surely late enough.
   const allowed = new Date(
-    Math.ceil((since.getTime() + STALE_SENDING_MS) / 60_000) * 60_000,
+    Math.ceil((since.getTime() + RESEND_WAIT_MS) / 60_000) * 60_000,
   );
   return row.sendingAt
     ? `Lần gửi lúc ${hhmm(since)} còn quá mới, đợi đến ${hhmm(allowed)} rồi kiểm tra lại trên Minvoice`
@@ -648,7 +652,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
   // with a number none of our rows holds -> issued with that number; nothing
   // found -> sent again, only when MARKER_SEARCH_CONFIRMED is on (it is off:
   // that resend is the human's "Chưa có — gửi lại") and the lost send started
-  // at least STALE_SENDING_MS ago. Anything else leaves it uncertain, draft
+  // at least RESEND_WAIT_MS ago. Anything else leaves it uncertain, draft
   // kept, for a manual check.
   private async recheck(
     user: AuthUser,
@@ -761,7 +765,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
         `Chưa tìm thấy hóa đơn ${marker} trên Minvoice và không rõ lúc gửi trước; ${MANUAL_CHECK}`,
       );
     }
-    if (Date.now() - row.sendingAt.getTime() < STALE_SENDING_MS) {
+    if (Date.now() - row.sendingAt.getTime() < RESEND_WAIT_MS) {
       return uncertain(
         `Chưa tìm thấy hóa đơn ${marker} trên Minvoice nhưng lần gửi trước còn quá mới; kiểm tra lại sau vài phút, hoặc ${MANUAL_CHECK}`,
       );
@@ -840,7 +844,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
     // "Chưa có — gửi lại": a draft may be posted again.
     const recent = dto.found ? null : tooRecent(row);
     if (recent) throw new ConflictException(recent);
-    const cutoff = new Date(Date.now() - STALE_SENDING_MS);
+    const cutoff = new Date(Date.now() - RESEND_WAIT_MS);
     const data: Prisma.EinvoiceUncheckedUpdateManyInput = dto.found
       ? {
           status: EinvoiceStatus.ISSUED,

@@ -4,7 +4,7 @@ import type { AuthUser } from '../auth/auth-user';
 import { businessDateOf, toDateString, toDbDate } from '../common/dates';
 import type { IssueConfig } from './einvoice-config.service';
 import type { SendOutcome } from './einvoice-sender';
-import { EinvoicesService, STALE_SENDING_MS } from './einvoices.service';
+import { EinvoicesService, RESEND_WAIT_MS } from './einvoices.service';
 import type { MarkerSearch } from './minvoice/minvoice-client';
 
 const yy = String(new Date().getFullYear() % 100).padStart(2, '0');
@@ -219,7 +219,7 @@ describe('EinvoicesService.issue of an uncertain invoice', () => {
   const sentSymbol = `1C${yy}OLD`;
   const sentDate = `${new Date().getFullYear()}-01-02`;
   // When the lost send started: long enough ago for a resend by default.
-  const lostAt = new Date(Date.now() - STALE_SENDING_MS - 60_000);
+  const lostAt = new Date(Date.now() - RESEND_WAIT_MS - 60_000);
   const sent = {
     status: 'UNCERTAIN',
     sellerTaxCode: ready.taxCode,
@@ -435,7 +435,7 @@ describe('EinvoicesService.issue of an uncertain invoice', () => {
   });
 
   // Minvoice may still be saving a send whose answer was lost: an empty list
-  // proves nothing until that send is well past (STALE_SENDING_MS).
+  // proves nothing until that send is well past (RESEND_WAIT_MS).
   it.each<[string, Date | null, RegExp]>([
     [
       'started moments ago',
@@ -540,7 +540,7 @@ describe('EinvoicesService.issue after an unexpected error', () => {
 
 // Spec §9.2: "Chưa có — gửi lại" sends the invoice back to draft, from where
 // it may be posted again. Minvoice may still be saving the lost request (our
-// timeout is not its own), so not before STALE_SENDING_MS after that send.
+// timeout is not its own), so not before RESEND_WAIT_MS after that send.
 describe('EinvoicesService.resolve', () => {
   afterEach(() => jest.restoreAllMocks());
 
@@ -569,7 +569,7 @@ describe('EinvoicesService.resolve', () => {
       .catch((e: unknown) => e);
     // The minute from which it may be done, rounded up.
     const allowed = new Date(
-      Math.ceil((sendingAt.getTime() + STALE_SENDING_MS) / 60_000) * 60_000,
+      Math.ceil((sendingAt.getTime() + RESEND_WAIT_MS) / 60_000) * 60_000,
     );
     expect(error).toMatchObject({
       status: 409,
@@ -579,7 +579,7 @@ describe('EinvoicesService.resolve', () => {
   });
 
   it('sends back to draft once the send is old enough, checked in the write', async () => {
-    const sendingAt = new Date(Date.now() - STALE_SENDING_MS - 1000);
+    const sendingAt = new Date(Date.now() - RESEND_WAIT_MS - 1000);
     const { service, einvoice } = resolving({ sendingAt });
     einvoice.findUnique.mockResolvedValueOnce({
       id: 12,
@@ -606,7 +606,7 @@ describe('EinvoicesService.resolve', () => {
   });
 
   it('goes by the last write when the time of the send is unknown', async () => {
-    const updatedAt = new Date(Date.now() - 60_000);
+    const updatedAt = new Date(Date.now() - 30_000);
     const { service, einvoice } = resolving({ sendingAt: null, updatedAt });
     await expect(
       service.resolve(user, 12, { found: false }),
@@ -638,7 +638,7 @@ describe('EinvoicesService.resolve', () => {
 
   it('explains a send that became recent between the read and the write', async () => {
     const { service, einvoice } = resolving({
-      sendingAt: new Date(Date.now() - STALE_SENDING_MS - 1000),
+      sendingAt: new Date(Date.now() - RESEND_WAIT_MS - 1000),
     });
     einvoice.updateMany.mockResolvedValueOnce({ count: 0 });
     const sendingAt = new Date();

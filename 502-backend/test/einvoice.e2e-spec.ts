@@ -1199,6 +1199,15 @@ describe('E-invoices (e2e)', () => {
           lines: [filler(909091)],
         })
         .expect(200);
+      // A second free draft goes away again (spec §7: edit and delete).
+      const second = (
+        await as('tn1_cs1').post('/einvoices?branch=cs1', free).expect(201)
+      ).body as Json;
+      expect(await drafts()).toBe(before + 2);
+      await as('tn1_cs1')
+        .delete(`/einvoices/${second.id as number}`)
+        .expect(200);
+      expect(await drafts()).toBe(before + 1);
       const listed = (
         await as('tn1_cs1').get('/einvoices?free=1&status=DRAFT').expect(200)
       ).body as Json[];

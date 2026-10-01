@@ -122,6 +122,7 @@ Spec này sửa spec gốc `2026-10-01-hoa-don-dien-tu-design.md`. Những gì k
 - Gọi ngay `POST /einvoices` với số tiền mặc định (§2), `lines: []` và không có ngày (server tự điền).
 - Nút + bị tắt **chỉ trong lúc** request đang chạy, để bấm đúp không tạo hai nháp. Bấm lại sau đó là có thêm nháp nữa.
 - + của bill đang đóng thì mở bill đó ra.
+  - Khi panel phải có thay đổi chưa lưu, bấm + của một bill chưa mở trước hết hỏi "Bỏ thay đổi chưa lưu?", vì một bill đang mở nuôi cả hai cột. + của bill đang mở thì không bao giờ hỏi.
 - Sau khi tạo:
   - dòng mới hiện ra và con trỏ được đặt vào ô số tiền của nó;
   - nếu panel phải không có thay đổi chưa lưu thì dòng mới được chọn luôn; nếu có thì panel giữ nguyên, không hỏi gì (bấm vào dòng mới thì mới hỏi như mọi lần đổi);

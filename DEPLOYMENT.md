@@ -578,9 +578,10 @@ Sau khi cập nhật:
   - Cột phải để điền ngày hóa đơn, người mua, dòng hàng và xuất.
   - Mọi dòng hàng mới có VAT 10%.
 - **Ngày hóa đơn** giờ lưu cùng nháp. Mặc định là ngày (theo lịch, không phải ngày kinh doanh) bill được thanh toán.
-  - Nháp tạo trước bản cập nhật chưa có ngày: trang hiện ngày thanh toán bill và ghi lại khi lưu nháp.
+  - Nháp tạo trước bản cập nhật chưa có ngày: trang chỉ hiện ngày thanh toán bill, chưa ghi vào database. Ngày được ghi ở lần **Lưu nháp** tiếp theo có lưu một thay đổi (lưu số tiền ngay trên dòng hóa đơn thì chưa ghi). **Xuất** luôn gửi đúng ngày đang hiện trên trang, nên hóa đơn mang ngày đó dù nháp chưa được lưu lại.
   - Bấm **Xuất** khi ngày hóa đơn khác hôm nay thì trang hỏi có đổi về hôm nay không (**Giữ** ngày cũ hoặc **Đổi về hôm nay**).
   - Một lần xuất bị Minvoice từ chối thì nháp giữ ngày đã chọn.
+- **Rollback cẩn thận:** khi đã có hóa đơn không theo bill (cột `orderId` để trống), quay lại bản backend cũ làm trang Hóa đơn điện tử báo lỗi 500, vì code cũ coi hóa đơn nào cũng có bill. Trước khi rollback hãy xóa các hóa đơn đó (nháp xóa được trên trang; hóa đơn đã xuất thì không), hoặc ngừng dùng trang Hóa đơn điện tử cho tới khi lên lại bản mới.
 
 ## 7. Xử lý sự cố
 

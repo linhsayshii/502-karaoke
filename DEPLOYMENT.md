@@ -212,7 +212,7 @@ Rồi trong khối `server` của `/etc/nginx/sites-available/karaoke502` (khố
    - Bot Fight Mode, Under Attack Mode hay rule Challenge áp vào `/api/*`: app gọi API ngầm nên không vượt được thử thách, người dùng sẽ thấy lỗi tải dữ liệu.
    - Cache Rule "Cache Everything" cho `/api/*` (số liệu phải luôn mới). File tĩnh `/_next/static/*` Cloudflare tự cache, vậy là tốt.
    - Cloudflare Web Analytics tự chèn script: CSP của app chặn nó (chỉ báo lỗi trong console, không hỏng gì); muốn dùng thì phải thêm vào CSP trong `next.config.ts`.
-6. **Giới hạn của Cloudflare:** request quá 100 giây bị cắt (lỗi 524); báo cáo chậm nhất đo được ~40 giây. Upload tối đa 100 MB (gói Free); nhập Excel tối đa 5 MB.
+6. **Giới hạn thời gian của một request:** Cloudflare cắt request quá 100 giây (lỗi 524). Trước nó, frontend (Next.js) chuyển tiếp `/api` vào backend và tự cắt ở 95 giây (`experimental.proxyTimeout` trong `502-frontend/next.config.ts`; mặc định của Next là 30 giây, khi đó mọi request chậm hơn nhận lỗi 500 "Internal Server Error" dù backend vẫn chạy tiếp). Báo cáo chậm nhất đo được ~40 giây, xuất hóa đơn điện tử xấu nhất ~80 giây: đều dưới 95 giây. Upload tối đa 100 MB (gói Free); nhập Excel tối đa 5 MB.
 7. **WebSocket** (`wss://<tên miền>/api/ws`): Cloudflare chuyển tiếp WebSocket mặc định (Network → WebSockets: On), và frontend chuyển tiếp request upgrade `/api/*` vào backend như request thường (đã chạy thử qua image production trên máy dev, giữ 10 phút với ping 30 giây; phần Cloudflare chưa thử được ở máy dev nên phải kiểm tra sau khi triển khai).
    - Kiểm tra: mở app bằng tài khoản thu ngân, trong DevTools → Network → WS phải thấy `/api/ws` trạng thái `101` và các khung `ping/pong` mỗi 30 giây.
    - Nếu không có (`ws` bị đóng liên tục): thêm trong tunnel một Public Hostname thứ hai cùng tên miền với **Path** `api/ws` trỏ `HTTP` `localhost:4000` và mở `ports: - "127.0.0.1:4000:4000"` cho `backend` trong `docker-compose.yml`; ứng dụng vẫn chạy bằng polling trong lúc đó.
@@ -320,7 +320,7 @@ docker compose logs --tail=20 backend       # "No pending migrations to apply"
 
 Khôi phục xong, kiểm tra hệ thống rồi mới xoá `data/postgres.old`.
 
-Máy chủ hỏng hẳn: cài lại theo mục 2, tải bản sao lưu mới nhất từ WebDAV về thư mục `backups/` (qua giao diện web của dịch vụ WebDAV, hoặc `curl -u '<tài khoản>' -o backups/<tên file> '<WEBDAV_URL>/<tên file>'`), rồi khôi phục như trên.
+Máy chủ hỏng hẳn: cài lại theo mục 2, tải bản sao lưu mới nhất từ WebDAV về thư mục `backups/` (qua giao diện web của dịch vụ WebDAV, hoặc `curl -u '<tài khoản>' -o backups/<tên file> '<WEBDAV_URL>/<tên file>'`), rồi khôi phục như trên. Khi tạo lại `.env`, dùng lại **đúng** `EINVOICE_SECRET` đã sao lưu (cùng `JWT_SECRET`, `POSTGRES_PASSWORD`…), đừng tạo khóa mới: khóa khác thì mật khẩu Minvoice trong bản sao lưu không giải mã được, mọi cơ sở phải đăng nhập Minvoice lại.
 
 Bản sao lưu tạo bằng `pg_dump` của PostgreSQL 17, nên phải khôi phục vào PostgreSQL 17 trở lên (service `db` dùng `postgres:17-alpine`). Nếu nâng `db` lên bản mới hơn, đổi dòng `FROM` trong `backup/Dockerfile` theo cùng bản.
 
@@ -542,14 +542,17 @@ Sau khi cập nhật:
 1. **Trước khi cập nhật**, thêm khóa mã hóa vào `.env` gốc (cạnh `docker-compose.yml`):
 
    ```bash
-   echo "EINVOICE_SECRET=$(openssl rand -base64 32)" >> .env
+   printf '\nEINVOICE_SECRET=%s\n' "$(openssl rand -base64 32)" >> .env
    ```
+
+   (`printf` thêm một dòng trống trước, nên khóa không dính vào dòng cuối của `.env` khi dòng đó thiếu ký tự xuống dòng.)
 
    (Nếu `.env` đã có dòng `EINVOICE_SECRET=` để trống, vì sao chép từ `.env.docker.example` mới, thì điền giá trị vào dòng đó thay vì thêm dòng.)
 
    Thiếu biến này thì `docker compose up` báo lỗi và dừng; backend production cũng không khởi động nếu khóa không phải 32 byte mã hóa base64 (`docker compose logs backend`). Khóa dùng để mã hóa mật khẩu và phiên Minvoice lưu trong database.
    - **Không đổi khóa sau này.** Đổi khóa thì mọi cơ sở phải đăng nhập Minvoice lại (hóa đơn đã xuất không mất).
    - Sao lưu khóa cùng chỗ với các bí mật khác (`JWT_SECRET`, `POSTGRES_PASSWORD`…). Bản sao lưu database mà không có khóa thì không đọc được mật khẩu Minvoice, phải đăng nhập lại.
+   - **Chỉ chạy một backend trên database production.** Không bật backend thứ hai trỏ vào database này, kể cả để thử hay kiểm tra migration: khi khởi động, backend chuyển mọi hóa đơn đang gửi (`SENDING`) thành "Không rõ", và mỗi backend chỉ biết các lần gửi của chính nó, nên backend thứ hai làm hỏng lần gửi đang chạy của backend kia.
 2. **Migration** tự chạy khi backend khởi động: thêm cột `Branch.taxCode` và hai bảng `EinvoiceConfig`, `Einvoice` cùng các chỉ mục. Không đụng dữ liệu cũ, chạy trong tích tắc.
 3. **Máy chủ phải gọi ra được** (HTTPS ra ngoài; Cloudflare Tunnel không ảnh hưởng chiều ra) ba địa chỉ:
    - `https://<MST>.minvoice.net`: tạo hóa đơn. Mỗi cơ sở một tên miền con theo MST của nó.
@@ -563,7 +566,7 @@ Sau khi cập nhật:
    - Thu ngân và quản lý cơ sở tạo và lưu nháp; chỉ **quản lý hệ thống** xuất lên Minvoice, đối chiếu hóa đơn "Không rõ" và sửa số. HĐQT chỉ xem.
 5. **Vận hành:**
    - Hóa đơn điện tử đi qua API không chính thức của web Minvoice. Nếu Minvoice đổi giao diện web, việc xuất có thể hỏng: lỗi hiện trên hóa đơn (trạng thái "Lỗi") và nháp không mất.
-   - Hóa đơn "Không rõ" nghĩa là không biết Minvoice đã tạo hay chưa (mất kết nối sau khi gửi, hoặc backend khởi động lại khi đang gửi). Hệ thống không bao giờ tự gửi lại: quản lý hệ thống mở Minvoice xem rồi chọn **Đã có — nhập số** hoặc **Chưa có — gửi lại**. Nút **Kiểm tra lại** tìm hóa đơn theo mã đối chiếu `K502-<số>` trên Minvoice: chỉ tự ghi số khi chính dòng hóa đơn tìm được hiện đúng mã đó; thấy một hóa đơn mà dòng không có mã thì chỉ gợi ý số trong thông báo. Việc tự gửi lại khi không thấy gì đang tắt (`MARKER_SEARCH_CONFIRMED = false` trong `minvoice-client.ts`) cho đến khi kiểm tra với Minvoice thật.
+   - Hóa đơn "Không rõ" nghĩa là không biết Minvoice đã tạo hay chưa (mất kết nối sau khi gửi, hoặc backend khởi động lại khi đang gửi). Hệ thống không bao giờ tự gửi lại: quản lý hệ thống mở Minvoice xem rồi chọn **Đã có — nhập số** hoặc **Chưa có — gửi lại**. **Chưa có — gửi lại** chỉ bấm được từ 3 phút sau lần gửi (Minvoice có thể vẫn đang lưu lần gửi đó); trước giờ đó server cũng từ chối và nói giờ được kiểm tra lại. Nút **Kiểm tra lại** tìm hóa đơn theo mã đối chiếu `K502-<số>` trên Minvoice: chỉ tự ghi số khi chính dòng hóa đơn tìm được hiện đúng mã đó; thấy một hóa đơn mà dòng không có mã thì chỉ gợi ý số trong thông báo. Việc tự gửi lại khi không thấy gì đang tắt (`MARKER_SEARCH_CONFIRMED = false` trong `minvoice-client.ts`) cho đến khi kiểm tra với Minvoice thật.
    - "Xóa dữ liệu" của HĐQT giờ xóa cả hóa đơn điện tử của phạm vi đã chọn trong database (không xóa gì trên Minvoice); cấu hình đăng nhập Minvoice của cơ sở được giữ lại.
 
 ## 7. Xử lý sự cố
@@ -581,6 +584,7 @@ Sau khi cập nhật:
 | Cloudflare báo lỗi `1033` | Tunnel không kết nối: `cloudflared` chưa chạy trên máy chủ (`sudo systemctl status cloudflared`). |
 | Cloudflare báo `502 Bad Gateway` | `cloudflared` chạy nhưng không gọi được `localhost:3000`: container `frontend` chưa chạy, hoặc URL của Public Hostname sai cổng `APP_PORT`, hoặc `cloudflared` chạy trong Docker mà không dùng `--network host`. |
 | Cloudflare báo `524` | Request chạy quá 100 giây, thường là tải báo cáo nhiều năm lúc máy chủ quá tải. Chọn khoảng ngắn hơn hoặc thử lại sau. |
+| Thao tác chậm báo `500 Internal Server Error`, log frontend có `Failed to proxy … socket hang up` | Request chạy quá 95 giây (`experimental.proxyTimeout` trong `502-frontend/next.config.ts`; bản build thiếu dòng này thì cắt ở 30 giây). Backend vẫn chạy tiếp: với xuất hóa đơn điện tử, mở lại hóa đơn để xem trạng thái thật trước khi làm gì thêm. |
 | `port is already allocated` | Cổng `APP_PORT` đang bị chương trình khác dùng (ví dụ frontend cũ chạy bằng PM2). |
 | Doanh thu rơi sai ngày | Ngày kinh doanh (06:00 → 06:00 hôm sau, giờ mở cửa 11:30 → 06:00) tính theo giờ container, đã cố định `Asia/Ho_Chi_Minh` trong `docker-compose.yml`. Đừng xoá biến `TZ`. |
 | Doanh thu và phiếu thu bán hàng trong Sổ quỹ lệch nhau | Chỉ xảy ra với hóa đơn thanh toán trước bản cập nhật 6.6 (chưa có phiếu thu tự động), hoặc khi cơ sở vẫn tự lập phiếu thu doanh thu bằng tay. |

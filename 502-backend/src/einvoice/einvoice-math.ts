@@ -84,8 +84,3 @@ export function fillerLine(
   return { ...filler, unitPrice: base, vatAmount: missing - base };
 }
 
-export function defaultVatRate(taxPercent: number): VatRate {
-  return (VAT_RATES as readonly number[]).includes(taxPercent)
-    ? (taxPercent as VatRate)
-    : 10;
-}

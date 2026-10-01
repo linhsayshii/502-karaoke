@@ -5,78 +5,78 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Field, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DecimalInput, MoneyInput } from "@/components/einvoices/number-input";
-import { fillerLine, lineAmountOf, MAX_LINES, VAT_RATES } from "@/lib/einvoice";
+import { EINVOICE_VAT_RATE, fillerLine, lineAmountOf, MAX_LINES } from "@/lib/einvoice";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { EinvoiceBillDetail, EinvoiceLine, VatRate } from "@/lib/types";
+import type { EinvoiceBillDetail, EinvoiceLine } from "@/lib/types";
 
 // One row per line from the panel's @container/einvoice width up (fixed
 // columns, so the rows line up under the header); below it each line is a
 // card of two columns with the labels shown.
 const LINE_GRID =
-  "grid-cols-2 gap-2 @2xl/einvoice:grid-cols-[minmax(0,1fr)_4rem_4.5rem_7rem_6.5rem_6.5rem_2rem] @2xl/einvoice:items-center";
+  "grid-cols-2 gap-2 @2xl/einvoice:grid-cols-[minmax(0,1fr)_4rem_4.5rem_7rem_8rem_2rem] @2xl/einvoice:items-center";
 const NARROW_LABEL = "text-xs font-normal text-muted-foreground @2xl/einvoice:hidden";
 
-// Dòng hàng of a small invoice (spec §10.2): typed freely, taken from the
-// bill, or a filler line that brings the total to the amount.
+// Dòng hàng of a small invoice: typed freely, taken from the bill, or a filler
+// line that brings the total to the amount. Every new line carries
+// EINVOICE_VAT_RATE; there is no rate to choose (spec
+// 2026-10-01-hddt-bo-cuc-va-hd-tu-do §5.4).
 export function EinvoiceLines({
   lines,
   bill,
-  defaultRate,
   missing,
   disabled,
   onChange,
 }: {
   lines: EinvoiceLine[];
-  bill: EinvoiceBillDetail["order"];
-  defaultRate: VatRate;
+  // Null for a free invoice: nothing to take from.
+  bill: EinvoiceBillDetail["order"] | null;
   missing: number;
   disabled: boolean;
   onChange: (lines: EinvoiceLine[]) => void;
 }) {
   const full = lines.length >= MAX_LINES;
 
-  // A change of price, quantity or rate drops the fixed VAT of a filler line.
+  // A change of price or quantity drops the fixed VAT of a filler line.
   const set = (index: number, patch: Partial<EinvoiceLine>) =>
     onChange(
       lines.map((line, i) => {
         if (i !== index) return line;
         const next = { ...line, ...patch };
-        if (patch.unitPrice !== undefined || patch.quantity !== undefined || patch.vatRate !== undefined) {
-          delete next.vatAmount;
-        }
+        if (patch.unitPrice !== undefined || patch.quantity !== undefined) delete next.vatAmount;
         return next;
       }),
     );
 
-  const fromBill: { label: string; line: EinvoiceLine }[] = [
-    ...(bill.billedHours > 0 && Number(bill.pricePerHour) > 0
-      ? [
-          {
-            label: `Tiền giờ ${bill.billedHours.toLocaleString("vi-VN")} giờ × ${formatMoney(bill.pricePerHour)}`,
-            line: {
-              name: `Tiền giờ phòng ${bill.room?.name ?? ""}`.trim(),
-              unit: "Giờ",
-              quantity: bill.billedHours,
-              unitPrice: Math.round(Number(bill.pricePerHour)),
-              vatRate: defaultRate,
-            },
+  const fromBill: { label: string; line: EinvoiceLine }[] = !bill
+    ? []
+    : [
+        ...(bill.billedHours > 0 && Number(bill.pricePerHour) > 0
+          ? [
+              {
+                label: `Tiền giờ ${bill.billedHours.toLocaleString("vi-VN")} giờ × ${formatMoney(bill.pricePerHour)}`,
+                line: {
+                  name: `Tiền giờ phòng ${bill.room?.name ?? ""}`.trim(),
+                  unit: "Giờ",
+                  quantity: bill.billedHours,
+                  unitPrice: Math.round(Number(bill.pricePerHour)),
+                  vatRate: EINVOICE_VAT_RATE,
+                },
+              },
+            ]
+          : []),
+        ...bill.items.map((item) => ({
+          label: `${item.name} × ${item.quantity} (${formatMoney(item.price)})`,
+          line: {
+            name: item.name,
+            unit: item.unit,
+            quantity: item.quantity,
+            unitPrice: Math.round(Number(item.price)),
+            vatRate: EINVOICE_VAT_RATE,
           },
-        ]
-      : []),
-    ...bill.items.map((item) => ({
-      label: `${item.name} × ${item.quantity} (${formatMoney(item.price)})`,
-      line: {
-        name: item.name,
-        unit: item.unit,
-        quantity: item.quantity,
-        unitPrice: Math.round(Number(item.price)),
-        vatRate: defaultRate,
-      },
-    })),
-  ];
+        })),
+      ];
 
   return (
     <FieldSet className="min-w-0 gap-3">
@@ -87,36 +87,40 @@ export function EinvoiceLines({
           size="sm"
           variant="outline"
           disabled={disabled || full}
-          onClick={() => onChange([...lines, { name: "", unit: "", quantity: 1, unitPrice: 0, vatRate: defaultRate }])}
+          onClick={() =>
+            onChange([...lines, { name: "", unit: "", quantity: 1, unitPrice: 0, vatRate: EINVOICE_VAT_RATE }])
+          }
         >
           <PlusIcon data-icon="inline-start" />
           Thêm dòng
         </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button type="button" size="sm" variant="outline" disabled={disabled || full || fromBill.length === 0}>
-              <ListPlusIcon data-icon="inline-start" />
-              Lấy món từ bill
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="start"
-            className="max-h-80 max-w-(--radix-dropdown-menu-content-available-width) overflow-y-auto"
-          >
-            {fromBill.map((entry, index) => (
-              <DropdownMenuItem key={index} onSelect={() => onChange([...lines, entry.line])}>
-                {entry.label}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {bill && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" size="sm" variant="outline" disabled={disabled || full || fromBill.length === 0}>
+                <ListPlusIcon data-icon="inline-start" />
+                Lấy món từ bill
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              className="max-h-80 max-w-(--radix-dropdown-menu-content-available-width) overflow-y-auto"
+            >
+              {fromBill.map((entry, index) => (
+                <DropdownMenuItem key={index} onSelect={() => onChange([...lines, entry.line])}>
+                  {entry.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         <Button
           type="button"
           size="sm"
           variant="outline"
           disabled={disabled || full || missing <= 0}
           onClick={() => {
-            const filler = fillerLine(missing, defaultRate);
+            const filler = fillerLine(missing, EINVOICE_VAT_RATE);
             if (filler) onChange([...lines, filler]);
           }}
         >
@@ -135,8 +139,7 @@ export function EinvoiceLines({
             <span>ĐVT</span>
             <span>SL</span>
             <span>Đơn giá trước VAT</span>
-            <span>Thuế suất</span>
-            <span className="text-right">Thành tiền</span>
+            <span className="text-right">Thành tiền trước VAT</span>
             <span />
           </div>
           <ul className="flex flex-col gap-3 @2xl/einvoice:gap-2">
@@ -193,36 +196,13 @@ export function EinvoiceLines({
                     onChange={(unitPrice) => set(index, { unitPrice: unitPrice ?? 0 })}
                   />
                 </Field>
-                <Field className="gap-1">
-                  <FieldLabel htmlFor={`einvoice-line-${index}-rate`} className={NARROW_LABEL}>
-                    Thuế suất
-                  </FieldLabel>
-                  <Select
-                    value={String(line.vatRate)}
-                    disabled={disabled}
-                    onValueChange={(rate) => set(index, { vatRate: Number(rate) as VatRate })}
-                  >
-                    <SelectTrigger
-                      id={`einvoice-line-${index}-rate`}
-                      aria-label={`Thuế suất dòng ${index + 1}`}
-                      className="w-full"
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {VAT_RATES.map((rate) => (
-                          <SelectItem key={rate} value={String(rate)}>
-                            VAT {rate}%
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <div className="self-center text-sm tabular-nums @2xl/einvoice:text-right">
-                  <span className="text-muted-foreground @2xl/einvoice:hidden">Thành tiền: </span>
-                  {formatMoney(lineAmountOf(line))}
+                <div className="flex flex-col gap-1 text-sm tabular-nums @2xl/einvoice:items-end">
+                  <span className={NARROW_LABEL}>Thành tiền trước VAT</span>
+                  <span className="flex h-9 items-center @2xl/einvoice:h-auto">{formatMoney(lineAmountOf(line))}</span>
+                  {/* A line saved before rates were fixed keeps its own; it shows. */}
+                  {line.vatRate !== EINVOICE_VAT_RATE && (
+                    <span className="text-xs text-muted-foreground">VAT {line.vatRate}%</span>
+                  )}
                 </div>
                 <Button
                   type="button"
@@ -231,7 +211,7 @@ export function EinvoiceLines({
                   aria-label={`Xóa dòng ${index + 1}`}
                   disabled={disabled}
                   onClick={() => onChange(lines.filter((_, i) => i !== index))}
-                  className="justify-self-end"
+                  className="col-span-2 justify-self-end @2xl/einvoice:col-span-1"
                 >
                   <Trash2Icon />
                 </Button>

@@ -79,6 +79,6 @@ export function fillerLine(missing: number, rate: VatRate): EinvoiceLine | null 
   return { ...filler, unitPrice: base, vatAmount: missing - base };
 }
 
-export function defaultVatRate(taxPercent: number): VatRate {
-  return (VAT_RATES as number[]).includes(taxPercent) ? (taxPercent as VatRate) : 10;
-}
+// Every line made on the page carries the venue's VAT; there is no rate to
+// choose (spec 2026-10-01-hddt-bo-cuc-va-hd-tu-do §5.4).
+export const EINVOICE_VAT_RATE: VatRate = 10;

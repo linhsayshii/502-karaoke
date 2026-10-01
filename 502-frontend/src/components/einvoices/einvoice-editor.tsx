@@ -14,7 +14,7 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Spinner } from "@/components/ui/spinner";
 import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
-import { defaultVatRate, issueProblem, totalsOf } from "@/lib/einvoice";
+import { issueProblem, totalsOf } from "@/lib/einvoice";
 import { formatMoney } from "@/lib/format";
 import { can } from "@/lib/permissions";
 import type { EinvoiceBillDetail, EinvoiceConfigView, EinvoiceDetail, EinvoiceLine } from "@/lib/types";
@@ -81,7 +81,6 @@ export function EinvoiceEditor({
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
-  const defaultRate = defaultVatRate(bill.taxPercent);
   const totals = totalsOf(form.lines);
   const missing = (form.amount ?? 0) - totals.total;
   const problem = form.amount ? issueProblem(form.amount, form.lines) : "Nhập số tiền của hóa đơn";
@@ -160,7 +159,6 @@ export function EinvoiceEditor({
       <EinvoiceLines
         lines={form.lines}
         bill={bill}
-        defaultRate={defaultRate}
         missing={missing}
         disabled={!canEdit}
         onChange={(lines) => setForm((f) => ({ ...f, lines }))}

@@ -97,6 +97,8 @@ function dbDay(
   return date;
 }
 
+const INVALID_INVOICE_DATE = 'Ngày hóa đơn không hợp lệ';
+
 function dateRange(
   from?: string,
   to?: string,
@@ -466,6 +468,11 @@ export class EinvoicesService implements OnApplicationBootstrap {
           branchId,
           orderId: null,
           businessDate: toDbDate(businessDateOf(new Date())),
+          // The calendar day, never the business day (spec §2).
+          invoiceDate: dbDay(
+            dto.invoiceDate ?? toDateString(new Date()),
+            INVALID_INVOICE_DATE,
+          ),
           ...written,
         },
         select: { id: true },
@@ -474,7 +481,13 @@ export class EinvoicesService implements OnApplicationBootstrap {
     }
     const order = await this.prisma.order.findUnique({
       where: { id: dto.orderId },
-      select: { id: true, branchId: true, status: true, businessDate: true },
+      select: {
+        id: true,
+        branchId: true,
+        status: true,
+        businessDate: true,
+        endTime: true,
+      },
     });
     if (!order) throw new NotFoundException('Không tìm thấy hóa đơn');
     this.scope.assertBranchAccess(user, order.branchId);
@@ -488,6 +501,12 @@ export class EinvoicesService implements OnApplicationBootstrap {
         branchId: order.branchId,
         orderId: order.id,
         businessDate: order.businessDate,
+        // The calendar day the bill was paid: a bill paid at 00:24 belongs
+        // to the business day before but is invoiced on its own date (spec §2).
+        invoiceDate: dbDay(
+          dto.invoiceDate ?? toDateString(order.endTime ?? new Date()),
+          INVALID_INVOICE_DATE,
+        ),
         ...written,
       },
       select: { id: true },
@@ -499,7 +518,15 @@ export class EinvoicesService implements OnApplicationBootstrap {
     await this.assertAccess(user, id);
     const { count } = await this.prisma.einvoice.updateMany({
       where: { id, status: EinvoiceStatus.DRAFT },
-      data: { ...draftData(dto), lastError: null, updatedById: user.id },
+      data: {
+        ...draftData(dto),
+        // Left out: the date planned stays (spec §4).
+        ...(dto.invoiceDate
+          ? { invoiceDate: dbDay(dto.invoiceDate, INVALID_INVOICE_DATE) }
+          : {}),
+        lastError: null,
+        updatedById: user.id,
+      },
     });
     if (count === 0) throw new ConflictException('Chỉ sửa được hóa đơn nháp');
     return this.findOne(user, id);
@@ -799,10 +826,10 @@ export class EinvoicesService implements OnApplicationBootstrap {
           status: EinvoiceStatus.DRAFT,
           lastError: null,
           sendingAt: null,
+          // The date stays: on a draft it is the date planned (spec §3).
           sellerTaxCode: null,
           symbolCode: null,
           registerInvoiceId: null,
-          invoiceDate: null,
         };
     let count: number;
     try {
@@ -887,7 +914,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
   // Spec §9.3: not before the newest invoice of the symbol, a future date
   // confirmed, and in the year of the symbol.
   private async assertInvoiceDate(ready: IssueConfig, dto: IssueEinvoiceDto) {
-    dbDay(dto.invoiceDate, 'Ngày hóa đơn không hợp lệ');
+    dbDay(dto.invoiceDate, INVALID_INVOICE_DATE);
     const latest = await this.config.latestIssued(
       ready.taxCode,
       ready.symbolCode,
@@ -1003,10 +1030,10 @@ export class EinvoicesService implements OnApplicationBootstrap {
               : outcome.message,
           ),
           sendingAt: null,
+          // The date stays: on a draft it is the date planned (spec §3).
           sellerTaxCode: null,
           symbolCode: null,
           registerInvoiceId: null,
-          invoiceDate: null,
         },
       });
       return;

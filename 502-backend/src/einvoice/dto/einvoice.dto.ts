@@ -75,6 +75,15 @@ export class EinvoiceDraftDto {
   @Max(100_000_000_000)
   amount: number;
 
+  @ApiProperty({
+    required: false,
+    description:
+      'Ngày hóa đơn dự kiến YYYY-MM-DD (ngày lịch, không phải ngày kinh doanh); bỏ trống khi sửa là giữ nguyên',
+  })
+  @IsOptional()
+  @Matches(DATE_RE, { message: DATE_MESSAGE })
+  invoiceDate?: string;
+
   @ApiProperty({ required: false, nullable: true })
   @IsOptional()
   @ValidateIf((dto: EinvoiceDraftDto) => !!dto.buyerTaxCode)

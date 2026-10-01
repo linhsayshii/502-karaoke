@@ -7,6 +7,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
+import { toDateString } from '../src/common/dates';
 import { EinvoiceConfigService } from '../src/einvoice/einvoice-config.service';
 import {
   EinvoicesService,
@@ -316,6 +317,33 @@ describe('E-invoices (e2e)', () => {
         .expect(400);
     });
 
+    it('keeps an invoice date of its own, the calendar day the bill was paid', async () => {
+      const today = toDateString(new Date());
+      const draft = (
+        await as('tn1_cs1').get(`/einvoices/${draftId}`).expect(200)
+      ).body as Json;
+      expect(draft.invoiceDate).toBe(today);
+      const body = { amount: 1000000, ...buyer, lines: [beer, filler] };
+      const moved = (
+        await as('tn1_cs1')
+          .patch(`/einvoices/${draftId}`, {
+            ...body,
+            invoiceDate: '2026-12-31',
+          })
+          .expect(200)
+      ).body as Json;
+      expect(moved.invoiceDate).toBe('2026-12-31');
+      const kept = (
+        await as('tn1_cs1').patch(`/einvoices/${draftId}`, body).expect(200)
+      ).body as Json;
+      expect(kept.invoiceDate).toBe('2026-12-31');
+      await as('tn1_cs1')
+        .patch(`/einvoices/${draftId}`, { ...body, invoiceDate: '2026-02-30' })
+        .expect(400);
+      await as('tn1_cs1')
+        .patch(`/einvoices/${draftId}`, { ...body, invoiceDate: today })
+        .expect(200);
+    });
     it('shows a bill with its invoices and how much is split', async () => {
       const detail = (
         await as('tn1_cs1').get(`/einvoices/bill/${orderId}`).expect(200)
@@ -614,10 +642,11 @@ describe('E-invoices (e2e)', () => {
       fake.behaviours = ['reject', 'reject'];
       const posts = fake.posts;
       const body = (await issue(id).expect(200)).body as Json;
+      // The header goes, the date planned stays.
       expect(body).toMatchObject({
         status: 'DRAFT',
         symbolCode: null,
-        invoiceDate: null,
+        invoiceDate: today(),
       });
       expect(body.lastError).toMatch(/ModelState/);
       expect((body.draft as Json).lines).toHaveLength(1);
@@ -635,6 +664,7 @@ describe('E-invoices (e2e)', () => {
       const posts = fake.posts;
       const body = (await issue(id).expect(200)).body as Json;
       expect(body.status).toBe('DRAFT');
+      expect(body.invoiceDate).toBe(today());
       expect(body.lastError).toMatch(/^Minvoice từ chối ngày hóa đơn/);
       expect(body.lastError).toContain('quy luật tăng dần');
       expect(fake.posts).toBe(posts + 1);
@@ -680,10 +710,11 @@ describe('E-invoices (e2e)', () => {
           .post(`/einvoices/${id}/resolve`, { found: false })
           .expect(200)
       ).body as Json;
+      // The header goes, the date planned stays.
       expect(back).toMatchObject({
         status: 'DRAFT',
         symbolCode: null,
-        invoiceDate: null,
+        invoiceDate: today(),
       });
       fake.behaviours = ['drop'];
       await issue(id).expect(200);

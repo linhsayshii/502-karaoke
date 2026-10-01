@@ -601,6 +601,8 @@ describe('EinvoicesService.resolve', () => {
       ],
     });
     expect(data).toMatchObject({ status: 'DRAFT', sendingAt: null });
+    // The date stays: on a draft it is the date planned.
+    expect(data).not.toHaveProperty('invoiceDate');
   });
 
   it('goes by the last write when the time of the send is unknown', async () => {
@@ -830,5 +832,73 @@ describe('EinvoicesService free invoices', () => {
         where: { branchId: 1, status: 'DRAFT', lastError: null, orderId: null },
       }),
     );
+  });
+});
+
+describe('EinvoicesService invoice dates', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('dates a new draft by the calendar day its bill was paid, not its business day', async () => {
+    const { service, einvoice, order } = creating();
+    order.findUnique.mockResolvedValue({
+      id: 5,
+      branchId: 1,
+      status: 'COMPLETED',
+      businessDate: toDbDate('2026-09-29'),
+      endTime: new Date(2026, 8, 30, 0, 24),
+    });
+    await service.create(user, { orderId: 5, amount: 0, lines: [] });
+    expect(dataOf(einvoice.create)).toMatchObject({
+      businessDate: toDbDate('2026-09-29'),
+      invoiceDate: toDbDate('2026-09-30'),
+    });
+  });
+
+  it('dates a free invoice today, or as asked', async () => {
+    const { service, einvoice } = creating();
+    await service.create(user, { amount: 0, lines: [] }, 'cs1');
+    await service.create(
+      user,
+      { amount: 0, lines: [], invoiceDate: '2026-12-31' },
+      'cs1',
+    );
+    expect(dataOf(einvoice.create, 0).invoiceDate).toEqual(
+      toDbDate(toDateString(new Date())),
+    );
+    expect(dataOf(einvoice.create, 1).invoiceDate).toEqual(
+      toDbDate('2026-12-31'),
+    );
+  });
+
+  it('changes the date of a draft only when one is sent', async () => {
+    const { service, einvoice } = creating();
+    await service.update(user, 40, {
+      amount: 0,
+      lines: [],
+      invoiceDate: '2026-10-02',
+    });
+    await service.update(user, 40, { amount: 0, lines: [] });
+    expect(dataOf(einvoice.updateMany, 0).invoiceDate).toEqual(
+      toDbDate('2026-10-02'),
+    );
+    expect(dataOf(einvoice.updateMany, 1)).not.toHaveProperty('invoiceDate');
+    await expect(
+      service.update(user, 40, {
+        amount: 0,
+        lines: [],
+        invoiceDate: '2026-02-30',
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('keeps the date of a send that ends as a draft', async () => {
+    const { service, einvoice } = setup({
+      kind: 'failed',
+      message: 'Minvoice từ chối',
+    });
+    await service.issue(user, 12, dto);
+    const data = dataOf(einvoice.update);
+    expect(data).toMatchObject({ status: 'DRAFT', symbolCode: null });
+    expect(data).not.toHaveProperty('invoiceDate');
   });
 });

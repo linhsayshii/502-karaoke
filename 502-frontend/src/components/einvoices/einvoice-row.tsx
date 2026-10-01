@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Trash2Icon } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -71,12 +71,17 @@ export function EinvoiceRow({
   const [deleting, setDeleting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  // The cleanup also ends it when the row goes away mid-save.
-  useEffect(() => {
-    if (!saving) return;
-    onSavingChange(einvoice.id, true);
-    return () => onSavingChange(einvoice.id, false);
-  }, [saving, einvoice.id, onSavingChange]);
+  // The page hears about a save from the event itself (below), never from an
+  // effect: an effect only runs after the click on the bill's + that follows
+  // the blur has been dispatched, and that + would read the old remainder. A
+  // row that goes away mid-save ends it here.
+  const savingRef = useRef(false);
+  useEffect(
+    () => () => {
+      if (savingRef.current) onSavingChange(einvoice.id, false);
+    },
+    [einvoice.id, onSavingChange],
+  );
 
   // PATCH replaces the whole draft: the saved buyer and lines go with the new
   // amount (a free row is read first, as the list leaves its lines out). The
@@ -88,6 +93,8 @@ export function EinvoiceRow({
     }
     if (typed === savedAmount || saving) return;
     setSaving(true);
+    savingRef.current = true;
+    onSavingChange(einvoice.id, true);
     try {
       const current =
         "draft" in einvoice ? einvoice : (await api.get<EinvoiceDetail>(`/einvoices/${einvoice.id}`)).data;
@@ -105,6 +112,8 @@ export function EinvoiceRow({
       setTyped(savedAmount);
     } finally {
       setSaving(false);
+      savingRef.current = false;
+      onSavingChange(einvoice.id, false);
     }
   };
 

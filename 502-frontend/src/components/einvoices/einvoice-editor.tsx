@@ -75,13 +75,13 @@ export function EinvoiceEditor({
   const saved = useMemo(() => formOf(einvoice, fallbackDate), [einvoice, fallbackDate]);
   const [form, setForm] = useState<FormState>(saved);
   const [saving, setSaving] = useState(false);
-  const [issuing, setIssuing] = useState(false);
-  const working = saving || issuing;
   const dirty = JSON.stringify(form) !== JSON.stringify(saved);
 
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
-  useEffect(() => onWorkingChange(working), [working, onWorkingChange]);
+  // Saving and issuing tell the page from their own handlers (below and in
+  // IssueControls), not from an effect, so the amount box of the row is locked
+  // before any further click; only the unmount ends it here.
   useEffect(() => () => onWorkingChange(false), [onWorkingChange]);
 
   const amount = Number(einvoice.amount);
@@ -97,6 +97,7 @@ export function EinvoiceEditor({
       return;
     }
     setSaving(true);
+    onWorkingChange(true);
     try {
       const res = await api.patch<EinvoiceDetail>(`/einvoices/${einvoice.id}`, {
         amount,
@@ -113,6 +114,7 @@ export function EinvoiceEditor({
       notify.error(error, "Không lưu được hóa đơn");
     } finally {
       setSaving(false);
+      onWorkingChange(false);
     }
   };
 
@@ -193,7 +195,7 @@ export function EinvoiceEditor({
             problem={dirty ? "Lưu nháp trước khi xuất" : problem}
             busy={busy}
             onIssued={onSaved}
-            onIssuingChange={setIssuing}
+            onIssuingChange={onWorkingChange}
           />
         )}
       </div>

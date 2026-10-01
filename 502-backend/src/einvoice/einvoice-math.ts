@@ -1,4 +1,4 @@
-import { EinvoiceLine, VAT_RATES, VatRate } from './einvoice-types';
+import { EinvoiceLine, VatRate } from './einvoice-types';
 
 // Money of an e-invoice (spec 2026-10-01 §5). The frontend mirrors this file
 // in lib/einvoice.ts: keep them in sync. Rounded to the đồng (Math.round),
@@ -83,4 +83,3 @@ export function fillerLine(
   }
   return { ...filler, unitPrice: base, vatAmount: missing - base };
 }
-

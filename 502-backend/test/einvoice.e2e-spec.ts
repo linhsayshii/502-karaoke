@@ -420,6 +420,25 @@ describe('E-invoices (e2e)', () => {
         .expect(404);
     });
 
+    it('takes empty drafts, one per click', async () => {
+      const ids: number[] = [];
+      for (let i = 0; i < 2; i++) {
+        const draft = (
+          await as('tn1_cs1')
+            .post('/einvoices', { orderId, amount: 0, lines: [] })
+            .expect(201)
+        ).body as Json;
+        expect(draft).toMatchObject({ status: 'DRAFT', amount: '0' });
+        ids.push(draft.id as number);
+      }
+      expect(ids[0]).not.toBe(ids[1]);
+      await as('tn1_cs1')
+        .post('/einvoices', { orderId, amount: -1, lines: [] })
+        .expect(400);
+      for (const id of ids)
+        await as('tn1_cs1').delete(`/einvoices/${id}`).expect(200);
+    });
+
     it('tells the bill sheet how many e-invoices a bill has', async () => {
       const order = (await as('admin').get(`/orders/${orderId}`).expect(200))
         .body as Json;
@@ -488,6 +507,20 @@ describe('E-invoices (e2e)', () => {
       const id = await newDraft(900000);
       expect(((await issue(id).expect(400)).body as Json).message).toBe(
         'Còn thiếu 10.000 đồng',
+      );
+      await as('tn1_cs1').delete(`/einvoices/${id}`).expect(200);
+    });
+
+    it('refuses a draft without an amount', async () => {
+      const id = (
+        (
+          await as('tn1_cs1')
+            .post('/einvoices', { orderId, amount: 0, lines: [filler(0)] })
+            .expect(201)
+        ).body as Json
+      ).id as number;
+      expect(((await issue(id).expect(400)).body as Json).message).toBe(
+        'Nhập số tiền của hóa đơn',
       );
       await as('tn1_cs1').delete(`/einvoices/${id}`).expect(200);
     });

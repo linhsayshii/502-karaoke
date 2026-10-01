@@ -88,4 +88,10 @@ describe('einvoice-math', () => {
     expect(defaultVatRate(0)).toBe(0);
     expect(defaultVatRate(7)).toBe(10);
   });
+
+  it('needs an amount before anything else', () => {
+    expect(issueProblem(0, [])).toBe('Nhập số tiền của hóa đơn');
+    // A line priced 0 adds up to an amount of 0: still nothing to issue.
+    expect(issueProblem(0, [line()])).toBe('Nhập số tiền của hóa đơn');
+  });
 });

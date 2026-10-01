@@ -67,9 +67,11 @@ export class EinvoiceLineDto {
 
 // The whole draft: PATCH replaces it (like the items of an order).
 export class EinvoiceDraftDto {
-  @ApiProperty({ description: 'Số tiền đã gồm VAT, đồng' })
+  @ApiProperty({
+    description: 'Số tiền đã gồm VAT, đồng; nháp được để 0, xuất thì cần ≥ 1',
+  })
   @IsInt()
-  @Min(1)
+  @Min(0)
   @Max(100_000_000_000)
   amount: number;
 

@@ -3,12 +3,14 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, Role, User } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser, authUserSelect } from '../auth/auth-user';
+import { REPORT_ACCESS_ROLES } from '../auth/roles';
 import {
   BranchScopeService,
   FORBIDDEN_BRANCH,
@@ -28,6 +30,7 @@ const userSelect = {
   role: true,
   position: true,
   managesPr: true,
+  reportAccess: true,
   branchId: true,
   active: true,
   password: true,
@@ -42,8 +45,32 @@ function toPublic({ password, ...user }: SelectedUser) {
   return { ...user, hasPassword: !!password };
 }
 
+// Vào trang báo cáo (spec 2026-10-02-trang-bao-cao-hddt §3.1): only the chain
+// manager grants it, only to a branch manager or HĐQT, and an account moved
+// to another role loses it in the same write.
+function reportAccessFor(
+  actor: AuthUser,
+  role: Role,
+  wanted: boolean | undefined,
+  current: boolean,
+): boolean {
+  if (wanted !== undefined && actor.role !== Role.CHAIN_MANAGER) {
+    throw new ForbiddenException(
+      'Chỉ quản lý hệ thống được cấp quyền vào trang báo cáo',
+    );
+  }
+  if (wanted && !REPORT_ACCESS_ROLES.includes(role)) {
+    throw new BadRequestException(
+      'Chỉ tài khoản quản lý cơ sở hoặc HĐQT được vào trang báo cáo',
+    );
+  }
+  return (wanted ?? current) && REPORT_ACCESS_ROLES.includes(role);
+}
+
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     private prisma: PrismaService,
     private branchScope: BranchScopeService,
@@ -108,6 +135,12 @@ export class UsersService {
     );
     const existing = await this.findOne(dto.username);
     if (existing) throw new ConflictException('Tên đăng nhập đã tồn tại');
+    const reportAccess = reportAccessFor(
+      actor,
+      assignment.role,
+      dto.reportAccess,
+      false,
+    );
 
     const user = await this.prisma.user.create({
       data: {
@@ -117,10 +150,14 @@ export class UsersService {
         phone: dto.phone,
         position: dto.position ?? null,
         managesPr: dto.managesPr ?? false,
+        reportAccess,
         ...assignment,
       },
       select: userSelect,
     });
+    if (reportAccess) {
+      this.logger.log(`User ${user.id}: report access on by user ${actor.id}`);
+    }
     return toPublic(user);
   }
 
@@ -143,6 +180,12 @@ export class UsersService {
       dto.role ?? target.role,
       dto.branchId !== undefined ? dto.branchId : target.branchId,
     );
+    const reportAccess = reportAccessFor(
+      actor,
+      assignment.role,
+      dto.reportAccess,
+      target.reportAccess,
+    );
 
     const user = await this.prisma.user.update({
       where: { id },
@@ -151,11 +194,17 @@ export class UsersService {
         phone: dto.phone,
         position: dto.position,
         managesPr: dto.managesPr,
+        reportAccess,
         active: dto.active,
         ...assignment,
       },
       select: userSelect,
     });
+    if (reportAccess !== target.reportAccess) {
+      this.logger.log(
+        `User ${id}: report access ${reportAccess ? 'on' : 'off'} by user ${actor.id}`,
+      );
+    }
     return toPublic(user);
   }
 

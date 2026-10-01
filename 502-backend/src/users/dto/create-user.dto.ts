@@ -52,6 +52,15 @@ export class CreateUserDto {
   @ApiProperty({
     required: false,
     description:
+      'Vào trang báo cáo: chỉ quản lý hệ thống cấp, cho quản lý cơ sở và HĐQT',
+  })
+  @IsOptional()
+  @IsBoolean()
+  reportAccess?: boolean;
+
+  @ApiProperty({
+    required: false,
+    description:
       'Bỏ trống với quản lý cao nhất; quản lý cơ sở luôn là cơ sở của mình',
   })
   @IsOptional()

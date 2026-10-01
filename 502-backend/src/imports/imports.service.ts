@@ -1,7 +1,13 @@
-import { BadRequestException, HttpException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { Prisma, Role, StockDocType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth-user';
+import { REPORT_ACCESS_ROLES } from '../auth/roles';
 import { BranchScopeService } from '../common/branch-scope.service';
 import { InventoryService, StockLine } from '../inventory/inventory.service';
 import { BRANCH_MANAGEABLE_ROLES, UsersService } from '../users/users.service';
@@ -98,6 +104,8 @@ class CategoryResolver {
 
 @Injectable()
 export class ImportsService {
+  private readonly logger = new Logger(ImportsService.name);
+
   constructor(
     private prisma: PrismaService,
     private branchScope: BranchScopeService,
@@ -438,6 +446,7 @@ export class ImportsService {
           phone: true,
           role: true,
           position: true,
+          reportAccess: true,
           branchId: true,
           active: true,
         },
@@ -544,6 +553,12 @@ export class ImportsService {
           if (error) return result('ERROR', error);
           data.role = r.role;
           changes.push('đổi vai trò');
+          // Spec 2026-10-02 §3.1: an account moved to a role without "Vào
+          // trang báo cáo" loses it in the same write.
+          if (account.reportAccess && !REPORT_ACCESS_ROLES.includes(r.role)) {
+            data.reportAccess = false;
+            changes.push('tắt quyền vào trang báo cáo');
+          }
         }
         if (!changes.length) return result('SKIP', 'Không có thay đổi');
         updates.push({ id: account.id, data });
@@ -559,6 +574,11 @@ export class ImportsService {
           await tx.user.createMany({ data: creates });
           for (const u of updates) {
             await tx.user.update({ where: { id: u.id }, data: u.data });
+            if (u.data.reportAccess === false) {
+              this.logger.log(
+                `User ${u.id}: report access off by user ${actor.id}`,
+              );
+            }
           }
         },
       };

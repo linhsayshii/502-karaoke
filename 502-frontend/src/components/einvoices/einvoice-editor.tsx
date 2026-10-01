@@ -3,34 +3,32 @@
 import { useEffect, useMemo, useState } from "react";
 import { TriangleAlertIcon } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
-import { ConfirmDialog } from "@/components/confirm-dialog";
+import { DatePicker } from "@/components/date-range-picker";
 import { BuyerFields, type BuyerValue } from "@/components/einvoices/buyer-fields";
 import { EinvoiceLines } from "@/components/einvoices/einvoice-lines";
 import { IssueControls } from "@/components/einvoices/issue-controls";
-import { MoneyInput } from "@/components/einvoices/number-input";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Field, FieldLabel } from "@/components/ui/field";
 import { Spinner } from "@/components/ui/spinner";
 import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
-import { issueProblem, totalsOf } from "@/lib/einvoice";
-import { formatMoney } from "@/lib/format";
+import { defaultInvoiceDate, invoiceDateProblem, issueProblem, totalsOf } from "@/lib/einvoice";
+import { formatDate, formatMoney, toDateInput } from "@/lib/format";
 import { can } from "@/lib/permissions";
 import type { EinvoiceBillDetail, EinvoiceConfigView, EinvoiceDetail, EinvoiceLine } from "@/lib/types";
 
 interface FormState extends BuyerValue {
-  amount: number | null;
+  invoiceDate: string;
   lines: EinvoiceLine[];
 }
 
-const formOf = (einvoice: EinvoiceDetail | null): FormState => ({
-  amount: einvoice ? Number(einvoice.amount) : null,
-  buyerTaxCode: einvoice?.buyerTaxCode ?? "",
-  buyerName: einvoice?.buyerName ?? "",
-  buyerAddress: einvoice?.draft?.buyerAddress ?? "",
-  buyerEmail: einvoice?.draft?.buyerEmail ?? "",
-  lines: einvoice?.draft?.lines ?? [],
+const formOf = (einvoice: EinvoiceDetail, fallbackDate: string): FormState => ({
+  invoiceDate: einvoice.invoiceDate ?? fallbackDate,
+  buyerTaxCode: einvoice.buyerTaxCode ?? "",
+  buyerName: einvoice.buyerName ?? "",
+  buyerAddress: einvoice.draft?.buyerAddress ?? "",
+  buyerEmail: einvoice.draft?.buyerEmail ?? "",
+  lines: einvoice.draft?.lines ?? [],
 });
 
 const buyerOf = (form: FormState): BuyerValue => ({
@@ -40,74 +38,68 @@ const buyerOf = (form: FormState): BuyerValue => ({
   buyerEmail: form.buyerEmail,
 });
 
-// One draft (or a new, unsaved one) of a bill (spec §10.2). The panel keys it
-// by the invoice and its updatedAt, so it starts from the saved draft and a
-// save remounts it clean. Rendered inside the panel's @container/einvoice.
+// One draft in the right column (spec 2026-10-01-hddt-bo-cuc-va-hd-tu-do
+// §5.3): its invoice date, buyer and lines. The amount is typed in the left
+// column and read from the saved row, so a change there never resets what is
+// typed here. Rendered inside the panel's @container/einvoice.
 export function EinvoiceEditor({
   bill,
   einvoice,
   previous,
   config,
   onSaved,
-  onDeleted,
   onDirtyChange,
   busy,
 }: {
-  bill: EinvoiceBillDetail["order"];
-  einvoice: EinvoiceDetail | null;
+  // Null for a free invoice.
+  bill: EinvoiceBillDetail["order"] | null;
+  einvoice: EinvoiceDetail;
   previous: BuyerValue | null;
   config: EinvoiceConfigView | null;
   onSaved: (row: EinvoiceDetail) => void;
-  onDeleted: (id: number | null) => void;
   onDirtyChange: (dirty: boolean) => void;
-  // The panel is reloading after a write: the editor still shows the old row,
-  // so saving or issuing it again waits for the new one.
+  // The page is reloading after a write: saving or issuing waits for the new row.
   busy: boolean;
 }) {
   const { user } = useAuth();
   const notify = useNotify();
-  const canWrite = can(user, "einvoices.write");
-  // A voided bill takes no new or changed invoice (the server refuses to
-  // issue it), but its drafts can still be deleted so they leave the Nháp tab.
-  const canEdit = canWrite && bill.status === "COMPLETED";
-  // The same goes for issuing: the chain manager, on a bill that stands.
-  const canIssue = can(user, "einvoices.issue") && bill.status === "COMPLETED";
-  const saved = useMemo(() => formOf(einvoice), [einvoice]);
+  // A voided bill takes no changed or issued invoice (the server refuses);
+  // its drafts are deleted in the left column.
+  const billStands = !bill || bill.status === "COMPLETED";
+  const canEdit = can(user, "einvoices.write") && billStands;
+  const canIssue = can(user, "einvoices.issue") && billStands;
+  const fallbackDate = defaultInvoiceDate(bill?.endTime);
+  const saved = useMemo(() => formOf(einvoice, fallbackDate), [einvoice, fallbackDate]);
   const [form, setForm] = useState<FormState>(saved);
   const [saving, setSaving] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
   const dirty = JSON.stringify(form) !== JSON.stringify(saved);
 
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
+  const amount = Number(einvoice.amount);
   const totals = totalsOf(form.lines);
-  const missing = (form.amount ?? 0) - totals.total;
-  const problem = form.amount ? issueProblem(form.amount, form.lines) : "Nhập số tiền của hóa đơn";
-
-  const body = () => ({
-    amount: form.amount,
-    buyerTaxCode: form.buyerTaxCode.trim() || null,
-    buyerName: form.buyerName.trim() || null,
-    buyerAddress: form.buyerAddress.trim() || null,
-    buyerEmail: form.buyerEmail.trim() || null,
-    lines: form.lines.map((line) => ({ ...line, name: line.name.trim(), unit: line.unit.trim() })),
-  });
+  const missing = amount - totals.total;
+  const problem = issueProblem(amount, form.lines);
+  // A warning only: Xuất offers to issue it today instead (spec §2).
+  const dateProblem = invoiceDateProblem(form.invoiceDate, config);
 
   const save = async () => {
-    if (!form.amount) {
-      notify.warning("Nhập số tiền của hóa đơn");
-      return;
-    }
     if (form.lines.some((line) => !line.name.trim())) {
       notify.warning("Dòng hàng nào cũng cần tên");
       return;
     }
     setSaving(true);
     try {
-      const res = einvoice
-        ? await api.patch<EinvoiceDetail>(`/einvoices/${einvoice.id}`, body())
-        : await api.post<EinvoiceDetail>("/einvoices", { orderId: bill.id, ...body() });
+      const res = await api.patch<EinvoiceDetail>(`/einvoices/${einvoice.id}`, {
+        amount,
+        invoiceDate: form.invoiceDate,
+        buyerTaxCode: form.buyerTaxCode.trim() || null,
+        buyerName: form.buyerName.trim() || null,
+        buyerAddress: form.buyerAddress.trim() || null,
+        buyerEmail: form.buyerEmail.trim() || null,
+        lines: form.lines.map((line) => ({ ...line, name: line.name.trim(), unit: line.unit.trim() })),
+      });
       notify.success("Đã lưu hóa đơn nháp");
       onSaved(res.data);
     } catch (error) {
@@ -117,37 +109,37 @@ export function EinvoiceEditor({
     }
   };
 
-  const remove = async () => {
-    if (!einvoice) return;
-    try {
-      await api.delete(`/einvoices/${einvoice.id}`);
-      notify.success("Đã xóa hóa đơn nháp");
-      onDeleted(einvoice.id);
-    } catch (error) {
-      notify.error(error, "Không xóa được hóa đơn");
-      return false;
-    }
-  };
-
   return (
     <div className="flex flex-col gap-5">
-      {einvoice?.lastError && (
+      {einvoice.lastError && (
         <Alert variant="destructive">
           <TriangleAlertIcon />
           <AlertTitle>Lần gửi gần nhất bị lỗi</AlertTitle>
           <AlertDescription className="wrap-anywhere">{einvoice.lastError}</AlertDescription>
         </Alert>
       )}
-      <Field className="max-w-60">
-        <FieldLabel htmlFor="einvoice-amount">Số tiền (đã gồm VAT)</FieldLabel>
-        <MoneyInput
-          id="einvoice-amount"
-          className="tabular-nums"
-          value={form.amount}
-          disabled={!canEdit}
-          onChange={(amount) => setForm((f) => ({ ...f, amount }))}
-        />
-      </Field>
+      <div className="flex flex-col gap-2">
+        <span className="text-sm font-medium">Ngày hóa đơn</span>
+        {canEdit ? (
+          <DatePicker
+            value={form.invoiceDate}
+            onChange={(invoiceDate) => setForm((f) => ({ ...f, invoiceDate }))}
+            min={config?.minInvoiceDate ?? undefined}
+            today={toDateInput()}
+            label="Ngày hóa đơn"
+            className="w-fit"
+          />
+        ) : (
+          <span className="text-sm">{formatDate(form.invoiceDate)}</span>
+        )}
+        {config?.minInvoiceDate && (
+          <span className="text-xs text-muted-foreground">
+            Từ {formatDate(config.minInvoiceDate)} trở đi (hóa đơn số {config.latestInvoiceNumber ?? "?"} cùng ký
+            hiệu mang ngày này)
+          </span>
+        )}
+        {dateProblem && <span className="text-xs text-warning">{dateProblem}</span>}
+      </div>
       {/* Functional updates: a lookup answers after a while and must not undo
           the lines typed meanwhile. */}
       <BuyerFields
@@ -170,14 +162,14 @@ export function EinvoiceEditor({
         <dd className="text-right">{formatMoney(totals.vatAmount)}</dd>
         <dt className="font-medium">Tổng</dt>
         <dd className="text-right font-medium">{formatMoney(totals.total)}</dd>
-        {form.amount !== null && missing !== 0 && (
+        {missing !== 0 && (
           <>
             <dt className="text-destructive">{missing > 0 ? "Còn thiếu" : "Thừa"}</dt>
             <dd className="text-right text-destructive">{formatMoney(Math.abs(missing))}</dd>
           </>
         )}
       </dl>
-      {problem && (form.amount === null || missing === 0) && <p className="text-sm text-destructive">{problem}</p>}
+      {problem && (amount < 1 || missing === 0) && <p className="text-sm text-destructive">{problem}</p>}
       <div className="flex flex-wrap items-center gap-2">
         {canEdit && (
           <Button onClick={save} disabled={saving || busy || !dirty}>
@@ -185,21 +177,11 @@ export function EinvoiceEditor({
             Lưu nháp
           </Button>
         )}
-        {einvoice
-          ? canWrite && (
-              <Button variant="outline" onClick={() => setDeleteOpen(true)}>
-                Xóa
-              </Button>
-            )
-          : canEdit && (
-              <Button variant="ghost" onClick={() => onDeleted(null)}>
-                Bỏ
-              </Button>
-            )}
         {dirty && <span className="text-sm text-muted-foreground">Có thay đổi chưa lưu</span>}
-        {einvoice && canIssue && (
+        {canIssue && (
           <IssueControls
             einvoice={einvoice}
+            invoiceDate={form.invoiceDate}
             config={config}
             problem={dirty ? "Lưu nháp trước khi xuất" : problem}
             busy={busy}
@@ -207,15 +189,6 @@ export function EinvoiceEditor({
           />
         )}
       </div>
-      <ConfirmDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        title="Xóa hóa đơn nháp?"
-        description="Nháp và các dòng hàng của nó bị xóa hẳn."
-        confirmLabel="Xóa"
-        destructive
-        onConfirm={remove}
-      />
     </div>
   );
 }

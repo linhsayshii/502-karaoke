@@ -83,9 +83,12 @@ export function EinvoiceRow({
     [einvoice.id, onSavingChange],
   );
 
-  // PATCH replaces the whole draft: the saved buyer and lines go with the new
-  // amount (a free row is read first, as the list leaves its lines out). The
-  // date is left out, so it stays.
+  // PATCH replaces the whole draft: the buyer, lines and date go with the new
+  // amount. Every row reads the invoice first, bill or free alike: the row's
+  // own data may be older than a Lưu nháp in the panel whose reload is still
+  // on its way, and the old buyer and lines would overwrite that save. The
+  // date goes along only when the invoice has one, so an old draft without a
+  // date keeps none.
   const saveAmount = async () => {
     if (typed === null) {
       setTyped(savedAmount);
@@ -96,10 +99,10 @@ export function EinvoiceRow({
     savingRef.current = true;
     onSavingChange(einvoice.id, true);
     try {
-      const current =
-        "draft" in einvoice ? einvoice : (await api.get<EinvoiceDetail>(`/einvoices/${einvoice.id}`)).data;
+      const current = (await api.get<EinvoiceDetail>(`/einvoices/${einvoice.id}`)).data;
       const res = await api.patch<EinvoiceDetail>(`/einvoices/${einvoice.id}`, {
         amount: typed,
+        ...(current.invoiceDate ? { invoiceDate: current.invoiceDate } : {}),
         buyerTaxCode: current.buyerTaxCode,
         buyerName: current.buyerName,
         buyerAddress: current.draft?.buyerAddress ?? null,

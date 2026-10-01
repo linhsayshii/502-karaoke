@@ -43,6 +43,7 @@ model Branch {
   discountRequests DiscountRequest[]
   einvoiceConfig   EinvoiceConfig?
   einvoices        Einvoice[]
+  manualBills      ManualBill[]
 }
 
 enum Role {
@@ -72,6 +73,9 @@ model User {
   // Quản lý PR/KTV: may edit the branch's PR/KTV list and take their roll call,
   // whatever the role.
   managesPr                 Boolean           @default(false)
+  // Vào trang báo cáo (spec 2026-10-02-trang-bao-cao-hddt §3.1): a branch
+  // manager or HĐQT may use the report site; the chain manager always can.
+  reportAccess              Boolean           @default(false)
   branchId                  Int?
   branch                    Branch?           @relation(fields: [branchId], references: [id])
   active                    Boolean           @default(true)
@@ -100,6 +104,8 @@ model User {
   einvoicesUpdated          Einvoice[]        @relation("EinvoiceUpdatedBy")
   einvoicesIssued           Einvoice[]        @relation("EinvoiceIssuedBy")
   einvoicesNumberEdited     Einvoice[]        @relation("EinvoiceNumberEditedBy")
+  manualBillsCreated        ManualBill[]      @relation("ManualBillCreatedBy")
+  manualBillsCancelled      ManualBill[]      @relation("ManualBillCancelledBy")
 
   @@index([branchId])
 }
@@ -214,16 +220,17 @@ enum RoomStatus {
 }
 
 model Room {
-  id           Int        @id @default(autoincrement())
+  id           Int          @id @default(autoincrement())
   branchId     Int
-  branch       Branch     @relation(fields: [branchId], references: [id])
+  branch       Branch       @relation(fields: [branchId], references: [id])
   name         String
-  type         String     @default("VIP") // "VIP", "NORMAL"
+  type         String       @default("VIP") // "VIP", "NORMAL"
   pricePerHour Decimal
-  status       RoomStatus @default(AVAILABLE)
+  status       RoomStatus   @default(AVAILABLE)
   orders       Order[]
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  manualBills  ManualBill[]
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
 
   @@index([branchId])
 }
@@ -606,13 +613,14 @@ model Einvoice {
   id           Int            @id @default(autoincrement())
   branchId     Int
   branch       Branch         @relation(fields: [branchId], references: [id])
-  // Null for a free invoice, made without a bill
-  // (spec 2026-10-01-hddt-bo-cuc-va-hd-tu-do). Restrict keeps what the
-  // column did when it was required: a bill with invoices is never deleted
-  // (Prisma's default for an optional relation, SetNull, would turn its
-  // invoices into free ones).
+  // The bill it belongs to: a paid bill (orderId) or a bill thêm tay of the
+  // report site (manualBillId), exactly one of them (CHECK "Einvoice_one_bill",
+  // spec 2026-10-02-trang-bao-cao-hddt §4.2). Restrict: a bill with invoices
+  // is never deleted.
   orderId      Int?
   order        Order?         @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  manualBillId Int?
+  manualBill   ManualBill?    @relation(fields: [manualBillId], references: [id], onDelete: Restrict)
   // Copied from Order.businessDate so the list filters on its own index.
   businessDate DateTime       @db.Date
   status       EinvoiceStatus @default(DRAFT)
@@ -652,5 +660,33 @@ model Einvoice {
   @@index([branchId, businessDate])
   @@index([branchId, status, createdAt])
   @@index([orderId])
+  @@index([manualBillId])
   @@index([sellerTaxCode, symbolCode, invoiceDate])
+}
+
+// Bill thêm tay (spec 2026-10-02-trang-bao-cao-hddt §4.1): a bill made on the
+// report site only to issue e-invoices, numbered in the branch's sequence of
+// its business day (BillCounter, shared with checkout). The sales, stock,
+// fund and report code of the main site never reads it.
+model ManualBill {
+  id            Int        @id @default(autoincrement())
+  branchId      Int
+  branch        Branch     @relation(fields: [branchId], references: [id])
+  businessDate  DateTime   @db.Date
+  billSeq       Int
+  billNumber    String
+  // Null only for the free invoices the migration turned into bills (room 0000).
+  roomId        Int?
+  room          Room?      @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  createdById   Int?
+  createdBy     User?      @relation("ManualBillCreatedBy", fields: [createdById], references: [id])
+  createdAt     DateTime   @default(now())
+  cancelledAt   DateTime?
+  cancelledById Int?
+  cancelledBy   User?      @relation("ManualBillCancelledBy", fields: [cancelledById], references: [id])
+  cancelReason  String?
+  einvoices     Einvoice[]
+
+  @@unique([branchId, businessDate, billSeq])
+  @@index([branchId, billNumber])
 }

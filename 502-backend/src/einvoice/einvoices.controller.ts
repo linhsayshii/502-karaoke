@@ -59,7 +59,7 @@ export class EinvoicesController {
   }
 
   @Get('bills')
-  @Roles(...EINVOICE_WRITERS)
+  @Roles(...EINVOICE_READERS)
   bills(
     @CurrentUser() user: AuthUser,
     @Query() query: EinvoiceBillsQuery,

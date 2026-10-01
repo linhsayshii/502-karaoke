@@ -374,6 +374,14 @@ describe('E-invoices (e2e)', () => {
       ).toContain(orderId);
       expect(await ids('?status=ISSUED')).not.toContain(orderId);
 
+      // HĐQT reads the list of the page like every other reader, one branch at
+      // a time: with no branch it gets the usual "Vui lòng chọn cơ sở" (400).
+      const board = (
+        await as('hdqt_hddt').get('/einvoices/bills?branch=cs1').expect(200)
+      ).body as Json[];
+      expect(board.map((b) => b.orderId)).toContain(orderId);
+      await as('hdqt_hddt').get('/einvoices/bills').expect(400);
+
       // A voided bill keeps its drafts in the pending tabs, not in the day's bills.
       const room = (
         await as('ql1_cs1')

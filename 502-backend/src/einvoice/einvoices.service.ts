@@ -179,6 +179,21 @@ const STALE_SENDING_ERROR = 'Lần gửi bị cắt ngang, hãy đối chiếu t
 // the uncertain ones. (branchId, status, createdAt) index.
 const NOT_SETTLED = { in: [EinvoiceStatus.SENDING, EinvoiceStatus.UNCERTAIN] };
 
+// The invoices of a tab: "Lỗi" is a draft with an error, "Không rõ" also
+// holds sends still in flight or cut off.
+function statusWhere(
+  status: 'DRAFT' | 'ERROR' | 'UNCERTAIN' | 'ISSUED',
+): Prisma.EinvoiceWhereInput {
+  if (status === 'DRAFT') {
+    return { status: EinvoiceStatus.DRAFT, lastError: null };
+  }
+  if (status === 'ERROR') {
+    return { status: EinvoiceStatus.DRAFT, lastError: { not: null } };
+  }
+  if (status === 'UNCERTAIN') return { status: NOT_SETTLED };
+  return { status: EinvoiceStatus.ISSUED };
+}
+
 const twoDigits = (n: number) => String(n).padStart(2, '0');
 // HH:mm in the server's time zone (the venue's, TZ).
 const hhmm = (date: Date) =>
@@ -297,19 +312,32 @@ export class EinvoicesService implements OnApplicationBootstrap {
     };
   }
 
-  // Paid bills of a business day for the picker, with what is split already.
+  // The bills of the left column (spec 2026-10-01-hddt-bo-cuc-va-hd-tu-do §4):
+  // the paid ones of a range of business days, or those holding an invoice of
+  // a status. Pending work (drafts, errors, uncertain) is every day and keeps
+  // voided bills, so their uncertain invoices can still be settled.
   async bills(user: AuthUser, query: EinvoiceBillsQuery) {
     const branchId = await this.scope.resolveBranchId(user, query.branch);
-    const where: Prisma.OrderWhereInput = {
-      branchId,
-      status: OrderStatus.COMPLETED,
-    };
+    const today = toDbDate(businessDateOf(new Date()));
+    const days = dateRange(query.from, query.to) ?? { gte: today, lte: today };
+    const where: Prisma.OrderWhereInput = { branchId };
     if (query.billNumber) {
       where.billNumber = billNumberPrefixRange(query.billNumber);
+    }
+    if (query.status) {
+      // Einvoice(branchId, status, createdAt) or (branchId, businessDate).
+      where.einvoices = {
+        some: {
+          branchId,
+          ...statusWhere(query.status),
+          ...(query.status === 'ISSUED' && !query.billNumber
+            ? { businessDate: days }
+            : {}),
+        },
+      };
     } else {
-      where.businessDate = dbDay(
-        query.businessDate ?? businessDateOf(new Date()),
-      );
+      where.status = OrderStatus.COMPLETED;
+      if (!query.billNumber) where.businessDate = days;
     }
     const [orders, total] = await Promise.all([
       this.prisma.order.findMany({
@@ -319,6 +347,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
           billNumber: true,
           finalAmount: true,
           endTime: true,
+          cancelledAt: true,
           room: { select: { name: true } },
         },
         orderBy: { endTime: 'desc' },
@@ -342,6 +371,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
       billNumber: order.billNumber,
       roomName: order.room?.name ?? null,
       endTime: order.endTime,
+      cancelledAt: order.cancelledAt,
       finalAmount: order.finalAmount,
       allocated: Number(byOrder.get(order.id)?._sum.amount ?? 0),
       einvoiceCount: byOrder.get(order.id)?._count._all ?? 0,
@@ -1149,18 +1179,10 @@ export class EinvoicesService implements OnApplicationBootstrap {
     query: EinvoiceListQuery,
   ): Promise<Prisma.EinvoiceWhereInput> {
     const branchId = await this.scope.resolveBranchId(user, query.branch);
-    const where: Prisma.EinvoiceWhereInput = { branchId };
-    if (query.status === 'DRAFT') {
-      where.status = EinvoiceStatus.DRAFT;
-      where.lastError = null;
-    } else if (query.status === 'ERROR') {
-      where.status = EinvoiceStatus.DRAFT;
-      where.lastError = { not: null };
-    } else if (query.status === 'UNCERTAIN') {
-      where.status = NOT_SETTLED;
-    } else if (query.status) {
-      where.status = query.status;
-    }
+    const where: Prisma.EinvoiceWhereInput = {
+      branchId,
+      ...(query.status ? statusWhere(query.status) : {}),
+    };
     if (query.free) where.orderId = null;
     // Pending work (drafts, errors, uncertain) is listed whatever its day.
     const dated = !query.status || query.status === 'ISSUED';

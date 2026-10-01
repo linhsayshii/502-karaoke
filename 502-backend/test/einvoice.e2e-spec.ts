@@ -361,6 +361,52 @@ describe('E-invoices (e2e)', () => {
       });
     });
 
+    it('lists bills by day and by the status of their invoices', async () => {
+      const ids = async (query: string) =>
+        (
+          (await as('tn1_cs1').get(`/einvoices/bills${query}`).expect(200))
+            .body as Json[]
+        ).map((b) => b.orderId);
+      expect(await ids('')).toContain(orderId);
+      expect(await ids('?from=2020-01-01&to=2020-01-02')).toEqual([]);
+      expect(
+        await ids('?status=DRAFT&from=2020-01-01&to=2020-01-02'),
+      ).toContain(orderId);
+      expect(await ids('?status=ISSUED')).not.toContain(orderId);
+
+      // A voided bill keeps its drafts in the pending tabs, not in the day's bills.
+      const room = (
+        await as('ql1_cs1')
+          .post('/rooms', { name: 'HĐĐT-4', pricePerHour: 100000 })
+          .expect(201)
+      ).body as Json;
+      const voided = (
+        (await as('tn1_cs1').post('/orders', { roomId: room.id }).expect(201))
+          .body as Json
+      ).id as number;
+      await as('tn1_cs1')
+        .post(`/orders/${voided}/checkout`, { paymentMethod: 'CASH' })
+        .expect(200);
+      const draft = (
+        (
+          await as('tn1_cs1')
+            .post('/einvoices', { orderId: voided, amount: 0, lines: [] })
+            .expect(201)
+        ).body as Json
+      ).id as number;
+      await as('admin')
+        .post(`/orders/${voided}/void`, { reason: 'Nhập nhầm phòng' })
+        .expect(200);
+      expect(await ids('')).not.toContain(voided);
+      const pending = (
+        await as('tn1_cs1').get('/einvoices/bills?status=DRAFT').expect(200)
+      ).body as Json[];
+      expect(pending.find((b) => b.orderId === voided)?.cancelledAt).toEqual(
+        expect.any(String),
+      );
+      await as('tn1_cs1').delete(`/einvoices/${draft}`).expect(200);
+    });
+
     it('lists drafts whatever their day, and counts them', async () => {
       const drafts = (
         await as('hdqt_hddt')
@@ -391,8 +437,9 @@ describe('E-invoices (e2e)', () => {
     it('refuses a day that does not exist', async () => {
       await as('tn1_cs1').get('/einvoices?from=2026-13-01').expect(400);
       await as('tn1_cs1').get('/einvoices/summary?to=2026-02-30').expect(400);
+      await as('tn1_cs1').get('/einvoices/bills?from=2026-02-30').expect(400);
       await as('tn1_cs1')
-        .get('/einvoices/bills?businessDate=2026-02-30')
+        .get('/einvoices/bills?from=2026-05-02&to=2026-05-01')
         .expect(400);
       await as('tn1_cs1')
         .get('/einvoices?from=2026-05-02&to=2026-05-01')

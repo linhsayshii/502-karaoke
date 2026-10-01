@@ -179,13 +179,30 @@ export class EinvoiceBillsQuery {
 
   @ApiProperty({
     required: false,
-    description: 'Ngày kinh doanh; mặc định hôm nay',
+    enum: ['DRAFT', 'ERROR', 'UNCERTAIN', 'ISSUED'],
+    description: 'Chỉ bill có hóa đơn ở trạng thái này',
+  })
+  @IsOptional()
+  @IsIn(['DRAFT', 'ERROR', 'UNCERTAIN', 'ISSUED'])
+  status?: 'DRAFT' | 'ERROR' | 'UNCERTAIN' | 'ISSUED';
+
+  @ApiProperty({
+    required: false,
+    description: 'Từ ngày kinh doanh; bỏ trống cả hai là hôm nay',
   })
   @IsOptional()
   @Matches(DATE_RE, { message: DATE_MESSAGE })
-  businessDate?: string;
+  from?: string;
 
-  @ApiProperty({ required: false })
+  @ApiProperty({ required: false, description: 'Đến ngày kinh doanh' })
+  @IsOptional()
+  @Matches(DATE_RE, { message: DATE_MESSAGE })
+  to?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'Tìm theo đầu số bill, mọi ngày',
+  })
   @IsOptional()
   @Matches(BILL_NUMBER_RE, { message: 'Số bill chỉ gồm chữ số' })
   billNumber?: string;

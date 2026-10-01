@@ -902,3 +902,73 @@ describe('EinvoicesService invoice dates', () => {
     expect(data).not.toHaveProperty('invoiceDate');
   });
 });
+
+describe('EinvoicesService.bills', () => {
+  const listing = () => {
+    const order = {
+      findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
+    };
+    const service = new EinvoicesService(
+      { order, einvoice: { groupBy: jest.fn() } } as never,
+      {} as never,
+      { resolveBranchId: jest.fn().mockResolvedValue(1) } as never,
+      {} as never,
+      {} as never,
+    );
+    const whereOf = () =>
+      (order.findMany.mock.calls[0] as [{ where: unknown }])[0].where;
+    return { service, whereOf };
+  };
+  const september = {
+    gte: toDbDate('2026-09-01'),
+    lte: toDbDate('2026-09-30'),
+  };
+
+  it('lists the paid bills of a range of days', async () => {
+    const { service, whereOf } = listing();
+    await service.bills(user, { from: '2026-09-01', to: '2026-09-30' });
+    expect(whereOf()).toEqual({
+      branchId: 1,
+      status: 'COMPLETED',
+      businessDate: september,
+    });
+  });
+
+  it('lists the bills holding pending work whatever their day, voided ones too', async () => {
+    const { service, whereOf } = listing();
+    await service.bills(user, {
+      status: 'UNCERTAIN',
+      from: '2026-09-01',
+      to: '2026-09-30',
+    });
+    expect(whereOf()).toEqual({
+      branchId: 1,
+      einvoices: {
+        some: { branchId: 1, status: { in: ['SENDING', 'UNCERTAIN'] } },
+      },
+    });
+  });
+
+  it('dates issued invoices, not their bills', async () => {
+    const { service, whereOf } = listing();
+    await service.bills(user, {
+      status: 'ISSUED',
+      from: '2026-09-01',
+      to: '2026-09-30',
+    });
+    expect(whereOf()).toEqual({
+      branchId: 1,
+      einvoices: {
+        some: { branchId: 1, status: 'ISSUED', businessDate: september },
+      },
+    });
+  });
+
+  it('refuses a range that ends before it starts', async () => {
+    const { service } = listing();
+    await expect(
+      service.bills(user, { from: '2026-09-30', to: '2026-09-01' }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+});

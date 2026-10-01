@@ -4,6 +4,12 @@ import type { NextConfig } from "next";
 // so the Docker image sets it as a build arg; unset, it keeps pointing at production.
 const apiProxyTarget = process.env.API_PROXY_TARGET || 'https://kara.hvlsv.uk';
 
+// The report site (spec 2026-10-02-trang-bao-cao-hddt §7.1): a host starting
+// with "baocao." or "baocao-" (baocao.localhost:3000 in development) gets the
+// pages of app/report at the same paths as the main site. Keep in step with
+// REPORT_HOST_RE in src/lib/site.ts. Next matches `host` without the port.
+const REPORT_HOST = 'baocao[.-].+';
+
 // The API origin the browser calls, when it is not the app's own origin (/api),
 // and the WebSocket (/api/ws) of the same API origin.
 function apiOrigin() {
@@ -58,13 +64,36 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }];
   },
-  async rewrites() {
+  async redirects() {
+    // The report pages are reached only through their own host.
     return [
-      {
-        source: '/api/:path*',
-        destination: `${apiProxyTarget}/api/:path*`,
-      },
+      { source: '/report', missing: [{ type: 'host', value: REPORT_HOST }], destination: '/', permanent: false },
+      { source: '/report/:path*', missing: [{ type: 'host', value: REPORT_HOST }], destination: '/', permanent: false },
     ];
+  },
+  async rewrites() {
+    return {
+      // Checked before the pages. Only page paths move: not /api, /_next,
+      // Next's own __nextjs routes, nor files (they have a dot). Each of these
+      // rewrites sees the path the one before it wrote, so "/" comes after the
+      // catch-all (which never matches "/"): before it, "/" became /report and
+      // then /report/report.
+      beforeFiles: [
+        {
+          source: '/:path((?!api/|_next/|__nextjs)[^.]+)',
+          has: [{ type: 'host', value: REPORT_HOST }],
+          destination: '/report/:path*',
+        },
+        { source: '/', has: [{ type: 'host', value: REPORT_HOST }], destination: '/report' },
+      ],
+      afterFiles: [
+        {
+          source: '/api/:path*',
+          destination: `${apiProxyTarget}/api/:path*`,
+        },
+      ],
+      fallback: [],
+    };
   },
 };
 

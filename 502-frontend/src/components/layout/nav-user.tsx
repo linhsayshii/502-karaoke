@@ -31,12 +31,14 @@ import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/c
 import { useAuth } from "@/components/auth-provider";
 import { ChangePasswordDialog } from "@/components/change-password-dialog";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { useSite } from "@/components/layout/site-context";
 import { initials } from "@/lib/format";
 import { PurgeDataDialog } from "@/components/purge-data-dialog";
 import { can } from "@/lib/permissions";
 
 
 export function NavUser() {
+  const site = useSite();
   const { user, logout } = useAuth();
   const { isMobile } = useSidebar();
   const { theme, setTheme } = useTheme();
@@ -44,6 +46,7 @@ export function NavUser() {
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [purgeOpen, setPurgeOpen] = useState(false);
   if (!user) return null;
+  const canPurge = site === "main" && can(user, "purge");
 
   const identity = (
     <>
@@ -111,7 +114,7 @@ export function NavUser() {
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
-                {can(user, "purge") && (
+                {canPurge && (
                   <DropdownMenuItem variant="destructive" onSelect={() => setPurgeOpen(true)}>
                     <Trash2Icon />
                     Xóa dữ liệu
@@ -128,7 +131,7 @@ export function NavUser() {
       </SidebarMenu>
 
       <ChangePasswordDialog open={passwordOpen} onOpenChange={setPasswordOpen} />
-      {can(user, "purge") && <PurgeDataDialog open={purgeOpen} onOpenChange={setPurgeOpen} />}
+      {canPurge && <PurgeDataDialog open={purgeOpen} onOpenChange={setPurgeOpen} />}
       <ConfirmDialog
         open={logoutOpen}
         onOpenChange={setLogoutOpen}

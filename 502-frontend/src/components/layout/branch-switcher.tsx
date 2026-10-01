@@ -13,12 +13,14 @@ import {
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar";
 import { useAuth } from "@/components/auth-provider";
 import { APP_NAME, BrandMark } from "@/components/brand";
+import { useSite } from "@/components/layout/site-context";
 import { useBranchCode } from "@/lib/branch";
 import { can } from "@/lib/permissions";
 
 // Sidebar header: the app and the branch on screen. The chain manager can
 // switch branch and stays on the same page (ids dropped: /sales/rooms/12).
 export function BranchSwitcher() {
+  const site = useSite();
   const { user, branches } = useAuth();
   const branch = useBranchCode();
   const pathname = usePathname();
@@ -32,7 +34,7 @@ export function BranchSwitcher() {
       <BrandMark className="bg-sidebar-primary text-sidebar-primary-foreground" />
       <div className="grid flex-1 text-left text-sm leading-tight">
         <span className="truncate font-semibold">{APP_NAME}</span>
-        <span className="truncate text-xs text-muted-foreground">{label}</span>
+        <span className="truncate text-xs text-muted-foreground">{site === "report" ? `Trang báo cáo · ${label}` : label}</span>
       </div>
     </>
   );
@@ -51,7 +53,7 @@ export function BranchSwitcher() {
 
   const switchTo = (code: string) => {
     const [, , ...rest] = pathname.split("/");
-    const section = rest.filter((segment) => !/^\d+$/.test(segment)).join("/") || "sales/rooms";
+    const section = rest.filter((segment) => !/^\d+$/.test(segment)).join("/") || (site === "report" ? "sales/bills" : "sales/rooms");
     router.push(`/${code}/${section}`);
   };
 

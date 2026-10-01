@@ -13,9 +13,10 @@ export const DISCOUNTS_CHANGED = "discounts-changed";
 
 // Requests waiting for this manager (own branch; the chain manager: every
 // branch). Polled every 15 s (60 s while the socket is up) on managers' screens only; null for others.
-export function usePendingDiscounts(): number | null {
+// Off on the report site (`active` false).
+export function usePendingDiscounts(active = true): number | null {
   const { user } = useAuth();
-  const enabled = can(user, "discounts.approve");
+  const enabled = active && can(user, "discounts.approve");
   const [count, setCount] = useState<number | null>(null);
   // Last count seen: the toast fires only when it grows, never on first load.
   const last = useRef<number | null>(null);

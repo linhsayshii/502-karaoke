@@ -22,6 +22,9 @@ export interface User {
   position: StaffPosition | null;
   // Quản lý PR/KTV: edits the PR/KTV list and takes their roll call.
   managesPr: boolean;
+  // Vào trang báo cáo: a branch manager or HĐQT may use the report site (the
+  // chain manager always can); see canUseReportSite in lib/permissions.ts.
+  reportAccess: boolean;
   branchId: number | null;
   branch: BranchRef | null;
 }

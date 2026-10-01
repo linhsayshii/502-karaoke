@@ -2,6 +2,8 @@
 
 Ngày: 01/10/2026. Trạng thái: đã duyệt thiết kế từng phần, chờ duyệt spec.
 
+> Bố cục trang (§10.1–10.3), hóa đơn không theo bill, số tiền 0 của nháp và ngày hóa đơn lưu cùng nháp đã được sửa bởi `2026-10-01-hddt-bo-cuc-va-hd-tu-do-design.md`; đọc spec đó cho các mục này.
+
 ## 1. Bối cảnh và mục tiêu
 
 Các cơ sở cần xuất hóa đơn điện tử cho bill đã thanh toán, qua nhà cung cấp **Minvoice**. Minvoice không có API công khai cho phần mềm khác gọi vào. Project nghiên cứu `minvoice-hddt-sender` (`/Users/linhsayshii/Documents/PetProject/me beo/minvoice-hddt-sender`) đã dựng lại được API mà web app Minvoice dùng:

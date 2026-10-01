@@ -24,6 +24,8 @@ const TABS: { value: Tab; label: string; count?: keyof EinvoiceSummary }[] = [
   { value: "all", label: "Tất cả" },
   { value: "DRAFT", label: "Nháp", count: "draftCount" },
   { value: "ERROR", label: "Lỗi", count: "errorCount" },
+  // With the sends still in flight or cut off (SENDING, badge "Đang gửi"):
+  // the server lists and counts them here until opening one settles it.
   { value: "UNCERTAIN", label: "Không rõ", count: "uncertainCount" },
   { value: "ISSUED", label: "Đã xuất", count: "issuedCount" },
 ];

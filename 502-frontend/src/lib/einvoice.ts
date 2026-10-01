@@ -39,6 +39,10 @@ export function totalsOf(lines: EinvoiceLine[]): EinvoiceTotals {
 // is reloaded to show the row as the server has it, never "it failed".
 export const UNKNOWN_RESULT_MESSAGE = "Không rõ kết quả, đã tải lại để xem trạng thái hóa đơn";
 
+// The backend's STALE_SENDING_MS (einvoices.service.ts): an uncertain invoice
+// goes back to draft ("Chưa có — gửi lại") only this long after its lost send.
+export const STALE_SENDING_MS = 3 * 60_000;
+
 const dong = (value: number) => value.toLocaleString("vi-VN");
 
 // Why a draft cannot be issued yet, or null when it can: its lines must add

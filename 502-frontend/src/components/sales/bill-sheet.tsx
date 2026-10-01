@@ -95,7 +95,7 @@ function BillDetail({ orderId, onChanged }: { orderId: number; onChanged: () => 
   // Voiding or correcting a bill never touches its e-invoices on Minvoice.
   const einvoiceCount = order?._count?.einvoices ?? 0;
   const einvoiceNote = einvoiceCount
-    ? `Bill có ${einvoiceCount} hóa đơn điện tử (${order?.einvoices?.length ?? 0} đã xuất).`
+    ? `Bill có ${einvoiceCount} hóa đơn điện tử (${order?._count?.issuedEinvoices ?? 0} đã xuất).`
     : null;
 
   return (
@@ -208,8 +208,8 @@ function BillDetail({ orderId, onChanged }: { orderId: number; onChanged: () => 
           onOpenChange={setEditOpen}
           warning={einvoiceNote && `${einvoiceNote} Sửa bill không sửa hóa đơn trên Minvoice.`}
           onSaved={(saved) => {
-            // The correction's answer carries neither e-invoice field.
-            setOrder((prev) => ({ ...saved, _count: prev?._count, einvoices: prev?.einvoices }));
+            // The correction's answer carries no e-invoice count.
+            setOrder((prev) => ({ ...saved, _count: prev?._count }));
             onChanged();
           }}
         />

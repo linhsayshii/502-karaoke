@@ -158,9 +158,9 @@ export interface Order {
   taxPercent: number;
   taxAmount: string | number;
   finalAmount: string | number;
-  // GET /orders/:id only: e-invoices of the bill, for the edit / void dialogs.
-  _count?: { einvoices: number };
-  einvoices?: { id: number }[];
+  // GET /orders/:id only: e-invoices of the bill and how many are issued, for
+  // the edit / void dialogs.
+  _count?: { einvoices: number; issuedEinvoices: number };
 }
 
 type BillAmounts =
@@ -664,6 +664,8 @@ export interface EinvoiceDetail extends EinvoiceRow {
   draft: EinvoiceDraft | null;
   sellerTaxCode: string | null;
   minvoiceId: string | null;
+  // When the last send started (null once settled).
+  sendingAt: string | null;
   updatedAt: string;
   updatedBy: StaffRef | null;
   numberEditedAt: string | null;

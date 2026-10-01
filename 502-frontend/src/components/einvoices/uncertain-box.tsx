@@ -10,16 +10,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { useNotify } from "@/hooks/use-notify";
+import { useNow } from "@/hooks/use-now";
 import api, { isBadRequest, isSessionEnded } from "@/lib/api";
-import { UNKNOWN_RESULT_MESSAGE } from "@/lib/einvoice";
-import { formatDate, formatMoney, toDateInput } from "@/lib/format";
+import { STALE_SENDING_MS, UNKNOWN_RESULT_MESSAGE } from "@/lib/einvoice";
+import { formatDate, formatDateTime, formatMoney, formatTime, toDateInput } from "@/lib/format";
 import { can } from "@/lib/permissions";
 import type { EinvoiceConfigView, EinvoiceDetail } from "@/lib/types";
 
 // "Không rõ" (spec §9.2): the send got no answer. The chain manager has
 // Minvoice searched again (Kiểm tra lại), or looks there and either types the
-// number found or sends the invoice back to draft. Rendered inside the panel's
-// @container/einvoice.
+// number found or sends the invoice back to draft, not before STALE_SENDING_MS
+// after the lost send (Minvoice may still be saving it; the server refuses it
+// too). Rendered inside the panel's @container/einvoice.
 export function UncertainBox({
   einvoice,
   config,
@@ -43,6 +45,13 @@ export function UncertainBox({
   const [notSentOpen, setNotSentOpen] = useState(false);
   const canIssue = can(user, "einvoices.issue");
   const disabled = working || busy;
+
+  // As on the server: from the start of the lost send (its last write when
+  // that is unknown), rounded up to the minute its message names.
+  const sentAt = new Date(einvoice.sendingAt ?? einvoice.updatedAt);
+  const backToDraftFrom = new Date(Math.ceil((sentAt.getTime() + STALE_SENDING_MS) / 60_000) * 60_000);
+  const now = useNow(10_000);
+  const tooRecent = now < backToDraftFrom;
 
   // The server runs its date checks on the request's date even for a search:
   // today, or the newest date of the symbol when that is later.
@@ -106,9 +115,10 @@ export function UncertainBox({
         <AlertTitle>Không rõ Minvoice đã tạo hóa đơn chưa</AlertTitle>
         <AlertDescription className="flex w-full min-w-0 flex-col gap-3">
           <p>
-            Lần gửi ngày {formatDate(einvoice.invoiceDate)}, ký hiệu {einvoice.symbolCode ?? "—"} không nhận được trả
-            lời. Mở Minvoice, tìm hóa đơn {formatMoney(einvoice.amount)} của {einvoice.buyerName ?? "khách lẻ"} rồi chọn
-            một trong hai.
+            {einvoice.sendingAt ? `Lần gửi lúc ${formatDateTime(einvoice.sendingAt)}` : "Lần gửi (không rõ lúc nào)"}{" "}
+            (ngày hóa đơn {formatDate(einvoice.invoiceDate) || "—"}, ký hiệu {einvoice.symbolCode ?? "—"}) không nhận
+            được trả lời. Mở Minvoice, tìm hóa đơn {formatMoney(einvoice.amount)} của {einvoice.buyerName ?? "khách lẻ"}{" "}
+            rồi chọn cách đối chiếu bên dưới.
           </p>
           {/* What the last check found: it may carry the number to type in. */}
           {einvoice.lastError && (
@@ -146,10 +156,21 @@ export function UncertainBox({
                 >
                   Đã có — nhập số
                 </Button>
-                <Button size="sm" variant="outline" disabled={disabled} onClick={() => setNotSentOpen(true)}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={disabled || tooRecent}
+                  onClick={() => setNotSentOpen(true)}
+                >
                   Chưa có — gửi lại
                 </Button>
               </div>
+              {tooRecent && (
+                <p className="text-xs text-muted-foreground">
+                  &quot;Chưa có — gửi lại&quot; mở từ {formatTime(backToDraftFrom)}: Minvoice có thể vẫn đang lưu lần
+                  gửi lúc {formatTime(sentAt)}, hãy kiểm tra trên Minvoice sau giờ đó.
+                </p>
+              )}
             </div>
           ) : (
             <p className="text-xs">Chỉ quản lý hệ thống đối chiếu được hóa đơn này.</p>
@@ -160,7 +181,10 @@ export function UncertainBox({
         open={recheckOpen}
         onOpenChange={setRecheckOpen}
         title="Kiểm tra lại trên Minvoice?"
-        description={`Hệ thống tìm hóa đơn theo mã đối chiếu trên Minvoice và ghi số nếu thấy. Chỉ khi chắc chắn chưa có và lần gửi trước đã quá lâu, hóa đơn được gửi lại, mang ngày ${formatDate(recheckDate)}.`}
+        // The server never sends again from a search while its automatic
+        // search is unconfirmed (MARKER_SEARCH_CONFIRMED, real-Minvoice check):
+        // reword this when that changes.
+        description="Hệ thống tìm hóa đơn theo mã đối chiếu trên Minvoice và ghi số nếu chắc chắn đó là hóa đơn này. Cách tìm tự động chưa được kiểm chứng: nếu không thấy, hóa đơn vẫn ở Không rõ và không được gửi lại; khi đó hãy tự tìm trên Minvoice."
         confirmLabel="Kiểm tra lại"
         onConfirm={recheck}
       />
@@ -168,7 +192,7 @@ export function UncertainBox({
         open={notSentOpen}
         onOpenChange={setNotSentOpen}
         title="Minvoice chưa có hóa đơn này?"
-        description="Hóa đơn về lại nháp để xuất lần nữa. Nếu thật ra Minvoice đã tạo, xuất lại sẽ sinh hóa đơn trùng."
+        description="Chỉ chọn khi đã tự tìm trên Minvoice và chắc chắn chưa có. Hóa đơn về lại nháp để xuất lần nữa; nếu thật ra Minvoice đã tạo, xuất lại sẽ sinh hóa đơn trùng."
         confirmLabel="Về nháp"
         onConfirm={() => resolve({ found: false })}
       />

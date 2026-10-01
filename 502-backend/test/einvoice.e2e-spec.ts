@@ -423,8 +423,7 @@ describe('E-invoices (e2e)', () => {
     it('tells the bill sheet how many e-invoices a bill has', async () => {
       const order = (await as('admin').get(`/orders/${orderId}`).expect(200))
         .body as Json;
-      expect(order._count).toEqual({ einvoices: 1 });
-      expect(order.einvoices).toEqual([]);
+      expect(order._count).toEqual({ einvoices: 1, issuedEinvoices: 0 });
       // An open session skips the lookup: the room page polls this route.
       const room = (
         await as('ql1_cs1')
@@ -439,8 +438,7 @@ describe('E-invoices (e2e)', () => {
           .get(`/orders/${session.id as number}`)
           .expect(200)
       ).body as Json;
-      expect(open._count).toEqual({ einvoices: 0 });
-      expect(open.einvoices).toEqual([]);
+      expect(open._count).toEqual({ einvoices: 0, issuedEinvoices: 0 });
     });
   });
   describe('issuing', () => {
@@ -527,6 +525,9 @@ describe('E-invoices (e2e)', () => {
         minInvoiceDate: today(),
         latestInvoiceNumber: 1001,
       });
+      const order = (await as('admin').get(`/orders/${orderId}`).expect(200))
+        .body as Json;
+      expect(order._count).toEqual({ einvoices: 1, issuedEinvoices: 1 });
     });
 
     it('keeps invoice dates in order and in the year of the symbol', async () => {
@@ -620,14 +621,27 @@ describe('E-invoices (e2e)', () => {
       const again = (await issue(id).expect(200)).body as Json;
       expect(again).toMatchObject({
         status: 'UNCERTAIN',
-        lastError: `Chưa tìm thấy hóa đơn K502-${id} trên Minvoice; kiểm tra trên Minvoice rồi đối chiếu bằng tay`,
+        lastError: `Tìm tự động không thấy hóa đơn K502-${id}, nhưng cách tìm này chưa được kiểm chứng: chưa chắc Minvoice chưa có hóa đơn; kiểm tra trên Minvoice rồi đối chiếu bằng tay`,
         symbolCode: fake.symbolCode(),
         invoiceDate: today(),
       });
+      expect(again.sendingAt).not.toBeNull();
       expect(fake.posts).toBe(posts + 1);
       await as('tn1_cs1')
         .post(`/einvoices/${id}/resolve`, { found: false })
         .expect(403);
+      // Minvoice may still be saving the lost send: not back to draft yet.
+      const early = await as('admin')
+        .post(`/einvoices/${id}/resolve`, { found: false })
+        .expect(409);
+      expect((early.body as Json).message).toMatch(
+        /^Lần gửi lúc \d{2}:\d{2} còn quá mới, đợi đến \d{2}:\d{2} rồi kiểm tra lại trên Minvoice$/,
+      );
+      expect(
+        ((await as('admin').get(`/einvoices/${id}`).expect(200)).body as Json)
+          .status,
+      ).toBe('UNCERTAIN');
+      await sentLongAgo(id);
       const back = (
         await as('admin')
           .post(`/einvoices/${id}/resolve`, { found: false })
@@ -655,6 +669,14 @@ describe('E-invoices (e2e)', () => {
         invoiceDate: today(),
       });
     });
+
+    // Ages the lost send of an uncertain invoice past STALE_SENDING_MS, as
+    // if the manual check came minutes later.
+    const sentLongAgo = (id: number) =>
+      app.get(PrismaService).einvoice.update({
+        where: { id },
+        data: { sendingAt: new Date(Date.now() - STALE_SENDING_MS - 1000) },
+      });
 
     // A lost answer: the invoice exists on Minvoice under K502-<id>.
     const lostAnswer = async () => {
@@ -750,6 +772,7 @@ describe('E-invoices (e2e)', () => {
         });
         expect((body.draft as Json).lines).toHaveLength(1);
         expect(fake.posts).toBe(posts);
+        await sentLongAgo(id);
         await as('admin')
           .post(`/einvoices/${id}/resolve`, { found: false })
           .expect(200);
@@ -840,6 +863,7 @@ describe('E-invoices (e2e)', () => {
         service.markerSearchConfirmed = trusted;
         fake.behaviours = [];
       }
+      await sentLongAgo(id);
       await as('admin')
         .post(`/einvoices/${id}/resolve`, { found: false })
         .expect(200);
@@ -902,6 +926,10 @@ describe('E-invoices (e2e)', () => {
       await as('admin')
         .patch(`/einvoices/${draftId}/number`, { invoiceNumber: 1500 })
         .expect(409);
+      // At most 8 digits (Thông tư 78/2021).
+      await as('admin')
+        .patch(`/einvoices/${draftId}/number`, { invoiceNumber: 100_000_000 })
+        .expect(400);
       const edited = (
         await as('admin')
           .patch(`/einvoices/${draftId}/number`, { invoiceNumber: 2001 })
@@ -968,6 +996,17 @@ describe('E-invoices (e2e)', () => {
           .status,
       ).toBe('SENDING');
       await stuck();
+      // Not opened yet, still SENDING: listed and counted as "Không rõ".
+      const listed = (
+        await as('tn1_cs1').get('/einvoices?status=UNCERTAIN').expect(200)
+      ).body as Json[];
+      expect(listed.find((e) => e.id === id)).toMatchObject({
+        status: 'SENDING',
+      });
+      const summary = (
+        await as('tn1_cs1').get('/einvoices/summary').expect(200)
+      ).body as Json;
+      expect(summary.uncertainCount).toBeGreaterThanOrEqual(1);
       const row = (await as('tn1_cs1').get(`/einvoices/${id}`).expect(200))
         .body as Json;
       expect(row).toMatchObject({

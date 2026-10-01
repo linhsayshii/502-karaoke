@@ -23,6 +23,9 @@ import { BUYER_TAX_CODE_RE, VAT_RATES, type VatRate } from '../einvoice-types';
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DATE_MESSAGE = 'Ngày phải có dạng YYYY-MM-DD';
 const BILL_NUMBER_RE = /^\d{1,15}$/;
+// Thông tư 78/2021: an invoice number has at most 8 digits.
+const MAX_INVOICE_NUMBER = 99_999_999;
+const INVOICE_NUMBER_MESSAGE = 'Số hóa đơn có tối đa 8 chữ số';
 
 export class EinvoiceLineDto {
   @ApiProperty({ maxLength: 300 })
@@ -190,6 +193,7 @@ export class ResolveEinvoiceDto {
   @ValidateIf((dto: ResolveEinvoiceDto) => dto.found)
   @IsInt()
   @Min(1)
+  @Max(MAX_INVOICE_NUMBER, { message: INVOICE_NUMBER_MESSAGE })
   invoiceNumber?: number;
 }
 
@@ -197,5 +201,6 @@ export class EinvoiceNumberDto {
   @ApiProperty()
   @IsInt()
   @Min(1)
+  @Max(MAX_INVOICE_NUMBER, { message: INVOICE_NUMBER_MESSAGE })
   invoiceNumber: number;
 }

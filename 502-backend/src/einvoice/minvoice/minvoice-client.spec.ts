@@ -101,6 +101,29 @@ describe('MinvoiceClient', () => {
     expect(error).toMatchObject({ reason: 'password' });
   });
 
+  // ABP LoginResultType: 3 NotAllowed, 4 LockedOut, 5 RequiresTwoFactor.
+  it.each([
+    [3, 'not-allowed', /không cho tài khoản này đăng nhập/],
+    [4, 'locked', /đang khóa tạm tài khoản/],
+    [5, 'two-factor', /xác thực hai bước/],
+  ])(
+    'tells login result %i (%s) from a wrong password',
+    async (result, reason, message) => {
+      replies.push(
+        reply({ success: true, tenantId: 't1', isActive: true }),
+        reply({}, 200, ['XSRF-TOKEN=anon']),
+        reply({ result, description: 'whatever Minvoice says' }),
+      );
+      const error = await client
+        .login('0107811836', 'admin', 'pw')
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(MinvoiceLoginError);
+      expect(error).toMatchObject({ reason });
+      expect((error as Error).message).toMatch(message);
+      expect((error as Error).message).not.toMatch(/Sai tên đăng nhập/);
+    },
+  );
+
   it('sends an invoice with the session and reads its number', async () => {
     replies.push(reply({ id: 'inv-1', invoiceNumber: 1015, invoiceStatus: 0 }));
     await expect(

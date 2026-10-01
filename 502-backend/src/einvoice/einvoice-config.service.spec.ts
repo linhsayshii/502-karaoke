@@ -121,6 +121,88 @@ describe('EinvoiceConfigService.relogin', () => {
     logins[1](session('c'));
     await expect(next).resolves.toEqual(session('c'));
   });
+
+  // A locked, not allowed or two-factor account is not a changed password:
+  // what is stored for the page says what happened.
+  it.each([
+    ['locked', 'Minvoice đang khóa tạm tài khoản'],
+    ['not-allowed', 'Minvoice không cho tài khoản này đăng nhập'],
+    ['two-factor', 'Tài khoản Minvoice bật xác thực hai bước'],
+  ] as const)(
+    'stores what happened when the account is %s',
+    async (reason, message) => {
+      const failed = service.relogin(1);
+      await flush();
+      logins[0](new MinvoiceLoginError(reason, message));
+      await expect(failed).rejects.toThrow(message);
+      expect(update).toHaveBeenCalledWith({
+        where: { branchId: 1 },
+        data: { loginError: message, sessionEnc: null },
+      });
+    },
+  );
+
+  // Spec §8: a send must not post to one tenant with the cookies of another.
+  it('refuses a session of another tax code than the one expected', async () => {
+    const calls = [
+      service.relogin(1, TAX_CODE),
+      service.relogin(1, '0100000001'),
+    ];
+    await flush();
+    expect(login).toHaveBeenCalledTimes(1);
+    logins[0](session('a'));
+    await expect(calls[0]).resolves.toEqual(session('a'));
+    await expect(calls[1]).rejects.toThrow(
+      `MST của cơ sở đã đổi từ 0100000001 sang ${TAX_CODE}`,
+    );
+  });
+});
+
+describe('EinvoiceConfigService.login', () => {
+  const dto = { username: 'admin', password: 'the-typed-password' };
+  let login: jest.Mock;
+  let service: EinvoiceConfigService;
+
+  beforeEach(() => {
+    login = jest.fn();
+    const prisma = {
+      branch: {
+        findUniqueOrThrow: jest.fn().mockResolvedValue({ taxCode: TAX_CODE }),
+      },
+    };
+    service = new EinvoiceConfigService(
+      prisma as never,
+      { resolveBranchId: jest.fn().mockResolvedValue(1) } as never,
+      { login } as unknown as MinvoiceClient,
+    );
+  });
+  const user = { id: 1, role: 'CHAIN_MANAGER' } as never;
+  const attempt = () =>
+    service.login(user, 'cs1', dto).catch((e: unknown) => e);
+
+  it('locks the branch after five wrong passwords', async () => {
+    login.mockRejectedValue(
+      new MinvoiceLoginError('password', 'Sai tên đăng nhập hoặc mật khẩu'),
+    );
+    for (let i = 0; i < 5; i++) {
+      expect(await attempt()).toBeInstanceOf(BadRequestException);
+    }
+    expect(await attempt()).toMatchObject({ status: 429 });
+    expect(login).toHaveBeenCalledTimes(5);
+  });
+
+  it.each(['locked', 'not-allowed', 'two-factor'] as const)(
+    'does not count a %s account as a wrong password',
+    async (reason) => {
+      login.mockRejectedValue(new MinvoiceLoginError(reason, 'Không được'));
+      for (let i = 0; i < 6; i++) {
+        const error = await attempt();
+        expect(error).toBeInstanceOf(BadRequestException);
+        expect(error).toMatchObject({ message: 'Không được' });
+      }
+      expect(login).toHaveBeenCalledTimes(6);
+    },
+  );
 });
 
 describe('EinvoiceConfigService.latestIssued', () => {

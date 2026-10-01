@@ -177,6 +177,28 @@ describe('EinvoiceSender (spec §9.1)', () => {
     });
   });
 
+  it('logs in again only for the tax code it sends to', async () => {
+    const { sender, config } = setup([refused(), ok(6)]);
+    await sender.send({ ...ready, session: null }, build);
+    expect(config.relogin.mock.calls).toEqual([
+      [1, ready.taxCode],
+      [1, ready.taxCode],
+    ]);
+  });
+
+  // The branch moved to another MST during the send: its account belongs to
+  // another tenant, so nothing is posted with it.
+  it('stops when the branch now logs in to another tax code', async () => {
+    const { sender, client, config } = setup([refused()]);
+    const changed = `MST của cơ sở đã đổi từ ${ready.taxCode} sang 0100000001, tải lại rồi thử lại`;
+    config.relogin.mockRejectedValueOnce(new BadRequestException(changed));
+    await expect(sender.send(ready, build)).resolves.toEqual({
+      kind: 'failed',
+      message: changed,
+    });
+    expect(client.createInvoice).toHaveBeenCalledTimes(1);
+  });
+
   it('stops when the symbol is gone from the account', async () => {
     const { sender, client, config } = setup([refused()]);
     config.refreshRange.mockRejectedValueOnce(

@@ -66,6 +66,12 @@ const PASSWORD_CHANGED =
 const PASSWORD_UNREADABLE =
   'Không đọc được mật khẩu Minvoice đã lưu (khóa EINVOICE_SECRET đã đổi?), quản lý hệ thống cần đăng nhập lại';
 
+// A session and the tenant it was opened on.
+interface BranchLogin {
+  taxCode: string;
+  session: MinvoiceSession;
+}
+
 function parseSession(text: string | null): MinvoiceSession | null {
   if (!text) return null;
   try {
@@ -83,10 +89,11 @@ function parseSession(text: string | null): MinvoiceSession | null {
 @Injectable()
 export class EinvoiceConfigService {
   // Five wrong Minvoice passwords in 15 minutes lock the branch's login for
-  // 15 minutes, before Minvoice locks the account itself.
+  // 15 minutes, before Minvoice locks the account itself. Only a wrong
+  // password counts (MinvoiceLoginError reason 'password').
   private throttle = new LoginThrottle();
   // One re-login per branch at a time; at most one entry per branch.
-  private relogins = new Map<number, Promise<MinvoiceSession>>();
+  private relogins = new Map<number, Promise<BranchLogin>>();
 
   constructor(
     private prisma: PrismaService,
@@ -344,15 +351,25 @@ export class EinvoiceConfigService {
     });
   }
 
-  // Logs the branch in again with the stored password, one at a time per branch.
-  relogin(branchId: number): Promise<MinvoiceSession> {
-    const running = this.relogins.get(branchId);
-    if (running) return running;
-    const promise = this.loginAgain(branchId).finally(() =>
-      this.relogins.delete(branchId),
-    );
-    this.relogins.set(branchId, promise);
-    return promise;
+  // Logs the branch in again with the stored password, one at a time per
+  // branch. With `taxCode`, the session must be of that tenant: the branch may
+  // have moved to another MST (and logged in to its account) since the caller
+  // read its config, and the caller is about to talk to that MST's host.
+  async relogin(branchId: number, taxCode?: string): Promise<MinvoiceSession> {
+    let running = this.relogins.get(branchId);
+    if (!running) {
+      running = this.loginAgain(branchId).finally(() =>
+        this.relogins.delete(branchId),
+      );
+      this.relogins.set(branchId, running);
+    }
+    const login = await running;
+    if (taxCode !== undefined && login.taxCode !== taxCode) {
+      throw new BadRequestException(
+        `MST của cơ sở đã đổi từ ${taxCode} sang ${login.taxCode}, tải lại rồi thử lại`,
+      );
+    }
+    return login.session;
   }
 
   // Runs a read with the stored session, logging in again once when Minvoice
@@ -372,7 +389,7 @@ export class EinvoiceConfigService {
         }
       }
     }
-    const fresh = await this.relogin(branchId);
+    const fresh = await this.relogin(branchId, config.taxCode);
     try {
       return await read(config.taxCode, fresh);
     } catch (error) {
@@ -380,7 +397,7 @@ export class EinvoiceConfigService {
     }
   }
 
-  private async loginAgain(branchId: number): Promise<MinvoiceSession> {
+  private async loginAgain(branchId: number): Promise<BranchLogin> {
     const config = await this.account(branchId);
     const password = decryptSecret(config.passwordEnc);
     if (password === null) throw new BadRequestException(PASSWORD_UNREADABLE);
@@ -398,9 +415,11 @@ export class EinvoiceConfigService {
           loggedInAt: new Date(),
         },
       });
-      return session;
+      return { taxCode: config.taxCode, session };
     } catch (error) {
       if (error instanceof MinvoiceLoginError) {
+        // Only a refused password means it was changed; a locked, not
+        // allowed or two-factor account keeps its own message.
         const message =
           error.reason === 'password' ? PASSWORD_CHANGED : error.message;
         await this.prisma.einvoiceConfig.update({

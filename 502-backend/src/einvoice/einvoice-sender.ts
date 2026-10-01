@@ -42,7 +42,9 @@ export class EinvoiceSender {
     let config = ready;
     let session: MinvoiceSession;
     try {
-      session = config.session ?? (await this.config.relogin(config.branchId));
+      session =
+        config.session ??
+        (await this.config.relogin(config.branchId, config.taxCode));
     } catch (error) {
       return { kind: 'failed', message: messageOf(error) };
     }
@@ -51,9 +53,11 @@ export class EinvoiceSender {
     if (first.kind !== 'retry') return first;
 
     // Nothing was created by the first request: a login or range failure
-    // here leaves nothing on Minvoice either.
+    // here leaves nothing on Minvoice either. The new session must be of the
+    // tenant the invoice was locked for: the branch's account may belong to
+    // another MST by now, and its cookies never go to this one's host.
     try {
-      session = await this.config.relogin(config.branchId);
+      session = await this.config.relogin(config.branchId, config.taxCode);
       config = await this.config.refreshRange(config, session);
     } catch (error) {
       return { kind: 'failed', message: messageOf(error) };

@@ -389,7 +389,8 @@ describe('EinvoicesService.issue of an uncertain invoice', () => {
     [
       'nothing found while the search is unconfirmed',
       () => Promise.resolve({ kind: 'none' }),
-      /^Chưa tìm thấy hóa đơn K502-12 trên Minvoice; /,
+      // Never worded as leave to press "Chưa có": the search is not trusted.
+      /^Tìm tự động không thấy hóa đơn K502-12, nhưng cách tìm này chưa được kiểm chứng: chưa chắc Minvoice chưa có hóa đơn; /,
     ],
   ])(
     'leaves it uncertain after %s, sending nothing',
@@ -532,6 +533,216 @@ describe('EinvoicesService.issue after an unexpected error', () => {
         lastError:
           'Lỗi không xác định khi gửi, hãy đối chiếu trên Minvoice: boom',
       },
+    });
+  });
+});
+
+// Spec §9.2: "Chưa có — gửi lại" sends the invoice back to draft, from where
+// it may be posted again. Minvoice may still be saving the lost request (our
+// timeout is not its own), so not before STALE_SENDING_MS after that send.
+describe('EinvoicesService.resolve', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  const hhmm = (date: Date) =>
+    `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  const uncertainRow = (fields: Record<string, unknown>) => ({
+    branchId: 1,
+    status: 'UNCERTAIN',
+    draft: { buyerAddress: null, buyerEmail: null, lines: [line] },
+    sellerTaxCode: ready.taxCode,
+    symbolCode: ready.symbolCode,
+    updatedAt: new Date(),
+    ...fields,
+  });
+  const resolving = (fields: Record<string, unknown>) => {
+    const context = setup(issued);
+    context.einvoice.findUnique.mockResolvedValueOnce(uncertainRow(fields));
+    return context;
+  };
+
+  it('refuses to send back to draft a send that is still too recent', async () => {
+    const sendingAt = new Date(Date.now() - 30_000);
+    const { service, einvoice } = resolving({ sendingAt });
+    const error = await service
+      .resolve(user, 12, { found: false })
+      .catch((e: unknown) => e);
+    // The minute from which it may be done, rounded up.
+    const allowed = new Date(
+      Math.ceil((sendingAt.getTime() + STALE_SENDING_MS) / 60_000) * 60_000,
+    );
+    expect(error).toMatchObject({
+      status: 409,
+      message: `Lần gửi lúc ${hhmm(sendingAt)} còn quá mới, đợi đến ${hhmm(allowed)} rồi kiểm tra lại trên Minvoice`,
+    });
+    expect(einvoice.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('sends back to draft once the send is old enough, checked in the write', async () => {
+    const sendingAt = new Date(Date.now() - STALE_SENDING_MS - 1000);
+    const { service, einvoice } = resolving({ sendingAt });
+    einvoice.findUnique.mockResolvedValueOnce({
+      id: 12,
+      branchId: 1,
+      status: 'DRAFT',
+      invoiceDate: null,
+    });
+    await service.resolve(user, 12, { found: false });
+    const [{ where, data }] = einvoice.updateMany.mock.calls[0] as [
+      { where: Record<string, unknown>; data: Record<string, unknown> },
+    ];
+    // A send started after the row was read (a recheck) is not cleared.
+    expect(where).toEqual({
+      id: 12,
+      status: 'UNCERTAIN',
+      OR: [
+        { sendingAt: { lte: expect.any(Date) as unknown } },
+        { sendingAt: null, updatedAt: { lte: expect.any(Date) as unknown } },
+      ],
+    });
+    expect(data).toMatchObject({ status: 'DRAFT', sendingAt: null });
+  });
+
+  it('goes by the last write when the time of the send is unknown', async () => {
+    const updatedAt = new Date(Date.now() - 60_000);
+    const { service, einvoice } = resolving({ sendingAt: null, updatedAt });
+    await expect(
+      service.resolve(user, 12, { found: false }),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringMatching(
+        new RegExp(
+          `^Không rõ lúc gửi; hóa đơn đổi lần cuối lúc ${hhmm(updatedAt)}, đợi đến `,
+        ),
+      ) as unknown,
+    });
+    expect(einvoice.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('records a number found on Minvoice whatever the age of the send', async () => {
+    const { service, einvoice } = resolving({ sendingAt: new Date() });
+    einvoice.findUnique.mockResolvedValueOnce({
+      id: 12,
+      branchId: 1,
+      status: 'ISSUED',
+      invoiceDate: null,
+    });
+    await service.resolve(user, 12, { found: true, invoiceNumber: 1015 });
+    const [{ where }] = einvoice.updateMany.mock.calls[0] as [
+      { where: Record<string, unknown> },
+    ];
+    expect(where).toEqual({ id: 12, status: 'UNCERTAIN' });
+  });
+
+  it('explains a send that became recent between the read and the write', async () => {
+    const { service, einvoice } = resolving({
+      sendingAt: new Date(Date.now() - STALE_SENDING_MS - 1000),
+    });
+    einvoice.updateMany.mockResolvedValueOnce({ count: 0 });
+    const sendingAt = new Date();
+    einvoice.findUnique.mockResolvedValueOnce(uncertainRow({ sendingAt }));
+    await expect(
+      service.resolve(user, 12, { found: false }),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringMatching(
+        new RegExp(`^Lần gửi lúc ${hhmm(sendingAt)} còn quá mới`),
+      ) as unknown,
+    });
+  });
+});
+
+describe('EinvoicesService.editNumber', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('logs who changed the number from what to what', async () => {
+    const { service, einvoice } = setup(issued);
+    const log = jest
+      .spyOn(Logger.prototype, 'log')
+      .mockImplementation(() => undefined);
+    einvoice.findUnique
+      .mockResolvedValueOnce({
+        branchId: 1,
+        sellerTaxCode: ready.taxCode,
+        symbolCode: ready.symbolCode,
+        invoiceNumber: 1015,
+      })
+      .mockResolvedValueOnce({
+        id: 12,
+        branchId: 1,
+        status: 'ISSUED',
+        invoiceDate: null,
+      });
+    await service.editNumber(user, 12, { invoiceNumber: 1016 });
+    expect(log).toHaveBeenCalledWith(
+      'Einvoice 12: number 1015 → 1016 by user 7',
+    );
+  });
+
+  it('logs nothing when the number was not changed', async () => {
+    const { service, einvoice } = setup(issued);
+    const log = jest
+      .spyOn(Logger.prototype, 'log')
+      .mockImplementation(() => undefined);
+    einvoice.findUnique.mockResolvedValueOnce({
+      branchId: 1,
+      sellerTaxCode: ready.taxCode,
+      symbolCode: ready.symbolCode,
+      invoiceNumber: 1015,
+    });
+    einvoice.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(
+      service.editNumber(user, 12, { invoiceNumber: 1016 }),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(log).not.toHaveBeenCalled();
+  });
+});
+
+// A SENDING row is pending work too: one whose send was cut off stays
+// SENDING until it is opened, and must not drop out of the tabs meanwhile.
+describe('EinvoicesService pending "Không rõ" work', () => {
+  const pending = { in: ['SENDING', 'UNCERTAIN'] };
+
+  it('lists invoices being sent with the uncertain ones', async () => {
+    const einvoice = {
+      findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
+    };
+    const service = new EinvoicesService(
+      { einvoice } as never,
+      {} as never,
+      { resolveBranchId: jest.fn().mockResolvedValue(1) } as never,
+      {} as never,
+      {} as never,
+    );
+    await service.list(user, { status: 'UNCERTAIN' });
+    expect(einvoice.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { branchId: 1, status: pending },
+        take: 500,
+      }),
+    );
+  });
+
+  it('counts them together', async () => {
+    const count = jest.fn().mockResolvedValue(0);
+    const service = new EinvoicesService(
+      {} as never,
+      {
+        einvoice: {
+          count,
+          aggregate: jest.fn().mockResolvedValue({
+            _count: { _all: 0 },
+            _sum: { amount: null, vatAmount: null },
+          }),
+        },
+      } as never,
+      { resolveBranchId: jest.fn().mockResolvedValue(1) } as never,
+      {} as never,
+      {} as never,
+    );
+    await service.summary(user, {});
+    expect(count).toHaveBeenCalledWith({
+      where: { branchId: 1, status: pending },
     });
   });
 });

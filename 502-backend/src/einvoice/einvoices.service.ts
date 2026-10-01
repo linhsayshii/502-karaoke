@@ -172,6 +172,37 @@ function sentHeader(ready: IssueConfig, dto: IssueEinvoiceDto) {
 export const STALE_SENDING_MS = 3 * 60_000;
 const STALE_SENDING_ERROR = 'Lần gửi bị cắt ngang, hãy đối chiếu trên Minvoice';
 
+// Pending "Không rõ" work: a SENDING row whose send was cut off stays SENDING
+// until it is opened (sweepStaleSending), so it is listed and counted with
+// the uncertain ones. (branchId, status, createdAt) index.
+const NOT_SETTLED = { in: [EinvoiceStatus.SENDING, EinvoiceStatus.UNCERTAIN] };
+
+const twoDigits = (n: number) => String(n).padStart(2, '0');
+// HH:mm in the server's time zone (the venue's, TZ).
+const hhmm = (date: Date) =>
+  `${twoDigits(date.getHours())}:${twoDigits(date.getMinutes())}`;
+
+// Why an uncertain send may not go back to draft yet, or null. Going back to
+// draft leads to a new POST, and Minvoice may still be saving the lost one
+// (our timeout is not its own) until STALE_SENDING_MS after it started.
+// Every path to UNCERTAIN keeps sendingAt (the lock stamps it, the outcome
+// and the sweeps keep it, a recheck puts the lost send's back); a row without
+// it is timed from its last write, which never comes before its last send.
+function tooRecent(
+  row: { sendingAt: Date | null; updatedAt: Date },
+  now = Date.now(),
+): string | null {
+  const since = row.sendingAt ?? row.updatedAt;
+  if (now - since.getTime() >= STALE_SENDING_MS) return null;
+  // Rounded up to the minute, so the time named is surely late enough.
+  const allowed = new Date(
+    Math.ceil((since.getTime() + STALE_SENDING_MS) / 60_000) * 60_000,
+  );
+  return row.sendingAt
+    ? `Lần gửi lúc ${hhmm(since)} còn quá mới, đợi đến ${hhmm(allowed)} rồi kiểm tra lại trên Minvoice`
+    : `Không rõ lúc gửi; hóa đơn đổi lần cuối lúc ${hhmm(since)}, đợi đến ${hhmm(allowed)} rồi kiểm tra lại trên Minvoice`;
+}
+
 // The kind and Prisma code of an error, for a log line: never its message,
 // which may quote the values written.
 function errorKind(error: unknown): string {
@@ -246,7 +277,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
         },
       }),
       this.reportDb.einvoice.count({
-        where: { branchId, status: EinvoiceStatus.UNCERTAIN },
+        where: { branchId, status: NOT_SETTLED },
       }),
       this.reportDb.einvoice.aggregate({
         where: { branchId, status: EinvoiceStatus.ISSUED, businessDate },
@@ -638,8 +669,9 @@ export class EinvoicesService implements OnApplicationBootstrap {
       );
     }
     if (!this.markerSearchConfirmed) {
+      // Never worded as leave to press "Chưa có": the search is not trusted.
       return uncertain(
-        `Chưa tìm thấy hóa đơn ${marker} trên Minvoice; ${MANUAL_CHECK}`,
+        `Tìm tự động không thấy hóa đơn ${marker}, nhưng cách tìm này chưa được kiểm chứng: chưa chắc Minvoice chưa có hóa đơn; ${MANUAL_CHECK}`,
       );
     }
     // Minvoice may still be saving the lost send (our timeout is not its
@@ -715,6 +747,8 @@ export class EinvoicesService implements OnApplicationBootstrap {
         draft: true,
         sellerTaxCode: true,
         symbolCode: true,
+        sendingAt: true,
+        updatedAt: true,
       },
     });
     if (!row) throw new NotFoundException('Không tìm thấy hóa đơn điện tử');
@@ -723,6 +757,10 @@ export class EinvoicesService implements OnApplicationBootstrap {
     if (row.status !== EinvoiceStatus.UNCERTAIN) {
       throw new ConflictException(NOT_UNCERTAIN);
     }
+    // "Chưa có — gửi lại": a draft may be posted again.
+    const recent = dto.found ? null : tooRecent(row);
+    if (recent) throw new ConflictException(recent);
+    const cutoff = new Date(Date.now() - STALE_SENDING_MS);
     const data: Prisma.EinvoiceUncheckedUpdateManyInput = dto.found
       ? {
           status: EinvoiceStatus.ISSUED,
@@ -745,9 +783,21 @@ export class EinvoicesService implements OnApplicationBootstrap {
         };
     let count: number;
     try {
-      // The status condition settles a race with another resolve.
+      // The status condition settles a race with another resolve; the age
+      // one with a recheck that sent it again after it was read.
       ({ count } = await this.prisma.einvoice.updateMany({
-        where: { id, status: EinvoiceStatus.UNCERTAIN },
+        where: {
+          id,
+          status: EinvoiceStatus.UNCERTAIN,
+          ...(dto.found
+            ? {}
+            : {
+                OR: [
+                  { sendingAt: { lte: cutoff } },
+                  { sendingAt: null, updatedAt: { lte: cutoff } },
+                ],
+              }),
+        },
         data,
       }));
     } catch (error) {
@@ -756,14 +806,32 @@ export class EinvoicesService implements OnApplicationBootstrap {
       }
       throw error;
     }
-    if (count === 0) throw new ConflictException(NOT_UNCERTAIN);
+    if (count === 0) throw await this.notResolved(id, dto.found);
     return this.findOne(user, id);
+  }
+
+  // Why the resolve found nothing to change: settled or sent again meanwhile.
+  private async notResolved(id: number, found: boolean) {
+    const now = await this.prisma.einvoice.findUnique({
+      where: { id },
+      select: { status: true, sendingAt: true, updatedAt: true },
+    });
+    const recent =
+      !found && now?.status === EinvoiceStatus.UNCERTAIN
+        ? tooRecent(now)
+        : null;
+    return new ConflictException(recent ?? NOT_UNCERTAIN);
   }
 
   async editNumber(user: AuthUser, id: number, dto: EinvoiceNumberDto) {
     const row = await this.prisma.einvoice.findUnique({
       where: { id },
-      select: { branchId: true, sellerTaxCode: true, symbolCode: true },
+      select: {
+        branchId: true,
+        sellerTaxCode: true,
+        symbolCode: true,
+        invoiceNumber: true,
+      },
     });
     if (!row) throw new NotFoundException('Không tìm thấy hóa đơn điện tử');
     this.scope.assertBranchAccess(user, row.branchId);
@@ -786,6 +854,10 @@ export class EinvoicesService implements OnApplicationBootstrap {
     }
     if (count === 0)
       throw new ConflictException('Chỉ sửa số của hóa đơn đã xuất');
+    // The row keeps who and when, not the number it replaced: the log does.
+    this.logger.log(
+      `Einvoice ${id}: number ${row.invoiceNumber ?? 'none'} → ${dto.invoiceNumber} by user ${user.id}`,
+    );
     return this.findOne(user, id);
   }
 
@@ -1034,6 +1106,8 @@ export class EinvoicesService implements OnApplicationBootstrap {
     } else if (query.status === 'ERROR') {
       where.status = EinvoiceStatus.DRAFT;
       where.lastError = { not: null };
+    } else if (query.status === 'UNCERTAIN') {
+      where.status = NOT_SETTLED;
     } else if (query.status) {
       where.status = query.status;
     }

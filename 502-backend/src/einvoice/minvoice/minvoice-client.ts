@@ -7,6 +7,7 @@ import {
   MinvoiceNetworkError,
   MinvoiceUnexpectedResponse,
   minvoiceMessage,
+  type MinvoiceLoginReason,
 } from './minvoice-errors';
 
 // The Minvoice web app's own API (no public API exists), as mapped by
@@ -30,6 +31,26 @@ const NOT_SENT_CODES = new Set([
   'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
   'ERR_TLS_CERT_ALTNAME_INVALID',
 ]);
+
+// ABP's LoginResultType (Volo.Abp.Account): 1 Success, 2
+// InvalidUserNameOrPassword, 3 NotAllowed, 4 LockedOut, 5 RequiresTwoFactor.
+// Only 2 (and an answer without a known result) is a wrong password; the
+// others must not count towards the branch's login throttle, nor be stored as
+// a changed password. The messages also read as the stored loginError.
+const LOGIN_REFUSALS: Record<number, [MinvoiceLoginReason, string]> = {
+  3: [
+    'not-allowed',
+    'Minvoice không cho tài khoản này đăng nhập (tài khoản chưa kích hoạt hoặc cần xác nhận); kiểm tra tài khoản trên Minvoice rồi đăng nhập lại',
+  ],
+  4: [
+    'locked',
+    'Minvoice đang khóa tạm tài khoản do đăng nhập sai nhiều lần; đợi vài phút rồi đăng nhập lại',
+  ],
+  5: [
+    'two-factor',
+    'Tài khoản Minvoice bật xác thực hai bước, hệ thống không đăng nhập được; tắt xác thực hai bước hoặc dùng tài khoản khác',
+  ],
+};
 
 // Invoice list of the Minvoice web app, filtered by column name (plan Task 0:
 // no generic filter exists). SEARCH_PARAM is the payload's MARKER_FIELD.
@@ -160,10 +181,11 @@ export class MinvoiceClient {
       jar,
     )) as { result?: number } | null;
     if (result?.result !== 1) {
-      throw new MinvoiceLoginError(
+      const [reason, message] = LOGIN_REFUSALS[result?.result ?? 0] ?? [
         'password',
         'Sai tên đăng nhập hoặc mật khẩu Minvoice',
-      );
+      ];
+      throw new MinvoiceLoginError(reason, message);
     }
 
     // The anti-forgery token is bound to the user: fetch the logged-in one.

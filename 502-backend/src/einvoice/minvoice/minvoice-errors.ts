@@ -23,10 +23,19 @@ export class MinvoiceNetworkError extends Error {
   }
 }
 
-// Wrong username/password, or no active tenant for the MST.
+// Why Minvoice refused a login: a wrong username/password, no active tenant
+// for the MST, or an account it will not let in (ABP's NotAllowed, LockedOut,
+// RequiresTwoFactor), which is not a wrong password.
+export type MinvoiceLoginReason =
+  | 'password'
+  | 'tenant'
+  | 'not-allowed'
+  | 'locked'
+  | 'two-factor';
+
 export class MinvoiceLoginError extends Error {
   constructor(
-    readonly reason: 'password' | 'tenant',
+    readonly reason: MinvoiceLoginReason,
     message: string,
   ) {
     super(message);

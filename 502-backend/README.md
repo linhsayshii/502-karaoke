@@ -49,7 +49,7 @@ TZ=Asia/Ho_Chi_Minh
 ```bash
 npm install
 npx prisma migrate deploy     # tạo bảng
-npx prisma db seed            # cơ sở cs1–cs5 + admin, ql1_cs1, tn1_cs1, pv1_cs1, ql1_cs5, tn1_cs5, cskh1_cs5, pv1_cs5 và 44 phòng VIP của cs5 (mật khẩu 12345678)
+npx prisma db seed            # cơ sở cs1–cs5 + admin, ql1_cs1, tn1_cs1, pv1_cs1, ql1_cs5, tn1_cs5, cskh1_cs5, pv1_cs5 và 45 phòng VIP, 9 danh mục, 63 mặt hàng của cs5 (mật khẩu 12345678)
 SEED_DEMO=1 npx prisma db seed  # (tuỳ chọn) thêm cskh1_cs1, ql1_cs2, tn1_cs2, pv1_cs2 (mật khẩu 12345678), phòng, mặt hàng cho cs1/cs2
 npm run start:dev             # http://localhost:4000/api, Swagger: http://localhost:4000/api/docs
 ```

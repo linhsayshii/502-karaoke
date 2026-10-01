@@ -34,6 +34,7 @@ export function IssueControls({
   problem,
   busy,
   onIssued,
+  onIssuingChange,
 }: {
   einvoice: EinvoiceDetail;
   // YYYY-MM-DD, the calendar day saved with the draft.
@@ -44,6 +45,8 @@ export function IssueControls({
   // The panel is reloading after a write: nothing more is sent meanwhile.
   busy: boolean;
   onIssued: (row: EinvoiceDetail) => void;
+  // Told while a send is running: the invoice's amount in the left column waits.
+  onIssuingChange: (issuing: boolean) => void;
 }) {
   const notify = useNotify();
   // The calendar day, not the business day.
@@ -57,6 +60,7 @@ export function IssueControls({
 
   const send = async (date: string) => {
     setIssuing(true);
+    onIssuingChange(true);
     try {
       const res = await api.post<EinvoiceDetail>(`/einvoices/${einvoice.id}/issue`, {
         invoiceDate: date,
@@ -84,6 +88,7 @@ export function IssueControls({
       return true;
     } finally {
       setIssuing(false);
+      onIssuingChange(false);
     }
   };
 

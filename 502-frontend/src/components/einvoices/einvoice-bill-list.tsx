@@ -49,24 +49,33 @@ export function EinvoiceBillList({
   version,
   openOrderId,
   openBill,
+  openBillLoading,
   selectedId,
   focusId,
   dirtyId,
+  lockedId,
+  savingIds,
   creating,
   onToggleBill,
   onSelect,
   onCreate,
   onSaved,
   onDeleted,
+  onSavingChange,
 }: {
   // Bumped after every write: the lists and counts reload.
   version: number;
   openOrderId: number | null;
-  // The open bill once loaded (null meanwhile).
+  // The open bill once loaded (null meanwhile), and whether it is being read.
   openBill: EinvoiceBillDetail | null;
+  openBillLoading: boolean;
   selectedId: number | null;
   focusId: number | null;
   dirtyId: number | null;
+  // The invoice the panel is saving or issuing: its amount box waits.
+  lockedId: number | null;
+  // The invoices whose amount is being saved: the + of their bill waits.
+  savingIds: number[];
   creating: Creating;
   onToggleBill: (orderId: number, tab: EinvoiceTab) => void;
   onSelect: (orderId: number | null, einvoiceId: number) => void;
@@ -74,6 +83,7 @@ export function EinvoiceBillList({
   onCreate: (orderId: number | null, amount: number) => void;
   onSaved: (row: EinvoiceDetail) => void;
   onDeleted: (orderId: number | null, einvoiceId: number) => void;
+  onSavingChange: (einvoiceId: number, saving: boolean) => void;
 }) {
   const { user } = useAuth();
   const branch = useBranchCode();
@@ -131,9 +141,15 @@ export function EinvoiceBillList({
         : "Không có hóa đơn nào ở trạng thái này.";
 
   const createFree = () => {
-    // A new draft shows in the Nháp tab and in the Bill tab of its day;
-    // from the other tabs the list moves to Nháp.
-    if (tab !== "BILLS" && tab !== "DRAFT") setTab("DRAFT");
+    // The new draft is dated today's business day. It shows in the Nháp tab,
+    // and in the Bill tab while its range holds today; no other tab or range
+    // lists it, and a bill-number search hides the free group altogether, so
+    // the list moves to Nháp and the search is cleared (its box empties at
+    // once, the list follows after the debounce).
+    const today = businessDate();
+    const shown = tab === "DRAFT" || (tab === "BILLS" && range.from <= today && today <= range.to);
+    if (!shown) setTab("DRAFT");
+    if (search) setSearch("");
     onCreate(null, 0);
   };
 
@@ -201,9 +217,11 @@ export function EinvoiceBillList({
                 editable
                 autoFocus={focusId === row.id}
                 forceConfirm={dirtyId === row.id}
+                locked={lockedId === row.id}
                 onSelect={() => onSelect(null, row.id)}
                 onSaved={onSaved}
                 onDeleted={() => onDeleted(null, row.id)}
+                onSavingChange={onSavingChange}
               />
             ))}
           </ul>
@@ -235,17 +253,21 @@ export function EinvoiceBillList({
               bill={bill}
               open={openOrderId === bill.orderId}
               detail={openBill?.order.id === bill.orderId ? openBill : null}
+              detailLoading={openOrderId === bill.orderId && openBillLoading}
               showDate={showDate}
               canWrite={canWrite}
               creating={creating === bill.orderId}
               selectedId={selectedId}
               focusId={focusId}
               dirtyId={dirtyId}
+              lockedId={lockedId}
+              savingIds={savingIds}
               onToggle={() => onToggleBill(bill.orderId, tab)}
               onCreate={onCreate}
               onSelect={(einvoiceId) => onSelect(bill.orderId, einvoiceId)}
               onSaved={onSaved}
               onDeleted={(einvoiceId) => onDeleted(bill.orderId, einvoiceId)}
+              onSavingChange={onSavingChange}
             />
           ))}
         </ul>
@@ -258,38 +280,50 @@ function BillItem({
   bill,
   open,
   detail,
+  detailLoading,
   showDate,
   canWrite,
   creating,
   selectedId,
   focusId,
   dirtyId,
+  lockedId,
+  savingIds,
   onToggle,
   onCreate,
   onSelect,
   onSaved,
   onDeleted,
+  onSavingChange,
 }: {
   bill: EinvoiceBill;
   open: boolean;
   detail: EinvoiceBillDetail | null;
+  // The bill is open and being read again (after a write, or just opened).
+  detailLoading: boolean;
   showDate: boolean;
   canWrite: boolean;
   creating: boolean;
   selectedId: number | null;
   focusId: number | null;
   dirtyId: number | null;
+  lockedId: number | null;
+  savingIds: number[];
   onToggle: () => void;
   onCreate: (orderId: number, amount: number) => void;
   onSelect: (einvoiceId: number) => void;
   onSaved: (row: EinvoiceDetail) => void;
   onDeleted: (einvoiceId: number) => void;
+  onSavingChange: (einvoiceId: number, saving: boolean) => void;
 }) {
   const total = Number(bill.finalAmount);
   // The open bill, once loaded, is fresher than the list.
   const allocated = detail ? detail.allocated : bill.allocated;
   const count = detail ? detail.einvoices.length : bill.einvoiceCount;
   const label = billLabel({ id: bill.orderId, billNumber: bill.billNumber });
+  // + hands out what is left of the bill, so it waits until that is known: its
+  // own create, a read of the bill, or an amount of its invoices being saved.
+  const plusBusy = creating || detailLoading || !!detail?.einvoices.some((e) => savingIds.includes(e.id));
   return (
     <li className="rounded-xl border">
       <div className="flex items-center gap-2 py-1 pr-2 pl-1">
@@ -326,7 +360,7 @@ function BillItem({
             variant="outline"
             aria-label={`Thêm hóa đơn nhỏ cho bill ${label}`}
             title="Thêm hóa đơn nhỏ"
-            disabled={creating}
+            disabled={plusBusy}
             className={cn(open && "border-primary")}
             onClick={() => onCreate(bill.orderId, Math.max(0, total - allocated))}
           >
@@ -341,9 +375,11 @@ function BillItem({
             selectedId={selectedId}
             focusId={focusId}
             dirtyId={dirtyId}
+            lockedId={lockedId}
             onSelect={onSelect}
             onSaved={onSaved}
             onDeleted={onDeleted}
+            onSavingChange={onSavingChange}
           />
         ) : (
           <div className="border-t p-3">

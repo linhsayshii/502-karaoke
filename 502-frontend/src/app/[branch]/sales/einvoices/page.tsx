@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FileCheck2Icon } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -69,6 +69,17 @@ export default function EinvoicesPage() {
   // through the sidebar is not guarded.
   const [dirty, setDirty] = useState(false);
   const [pending, setPending] = useState<(() => void) | null>(null);
+  // The panel is saving or issuing its invoice: that invoice's amount box in the
+  // left column waits (the two PATCHes would overwrite each other).
+  const [panelWorking, setPanelWorking] = useState(false);
+  // The invoices whose amount box is being saved: the panel's save and the +
+  // of their bill wait for the saved row to be back.
+  const [savingIds, setSavingIds] = useState<number[]>([]);
+  const rowSaving = useCallback(
+    (einvoiceId: number, saving: boolean) =>
+      setSavingIds((ids) => (saving ? [...ids, einvoiceId] : ids.filter((id) => id !== einvoiceId))),
+    [],
+  );
 
   useEffect(() => {
     if (!dirty) return;
@@ -210,6 +221,7 @@ export default function EinvoicesPage() {
       ? billDetail.einvoices.findIndex((e) => e.id === shown.einvoiceId)
       : -1;
   const panelBusy = bill.loading || free.loading;
+  const panelLocked = panelBusy || (shown !== null && savingIds.includes(shown.einvoiceId));
   const panel =
     shown === null ? null : panelEinvoice ? (
       <EinvoiceIssuePanel
@@ -219,10 +231,11 @@ export default function EinvoicesPage() {
         label={shown.orderId === null ? `HĐ tự do #${panelEinvoice.id}` : `HĐ ${index + 1}`}
         previous={index > 0 && billDetail ? buyerOf(billDetail.einvoices[index - 1]) : null}
         config={config.data}
-        busy={panelBusy}
+        busy={panelLocked}
         onChanged={panelChanged}
         onReload={() => (shown.orderId === null ? free.reload() : bill.reload())}
         onDirtyChange={setDirty}
+        onWorkingChange={setPanelWorking}
       />
     ) : panelBusy ? (
       <Skeleton className="h-96 w-full rounded-xl" />
@@ -263,15 +276,19 @@ export default function EinvoicesPage() {
             version={listVersion}
             openOrderId={openOrderId}
             openBill={billDetail}
+            openBillLoading={bill.loading}
             selectedId={shown?.einvoiceId ?? null}
             focusId={focusId}
             dirtyId={dirty ? (shown?.einvoiceId ?? null) : null}
+            lockedId={panelWorking ? (shown?.einvoiceId ?? null) : null}
+            savingIds={savingIds}
             creating={creating}
             onToggleBill={toggleBill}
             onSelect={select}
             onCreate={create}
             onSaved={changed}
             onDeleted={deleted}
+            onSavingChange={rowSaving}
           />
           {!isMobile && (
             <div ref={panelRef} className="min-w-0 scroll-mt-[calc(var(--header-height)+1rem)]">

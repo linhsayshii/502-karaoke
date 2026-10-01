@@ -49,6 +49,7 @@ export function EinvoiceEditor({
   config,
   onSaved,
   onDirtyChange,
+  onWorkingChange,
   busy,
 }: {
   // Null for a free invoice.
@@ -58,6 +59,8 @@ export function EinvoiceEditor({
   config: EinvoiceConfigView | null;
   onSaved: (row: EinvoiceDetail) => void;
   onDirtyChange: (dirty: boolean) => void;
+  // True while this editor saves or issues: the amount box of its row waits.
+  onWorkingChange: (working: boolean) => void;
   // The page is reloading after a write: saving or issuing waits for the new row.
   busy: boolean;
 }) {
@@ -72,10 +75,14 @@ export function EinvoiceEditor({
   const saved = useMemo(() => formOf(einvoice, fallbackDate), [einvoice, fallbackDate]);
   const [form, setForm] = useState<FormState>(saved);
   const [saving, setSaving] = useState(false);
+  const [issuing, setIssuing] = useState(false);
+  const working = saving || issuing;
   const dirty = JSON.stringify(form) !== JSON.stringify(saved);
 
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
+  useEffect(() => onWorkingChange(working), [working, onWorkingChange]);
+  useEffect(() => () => onWorkingChange(false), [onWorkingChange]);
 
   const amount = Number(einvoice.amount);
   const totals = totalsOf(form.lines);
@@ -186,6 +193,7 @@ export function EinvoiceEditor({
             problem={dirty ? "Lưu nháp trước khi xuất" : problem}
             busy={busy}
             onIssued={onSaved}
+            onIssuingChange={setIssuing}
           />
         )}
       </div>

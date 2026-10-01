@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Trash2Icon } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -28,9 +28,11 @@ export function EinvoiceRow({
   editable,
   autoFocus = false,
   forceConfirm = false,
+  locked = false,
   onSelect,
   onSaved,
   onDeleted,
+  onSavingChange,
 }: {
   // A row of the open bill (with its draft) or of the free list (without).
   einvoice: EinvoiceListRow | EinvoiceDetail;
@@ -42,9 +44,15 @@ export function EinvoiceRow({
   autoFocus?: boolean;
   // The panel holds unsaved edits of it: deleting it always asks.
   forceConfirm?: boolean;
+  // The panel is saving or issuing this invoice: its amount waits, so the two
+  // writes never overwrite each other.
+  locked?: boolean;
   onSelect: () => void;
   onSaved: (row: EinvoiceDetail) => void;
   onDeleted: () => void;
+  // Told while the amount is on its way: the page holds back the panel's save
+  // and the bill's + until the saved row is back.
+  onSavingChange: (einvoiceId: number, saving: boolean) => void;
 }) {
   const { user } = useAuth();
   const notify = useNotify();
@@ -62,6 +70,13 @@ export function EinvoiceRow({
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+
+  // The cleanup also ends it when the row goes away mid-save.
+  useEffect(() => {
+    if (!saving) return;
+    onSavingChange(einvoice.id, true);
+    return () => onSavingChange(einvoice.id, false);
+  }, [saving, einvoice.id, onSavingChange]);
 
   // PATCH replaces the whole draft: the saved buyer and lines go with the new
   // amount (a free row is read first, as the list leaves its lines out). The
@@ -134,7 +149,7 @@ export function EinvoiceRow({
             autoFocus={autoFocus}
             className="h-8 w-32 text-right tabular-nums"
             value={typed}
-            disabled={saving}
+            disabled={saving || locked}
             onChange={setTyped}
             onBlur={() => void saveAmount()}
             onKeyDown={(e) => {

@@ -12,18 +12,23 @@ export function BillSplit({
   selectedId,
   focusId,
   dirtyId,
+  lockedId,
   onSelect,
   onSaved,
   onDeleted,
+  onSavingChange,
 }: {
   detail: EinvoiceBillDetail;
   selectedId: number | null;
   focusId: number | null;
   // The invoice whose unsaved edits the panel holds.
   dirtyId: number | null;
+  // The invoice the panel is saving or issuing.
+  lockedId: number | null;
   onSelect: (einvoiceId: number) => void;
   onSaved: (row: EinvoiceDetail) => void;
   onDeleted: (einvoiceId: number) => void;
+  onSavingChange: (einvoiceId: number, saving: boolean) => void;
 }) {
   const { order, einvoices, allocated } = detail;
   const billTotal = Number(order.finalAmount);
@@ -60,9 +65,11 @@ export function BillSplit({
               editable={order.status === "COMPLETED"}
               autoFocus={focusId === einvoice.id}
               forceConfirm={dirtyId === einvoice.id}
+              locked={lockedId === einvoice.id}
               onSelect={() => onSelect(einvoice.id)}
               onSaved={onSaved}
               onDeleted={() => onDeleted(einvoice.id)}
+              onSavingChange={onSavingChange}
             />
           ))}
         </ul>

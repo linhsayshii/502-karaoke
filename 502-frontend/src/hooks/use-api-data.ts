@@ -26,6 +26,10 @@ export function useApiData<T>(
   // setting state synchronously inside the effect.
   const requestKey = url === null ? null : `${url}:${paramsKey}:${version}`;
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  // A url that goes null forgets the last answer's key (adjusted during
+  // render), so when it comes back, even to the same url, params and version,
+  // `loading` is true until the refetch lands, not while stale data shows.
+  if (requestKey === null && loadedKey !== null) setLoadedKey(null);
   const loading = requestKey !== null && loadedKey !== requestKey;
 
   useEffect(() => {

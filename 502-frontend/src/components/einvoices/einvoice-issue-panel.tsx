@@ -44,6 +44,7 @@ export function EinvoiceIssuePanel({
   onChanged,
   onReload,
   onDirtyChange,
+  onWorkingChange,
 }: {
   einvoice: EinvoiceDetail;
   // Its bill; null for a free invoice.
@@ -56,6 +57,7 @@ export function EinvoiceIssuePanel({
   onChanged: (row: EinvoiceDetail) => void;
   onReload: () => void;
   onDirtyChange: (dirty: boolean) => void;
+  onWorkingChange: (working: boolean) => void;
 }) {
   const badge = einvoiceStatusBadge(einvoice.status, einvoice.lastError);
   return (
@@ -106,6 +108,7 @@ export function EinvoiceIssuePanel({
           config={config}
           onSaved={onChanged}
           onDirtyChange={onDirtyChange}
+          onWorkingChange={onWorkingChange}
           busy={busy}
         />
       )}

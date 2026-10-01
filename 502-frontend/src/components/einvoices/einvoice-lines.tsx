@@ -11,12 +11,14 @@ import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { EinvoiceBillDetail, EinvoiceLine } from "@/lib/types";
 
-// One row per line from the panel's @container/einvoice width up (fixed
-// columns, so the rows line up under the header); below it each line is a
-// card of two columns with the labels shown.
+// One row per line from 38rem of the panel's @container/einvoice width up
+// (fixed columns, so the rows line up under the header; the panel is 667px
+// wide on a 1440px laptop with the sidebar open, just under the 672px of
+// @2xl, which would then never switch there); below it each line is a card of
+// two columns with the labels shown.
 const LINE_GRID =
-  "grid-cols-2 gap-2 @2xl/einvoice:grid-cols-[minmax(0,1fr)_4rem_4.5rem_7rem_8rem_2rem] @2xl/einvoice:items-center";
-const NARROW_LABEL = "text-xs font-normal text-muted-foreground @2xl/einvoice:hidden";
+  "grid-cols-2 gap-2 @min-[38rem]/einvoice:grid-cols-[minmax(0,1fr)_4rem_4.5rem_7rem_8rem_2rem] @min-[38rem]/einvoice:items-center";
+const NARROW_LABEL = "text-xs font-normal text-muted-foreground @min-[38rem]/einvoice:hidden";
 
 // Dòng hàng of a small invoice: typed freely, taken from the bill, or a filler
 // line that brings the total to the amount. Every new line carries
@@ -133,7 +135,7 @@ export function EinvoiceLines({
         <div className="flex flex-col gap-2">
           <div
             aria-hidden
-            className={cn(LINE_GRID, "hidden border-b pb-2 text-xs font-medium text-muted-foreground @2xl/einvoice:grid")}
+            className={cn(LINE_GRID, "hidden border-b pb-2 text-xs font-medium text-muted-foreground @min-[38rem]/einvoice:grid")}
           >
             <span>Tên hàng, dịch vụ</span>
             <span>ĐVT</span>
@@ -142,11 +144,11 @@ export function EinvoiceLines({
             <span className="text-right">Thành tiền trước VAT</span>
             <span />
           </div>
-          <ul className="flex flex-col gap-3 @2xl/einvoice:gap-2">
+          <ul className="flex flex-col gap-3 @min-[38rem]/einvoice:gap-2">
             {lines.map((line, index) => (
               <li
                 key={index}
-                className={cn(LINE_GRID, "grid rounded-md border p-2 @2xl/einvoice:border-0 @2xl/einvoice:p-0")}
+                className={cn(LINE_GRID, "grid rounded-md border p-2 @min-[38rem]/einvoice:border-0 @min-[38rem]/einvoice:p-0")}
               >
                 <Input
                   aria-label={`Tên hàng dòng ${index + 1}`}
@@ -155,7 +157,7 @@ export function EinvoiceLines({
                   value={line.name}
                   disabled={disabled}
                   onChange={(e) => set(index, { name: e.target.value })}
-                  className="col-span-2 @2xl/einvoice:col-span-1"
+                  className="col-span-2 @min-[38rem]/einvoice:col-span-1"
                 />
                 <Field className="gap-1">
                   <FieldLabel htmlFor={`einvoice-line-${index}-unit`} className={NARROW_LABEL}>
@@ -196,9 +198,9 @@ export function EinvoiceLines({
                     onChange={(unitPrice) => set(index, { unitPrice: unitPrice ?? 0 })}
                   />
                 </Field>
-                <div className="flex flex-col gap-1 text-sm tabular-nums @2xl/einvoice:items-end">
+                <div className="flex flex-col gap-1 text-sm tabular-nums @min-[38rem]/einvoice:items-end">
                   <span className={NARROW_LABEL}>Thành tiền trước VAT</span>
-                  <span className="flex h-9 items-center @2xl/einvoice:h-auto">{formatMoney(lineAmountOf(line))}</span>
+                  <span className="flex h-9 items-center @min-[38rem]/einvoice:h-auto">{formatMoney(lineAmountOf(line))}</span>
                   {/* A line saved before rates were fixed keeps its own; it shows. */}
                   {line.vatRate !== EINVOICE_VAT_RATE && (
                     <span className="text-xs text-muted-foreground">VAT {line.vatRate}%</span>
@@ -211,7 +213,7 @@ export function EinvoiceLines({
                   aria-label={`Xóa dòng ${index + 1}`}
                   disabled={disabled}
                   onClick={() => onChange(lines.filter((_, i) => i !== index))}
-                  className="col-span-2 justify-self-end @2xl/einvoice:col-span-1"
+                  className="col-span-2 justify-self-end @min-[38rem]/einvoice:col-span-1"
                 >
                   <Trash2Icon />
                 </Button>

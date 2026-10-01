@@ -51,6 +51,26 @@ describe('classifySendError (spec §9.1)', () => {
     );
   });
 
+  it("knows Minvoice's English date-order sentence and leaves the stack trace out", () => {
+    // HTTP 500 of the real Minvoice, 01/10/2026, for a date before the newest
+    // invoice of the symbol.
+    const message =
+      'Create invoice fail because date is [30/09/2026 12:00:00 SA] use with other invoice before';
+    const failure = classifySendError(
+      new MinvoiceHttpError(
+        500,
+        JSON.stringify({
+          error: {
+            message,
+            details: `MInvoiceBusinessException: ${message} STACK TRACE: at MInvoice.Invoices.InvoiceAppService.ValidDate()`,
+          },
+        }),
+        'HTTP 500',
+      ),
+    );
+    expect(failure).toEqual({ kind: 'date-order', message });
+  });
+
   it('knows the date-order error by its code when the message says something else', () => {
     expect(classifySendError(httpCode('296', 'Lỗi không xác định')).kind).toBe(
       'date-order',

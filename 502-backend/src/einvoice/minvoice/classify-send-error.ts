@@ -26,13 +26,17 @@ const DATE_ORDER_CODE = '296';
 const DATE_ORDER_MESSAGE =
   'Ngày hóa đơn phải đảm bảo quy luật tăng dần của số hóa đơn';
 
-// Its sentence, then a looser one for a date said to be before another
-// invoice. Deliberately not "any sentence about the invoice date": ErrorCode-295
-// (date after today) and 29504 (date before the declaration) are not about the
-// order of the numbers, and resending may still fix what they complain about.
+// Its sentence, a looser one for a date said to be before another invoice,
+// then the English sentence of the real Minvoice's HTTP 500 (01/10/2026, an
+// ABP error with code null): "Create invoice fail because date is
+// [30/09/2026 12:00:00 SA] use with other invoice before". Deliberately not
+// "any sentence about the invoice date": ErrorCode-295 (date after today) and
+// 29504 (date before the declaration) are not about the order of the numbers,
+// and resending may still fix what they complain about.
 export const DATE_ORDER_PATTERNS: RegExp[] = [
   /quy luật tăng dần của số hóa đơn/i,
   /ngày hóa đơn[^.]*(nhỏ hơn|trước)[^.]*hóa đơn/i,
+  /because date is .* use with other invoice before/i,
 ];
 
 export function classifySendError(error: unknown): SendFailure {

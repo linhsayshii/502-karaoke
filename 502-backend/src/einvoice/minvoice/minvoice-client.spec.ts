@@ -5,6 +5,7 @@ import {
   minvoiceBaseUrl,
 } from './minvoice-client';
 import { MARKER_FIELD } from './minvoice-payload';
+import { classifySendError } from './classify-send-error';
 import {
   MinvoiceHttpError,
   MinvoiceLoginError,
@@ -185,6 +186,34 @@ describe('MinvoiceClient', () => {
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(MinvoiceNetworkError);
     expect(error).toMatchObject({ sent: true });
+  });
+
+  it('keeps an ABP error readable when Minvoice adds a long stack trace', async () => {
+    // Seen on the real Minvoice (01/10/2026): an HTTP 500 whose ABP body
+    // carries the .NET stack trace in `details`, far past the body we keep.
+    const message =
+      'Create invoice fail because date is [30/09/2026 12:00:00 SA] use with other invoice before';
+    replies.push(
+      reply(
+        {
+          error: {
+            code: null,
+            message,
+            details: `MInvoiceBusinessException: ${message}\r\nSTACK TRACE:${'   at MInvoice.Invoices.InvoiceAppService.ValidDate()\r\n'.repeat(200)}`,
+          },
+        },
+        500,
+      ),
+    );
+    const error = await client
+      .createInvoice('0107811836', session, {})
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(MinvoiceHttpError);
+    expect(classifySendError(error)).toEqual({
+      kind: 'date-order',
+      message,
+    });
+    expect((error as Error).message).not.toMatch(/STACK TRACE/);
   });
 
   it('lists the symbols of a year, newest first, in use only', async () => {

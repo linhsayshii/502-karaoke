@@ -6,6 +6,7 @@ import {
   MinvoiceLoginError,
   MinvoiceNetworkError,
   MinvoiceUnexpectedResponse,
+  keptBody,
   minvoiceMessage,
   type MinvoiceLoginReason,
 } from './minvoice-errors';
@@ -415,7 +416,7 @@ export class MinvoiceClient {
     if (response.status >= 300) {
       throw new MinvoiceHttpError(
         response.status,
-        body.slice(0, 2000),
+        keptBody(body),
         `Minvoice trả lỗi HTTP ${response.status}: ${minvoiceMessage(body)}`,
       );
     }

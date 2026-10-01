@@ -60,15 +60,50 @@ function parseBody(body: string): AbpErrorBody | null {
   }
 }
 
+// The body an error keeps. A long ABP error (Minvoice puts the .NET stack
+// trace in `error.details`) is kept as JSON with only the fields read here,
+// each cut short: cutting the raw text would leave JSON that no longer parses,
+// and a Minvoice refusal would then look like a gateway page (uncertain).
+const KEPT_BODY = 2000;
+const KEPT_FIELD = 500;
+export function keptBody(body: string): string {
+  if (body.length <= KEPT_BODY) return body;
+  const json = parseBody(body);
+  if (!json) return body.slice(0, KEPT_BODY);
+  const cut = (value: unknown) =>
+    typeof value === 'string' ? value.slice(0, KEPT_FIELD) : undefined;
+  const error = json.error;
+  return JSON.stringify({
+    error:
+      typeof error === 'object' && error !== null
+        ? {
+            code: typeof error.code === 'number' ? error.code : cut(error.code),
+            message: cut(error.message),
+            details: cut(error.details),
+          }
+        : undefined,
+    message: cut(json.message),
+    description: cut(json.description),
+  });
+}
+
+// `error.details` without the stack trace Minvoice appends, and nothing when
+// all that is left repeats the message ("MInvoiceBusinessException: <message>").
+function detailsOf(details: unknown, message: unknown): string {
+  if (typeof details !== 'string') return '';
+  const text = details.split(/\s*STACK TRACE:/i)[0].trim();
+  return typeof message === 'string' && message && text.includes(message)
+    ? ''
+    : text;
+}
+
 // The message inside an ABP error body ({error: {message, details}}), or ''
 // when the body is not JSON or carries none.
 export function minvoiceJsonMessage(body: string): string {
   const json = parseBody(body);
   if (!json) return '';
-  return [
-    json.error?.message ?? json.message ?? json.description,
-    json.error?.details,
-  ]
+  const message = json.error?.message ?? json.message ?? json.description;
+  return [message, detailsOf(json.error?.details, message)]
     .filter(Boolean)
     .join(' — ')
     .slice(0, 300);

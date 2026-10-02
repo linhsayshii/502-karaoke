@@ -9,6 +9,8 @@ Spec này sửa `2026-10-02-trang-bao-cao-hddt-design.md` (gọi tắt là **spe
 - **Số bill trong báo cáo.** Bỏ "số bill" ở §5.1 và ô "Số bill" ở §7.4, §7.6.
 - **Quản lý bán hàng của trang báo cáo.** §7.4 liệt kê theo từng HĐĐT thay cho từng bill (§5).
 
+Spec này cũng sửa `2026-10-01-hddt-bo-cuc-va-hd-tu-do-design.md` §2, dòng "Ngày hóa đơn: mặc định": nháp tạo cho một bill đã thanh toán lấy mặc định là **ngày kinh doanh của bill**, không còn là ngày lịch lúc thanh toán (§2 và §11 dưới đây).
+
 ## 1. Mục tiêu
 
 1. Ở Quản lý bán hàng của trang chính, thu ngân bấm một nút để lưu nháp HĐĐT cho cả bill. Bill đó lên trang báo cáo.
@@ -31,6 +33,7 @@ Spec này sửa `2026-10-02-trang-bao-cao-hddt-design.md` (gọi tắt là **spe
 | Dòng hàng không khớp tiền bill (bill có chiết khấu, hoặc thuế khác 10%) | Giữ nguyên số tiền = tiền bill và giá gốc của các dòng. Nháp hiện Còn thiếu/Thừa, người ở trang báo cáo sửa tay trước khi xuất. |
 | Bill đã có HĐĐT | Không gửi được nữa: nút bị khóa và có dòng "Đã có trong báo cáo (N hóa đơn)". Server trả 409. |
 | Ngày của HĐĐT trên trang báo cáo | Luôn là `Einvoice.invoiceDate`, cho mọi trạng thái. Nút của thu ngân đặt sẵn ngày này = ngày kinh doanh của bill. |
+| Ngày mặc định của nháp tạo bằng nút **+** | Cũng là ngày kinh doanh của bill (`POST /einvoices` không gửi ngày). Một bill trả sau nửa đêm nằm ở cùng một ngày báo cáo dù thu ngân bấm nút nào. "Gửi lại" vẫn đặt ngày hôm nay; lúc xuất hệ thống vẫn hỏi lại ngày. |
 | Màn nào liệt kê theo từng HĐĐT | Quản lý bán hàng của trang báo cáo. Trang HĐĐT vẫn gom theo bill để chia, nhưng tab Bill và tab Đã xuất lọc theo ngày HĐ. |
 | Số bill trong báo cáo | Bỏ, vì một bill có thể trải trên nhiều ngày. Chỉ còn Số HĐĐT. |
 | Số hóa đơn nội bộ | Dạng `DDMM` + mã phòng (4 chữ số) + số thứ tự (ít nhất 3 chữ số). Bộ đếm `ReportCounter` riêng theo (cơ sở, ngày). Cấp lúc tạo HĐĐT, không bao giờ đổi. Số của nháp đã xóa bỏ trống, không cấp lại. |
@@ -52,7 +55,7 @@ Spec này sửa `2026-10-02-trang-bao-cao-hddt-design.md` (gọi tắt là **spe
 - `Einvoice.invoiceDate` thành `NOT NULL` (migration §6).
 - Thêm `@@index([branchId, invoiceDate])`.
 - Giữ `@@index([branchId, businessDate])`, vì trang chính vẫn lọc theo `businessDate`.
-- Mọi lệnh tạo đã ghi `invoiceDate`, kể cả `POST /einvoices`, bill thêm tay và nút của thu ngân. Lệnh sửa chỉ ghi khi có gửi giá trị. Lệnh xuất ghi ngày được gửi đi. Không lệnh nào xóa giá trị này.
+- Mọi lệnh tạo đã ghi `invoiceDate`, kể cả `POST /einvoices`, bill thêm tay và nút của thu ngân. `POST /einvoices` của một bill đã thanh toán mà không gửi ngày thì lấy ngày kinh doanh của bill, như nút của thu ngân. Lệnh sửa chỉ ghi khi có gửi giá trị. Lệnh xuất ghi ngày được gửi đi. Không lệnh nào xóa giá trị này.
 - Bỏ `defaultInvoiceDate` ở frontend (`lib/einvoice.ts` và editor): mọi HĐĐT đều có ngày, nên không còn gì để mặc định. Kiểu `invoiceDate` trong `lib/types.ts` thành `string`.
 
 ### 3.2. Số liệu của trang báo cáo
@@ -265,3 +268,12 @@ Cập nhật:
 - `502-frontend/CLAUDE.md`;
 - `502-frontend/src/components/einvoices/CLAUDE.md`;
 - root `CLAUDE.md`: đoạn Report site không còn nói bill thêm tay "numbered in the day's sequence of the branch, so the main site's numbers skip them".
+
+## 11. Sửa sau khi chạy kiểm tra (02/10/2026)
+
+Chạy thử cả hai trang trên trình duyệt cho thấy bốn chỗ cần sửa:
+
+- **Ngày mặc định của nút +.** Bill trả lúc 00:30 gửi bằng nút của thu ngân mang ngày kinh doanh, còn tạo bằng nút **+** thì mang ngày lịch, nên cùng một bill rơi vào hai ngày báo cáo khác nhau. Nay cả hai lấy ngày kinh doanh của bill (`EinvoicesService.create`; unit test "dates a new draft by its bill's business day"). Migration §6 không đổi: nháp cũ chưa có ngày vẫn được điền đúng ngày màn hình đang hiện cho nó.
+- **Liên kết "Cơ sở".** Cảnh báo "Cơ sở chưa có mã số thuế" trên trang HĐĐT dẫn tới trang Cơ sở, trang mà trang báo cáo không có (404). Ở trang báo cáo cảnh báo chỉ ghi "Nhập MST ở trang Cơ sở của trang chính" (`einvoice-config-card.tsx`).
+- **Bill không còn hóa đơn ở trang báo cáo.** Bill đã thanh toán mà hết hóa đơn thì không còn trong danh sách của trang báo cáo, nên không có nút **+** để bấm. Khung phải nay ghi "Gửi lại từ trang chính bằng nút Thêm hóa đơn vào báo cáo" thay cho "Bấm + trên dòng bill" (`einvoices-page.tsx`).
+- **Lời của hộp thoại Thêm hóa đơn.** "Số bill nối tiếp dãy số của ngày đã chọn" là lời của cách đánh số cũ; nay ghi rõ là dãy số hóa đơn của trang báo cáo (`add-manual-bill-dialog.tsx`).

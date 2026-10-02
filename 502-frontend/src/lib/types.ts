@@ -811,3 +811,51 @@ export interface CreatedManualBill {
   businessDate: string;
   einvoiceId: number;
 }
+
+// GET /report-site/reports/revenue.
+export interface EinvoiceRevenueReport {
+  branchId: number | null; // null: whole chain
+  range: { from: string; to: string };
+  groupBy: GroupBy;
+  totals: EinvoiceMetrics;
+  previous: { from: string; to: string; totals: EinvoiceMetrics } | null;
+  buckets: (ReportBucket & EinvoiceMetrics)[];
+  byBranch: ({ branchId: number; code: string; name: string } & EinvoiceMetrics)[] | null;
+}
+
+// GET /report-site/reports/rooms; id: room id, or the room type (by=type); null: "Không phòng".
+export interface EinvoiceRoomRow extends EinvoiceMetrics {
+  id: number | string | null;
+  name: string | null;
+  type: string | null;
+  branchCode: string | null;
+  rooms: number;
+}
+
+export interface EinvoiceRoomReport {
+  branchId: number | null;
+  range: { from: string; to: string };
+  by: RoomGroup;
+  totals: EinvoiceMetrics;
+  rows: EinvoiceRoomRow[];
+}
+
+// GET /report-site/reports/products: lines grouped by name and unit; "others"
+// past the first 1000, "unlisted" (Chưa có dòng hàng) what the invoices hold
+// beyond their lines. The rows add up to the totals.
+export interface EinvoiceProductRow {
+  kind: "item" | "others" | "unlisted";
+  name: string | null;
+  unit: string | null;
+  quantity: number | null;
+  revenue: number;
+  vat: number;
+  total: number;
+}
+
+export interface EinvoiceProductReport {
+  branchId: number | null;
+  range: { from: string; to: string };
+  totals: { revenue: number; vat: number; total: number };
+  rows: EinvoiceProductRow[];
+}

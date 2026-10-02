@@ -25,6 +25,8 @@ interface ReasonDialogProps {
   reasonLabel?: string;
   placeholder?: string;
   requiredMessage?: string;
+  // Longest note the textarea takes, for a server that allows less than 500.
+  maxLength?: number;
   // Return false to keep the dialog open (e.g. the call failed).
   onConfirm: (reason: string) => Promise<boolean | void>;
 }
@@ -40,6 +42,7 @@ export function ReasonDialog({
   reasonLabel = "Lý do hủy",
   placeholder = "Ví dụ: nhập nhầm số lượng",
   requiredMessage = "Vui lòng nhập lý do hủy",
+  maxLength = 500,
   onConfirm,
 }: ReasonDialogProps) {
   const [reason, setReason] = useState("");
@@ -74,7 +77,9 @@ export function ReasonDialog({
           <AlertDialogTitle>{title}</AlertDialogTitle>
           {description && <AlertDialogDescription>{description}</AlertDialogDescription>}
         </AlertDialogHeader>
-        <Field data-invalid={invalid || undefined}>
+        {/* min-w-0: the textarea sizes to its text, so a long word (a pasted link) would
+            widen the dialog's grid column and push the buttons off the screen. */}
+        <Field data-invalid={invalid || undefined} className="min-w-0">
           <FieldLabel htmlFor="cancel-reason">{reasonLabel}</FieldLabel>
           <Textarea
             id="cancel-reason"
@@ -83,7 +88,7 @@ export function ReasonDialog({
             aria-invalid={invalid || undefined}
             onChange={(e) => setReason(e.target.value)}
             onBlur={() => setTouched(true)}
-            maxLength={500}
+            maxLength={maxLength}
           />
           {invalid && <FieldError>{requiredMessage}</FieldError>}
         </Field>

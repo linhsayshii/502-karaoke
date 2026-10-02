@@ -57,7 +57,7 @@ function BillsView() {
   const canWrite = can(user, "einvoices.write");
   const [range, setRange] = useState<DateRangeValue>(() => ({ from: businessDate(), to: businessDate() }));
   const [search, setSearch] = useState("");
-  // A bill number searches every day.
+  // A bill number (digits, at most 15 as the backend takes) searches every day.
   const billNumber = useDebouncedValue(search).replace(/\D/g, "");
   const bills = useApiData<ReportSiteBill[]>(
     "/report-site/bills",
@@ -116,18 +116,26 @@ function BillsView() {
         title="Quản lý bán hàng"
         info={`Bill đã có hóa đơn điện tử bên trang chính và bill thêm tay, theo ngày kinh doanh của bill. Số tiền là của các hóa đơn điện tử; hóa đơn chưa xuất của bill đã hủy không được tính. ${BUSINESS_DAY_HINT}`}
         actions={
-          <>
-            <ExportExcelButton onExport={bills.data.length > 0 ? exportExcel : undefined} />
-            <DateRangePicker value={range} onChange={setRange} align="end" />
-            {canWrite && (
-              <Button onClick={startAdding}>
-                <PlusIcon data-icon="inline-start" />
-                Thêm hóa đơn
-              </Button>
-            )}
-          </>
+          canWrite && (
+            <Button onClick={startAdding}>
+              <PlusIcon data-icon="inline-start" />
+              Thêm hóa đơn
+            </Button>
+          )
         }
       />
+      {/* The header keeps the one main action; the date and the export wrap in a
+          row below it, as the reports' toolbar does. Beside the title, three
+          controls left it a few pixels between 768 and ~1000 px (the sidebar
+          takes 16rem) and a long range pushed the page sideways. The export
+          waits for a reload: the rows shown meanwhile are the previous range's. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <DateRangePicker value={range} onChange={setRange} />
+        <ExportExcelButton
+          className="@xl/main:ml-auto"
+          onExport={bills.data.length > 0 && !bills.loading ? exportExcel : undefined}
+        />
+      </div>
 
       <div className="grid gap-4 @xl/main:grid-cols-2 @5xl/main:grid-cols-4">
         <StatTile label="Bill" value={s ? formatNumber(s.billCount) : "…"} footer={s ? `${formatNumber(s.einvoiceCount)} hóa đơn điện tử` : undefined} />
@@ -151,6 +159,7 @@ function BillsView() {
             <InputGroupInput
               placeholder="Tìm số bill"
               inputMode="numeric"
+              maxLength={15}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               aria-label="Tìm theo số bill"
@@ -240,6 +249,7 @@ function BillsView() {
         title={`Hủy bill ${cancelling?.billNumber ?? ""}?`}
         description="Các hóa đơn nháp của bill bị xóa cùng. Bill đã có hóa đơn gửi hoặc xuất thì không hủy được. Số bill không được cấp lại."
         confirmLabel="Hủy bill"
+        maxLength={300} // the most the backend takes (CancelManualBillDto.reason, spec §6.1)
         onConfirm={cancel}
       />
     </>

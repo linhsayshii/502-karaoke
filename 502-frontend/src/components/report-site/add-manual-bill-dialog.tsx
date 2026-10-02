@@ -12,15 +12,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { useApiData } from "@/hooks/use-api-data";
 import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
-import { businessDate } from "@/lib/format";
+import { businessDate, formatMoney } from "@/lib/format";
 import type { CreatedManualBill, Room } from "@/lib/types";
+
+// The most the backend takes for the first e-invoice (CreateManualBillDto.amount,
+// spec 2026-10-02 §6.1); MoneyInput itself lets 12 digits through.
+const MAX_AMOUNT = 100_000_000_000;
 
 // Thêm hóa đơn (spec 2026-10-02-trang-bao-cao-hddt §7.4): a bill only to issue
 // e-invoices, numbered in the day's sequence of the branch with its room, and
@@ -42,7 +46,8 @@ export function AddManualBillDialog({
   const [roomId, setRoomId] = useState("");
   const [amount, setAmount] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
-  const ready = roomId !== "" && amount !== null && amount >= 1;
+  const tooMuch = amount !== null && amount > MAX_AMOUNT;
+  const ready = roomId !== "" && amount !== null && amount >= 1 && !tooMuch;
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -95,10 +100,20 @@ export function AddManualBillDialog({
                 </SelectContent>
               </Select>
             </Field>
-            <Field>
+            <Field data-invalid={tooMuch || undefined}>
               <FieldLabel htmlFor="manual-bill-amount">Số tiền hóa đơn điện tử</FieldLabel>
-              <MoneyInput id="manual-bill-amount" value={amount} onChange={setAmount} placeholder="0" />
-              <FieldDescription>Đã gồm VAT. Người mua và dòng hàng nhập ở trang Hóa đơn điện tử.</FieldDescription>
+              <MoneyInput
+                id="manual-bill-amount"
+                value={amount}
+                onChange={setAmount}
+                placeholder="0"
+                aria-invalid={tooMuch || undefined}
+              />
+              {tooMuch ? (
+                <FieldError>Tối đa {formatMoney(MAX_AMOUNT)}</FieldError>
+              ) : (
+                <FieldDescription>Đã gồm VAT. Người mua và dòng hàng nhập ở trang Hóa đơn điện tử.</FieldDescription>
+              )}
             </Field>
           </FieldGroup>
           <DialogFooter>

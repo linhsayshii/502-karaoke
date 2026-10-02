@@ -79,8 +79,8 @@ describe('Report site (e2e)', () => {
   // DDMM + room (4) + sequence.
   const seqOf = (billNumber: string) => Number(billNumber.slice(8));
   const today = () => businessDateOf(new Date());
-  // Today's business day to today's date: an invoice of a bill paid after
-  // midnight, or one issued then, is dated the calendar day (before 06:00 the
+  // Today's business day to today's date: a draft is dated its bill's business
+  // day, an invoice issued after midnight the calendar day (before 06:00 the
   // day after the business day).
   const span = () => `&from=${today()}&to=${toDateString(new Date())}`;
   const daysAgo = (n: number) =>

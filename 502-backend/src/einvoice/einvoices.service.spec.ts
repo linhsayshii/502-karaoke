@@ -917,7 +917,10 @@ describe('EinvoicesService invoices of a bill thêm tay', () => {
 describe('EinvoicesService invoice dates', () => {
   afterEach(() => jest.restoreAllMocks());
 
-  it('dates a new draft by the calendar day its bill was paid, not its business day', async () => {
+  // As "Thêm hóa đơn vào báo cáo" dates its draft: a bill paid after midnight
+  // shows on the report site on the day it belongs to, whichever button made
+  // its invoice.
+  it("dates a new draft by its bill's business day, not the calendar day it was paid", async () => {
     const { service, einvoice, order } = creating();
     order.findUnique.mockResolvedValue({
       id: 5,
@@ -930,9 +933,9 @@ describe('EinvoicesService invoice dates', () => {
     // Numbered on the invoice date, inside a transaction.
     expect(dataOf(einvoice.create)).toMatchObject({
       businessDate: toDbDate('2026-09-29'),
-      invoiceDate: toDbDate('2026-09-30'),
-      reportDate: toDbDate('2026-09-30'),
-      reportNumber: '30090000007',
+      invoiceDate: toDbDate('2026-09-29'),
+      reportDate: toDbDate('2026-09-29'),
+      reportNumber: '29090000007',
     });
   });
 

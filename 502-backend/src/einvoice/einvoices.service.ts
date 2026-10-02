@@ -462,7 +462,6 @@ export class EinvoicesService implements OnApplicationBootstrap {
         branchId: true,
         status: true,
         businessDate: true,
-        endTime: true,
         room: { select: { name: true } },
       },
     });
@@ -474,10 +473,11 @@ export class EinvoicesService implements OnApplicationBootstrap {
       );
     }
     const { businessDate } = order;
-    // The calendar day the bill was paid: a bill paid at 00:24 belongs to the
-    // business day before but is invoiced on its own date (spec §2).
-    const invoiceDate =
-      dto.invoiceDate ?? toDateString(order.endTime ?? new Date());
+    // The bill's business day, as reportBill dates its draft (spec
+    // 2026-10-02-bao-cao-theo-tung-hddt §2): a bill paid at 00:24 shows on the
+    // report site on the day it belongs to, whichever button made its invoice.
+    // Issuing asks for the date again.
+    const invoiceDate = dto.invoiceDate ?? fromDbDate(businessDate);
     const invoiceDay = dbDay(invoiceDate, INVALID_INVOICE_DATE);
     // Short: the day's ReportCounter row stays locked until this commits.
     const id = await this.prisma.$transaction(async (tx) => {

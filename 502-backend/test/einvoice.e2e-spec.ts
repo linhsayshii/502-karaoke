@@ -7,7 +7,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
-import { toDateString } from '../src/common/dates';
+import { businessDateOf, toDateString } from '../src/common/dates';
 import { EinvoiceConfigService } from '../src/einvoice/einvoice-config.service';
 import {
   EinvoicesService,
@@ -322,12 +322,12 @@ describe('E-invoices (e2e)', () => {
         .expect(400);
     });
 
-    it('keeps an invoice date of its own, the calendar day the bill was paid', async () => {
+    it("keeps an invoice date of its own, by default its bill's business day", async () => {
       const today = toDateString(new Date());
       const draft = (
         await as('tn1_cs1').get(`/einvoices/${draftId}`).expect(200)
       ).body as Json;
-      expect(draft.invoiceDate).toBe(today);
+      expect(draft.invoiceDate).toBe(businessDateOf(new Date()));
       const body = { amount: 1000000, ...buyer, lines: [beer, filler] };
       const moved = (
         await as('tn1_cs1')

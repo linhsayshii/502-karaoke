@@ -362,7 +362,7 @@ export default function UsersPage() {
               ) : (
                 shown.map((u) => (
                   <TableRow key={u.id} className={cn(!u.active && "text-muted-foreground")}>
-                    <TableCell>
+                    <TableCell className="whitespace-normal">
                       <div className="flex items-center gap-3">
                         <Avatar className="size-8">
                           <AvatarFallback className="text-xs">{initials(u.fullName)}</AvatarFallback>
@@ -460,7 +460,7 @@ export default function UsersPage() {
       </Card>
 
       <Dialog open={editing !== null} onOpenChange={(open) => !open && !saving && setEditing(null)}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
           {form && invalid && (
             <form onSubmit={save} className="flex flex-col gap-6">
               <DialogHeader>

@@ -107,7 +107,9 @@ describe('Report site (e2e)', () => {
     app = configureApp(
       moduleRef.createNestApplication<NestExpressApplication>(),
     );
-    await app.init();
+    // On 127.0.0.1, where supertest calls: its own listen(0) binds [::] and
+    // can get a port another program holds on 127.0.0.1, which then answers.
+    await app.listen(0, '127.0.0.1');
     for (const name of ['admin', 'ql1_cs1', 'tn1_cs1', 'ql1_cs2'])
       await signIn(name);
     const branches = (await as('admin').get('/branches').expect(200))
@@ -171,6 +173,10 @@ describe('Report site (e2e)', () => {
         expect((res.body as Json).message).toBe(
           'Tài khoản này không được vào trang báo cáo',
         );
+        // No session is made before the check (spec §3.2): no refresh
+        // cookie, no access token.
+        expect(res.headers['set-cookie']).toBeUndefined();
+        expect(res.body).not.toHaveProperty('access_token');
       }
       // The main site is unchanged for them.
       await login('tn1_cs1').expect(200);
@@ -366,6 +372,12 @@ describe('Report site (e2e)', () => {
       }).expect(400);
       await add('qlbc_cs1', {
         businessDate: '2026-02-30',
+        roomId,
+        amount: 1000,
+      }).expect(400);
+      // A calendar day for JavaScript, none for PostgreSQL's ::date (a 500).
+      await add('qlbc_cs1', {
+        businessDate: '0000-01-01',
         roomId,
         amount: 1000,
       }).expect(400);
@@ -696,6 +708,55 @@ describe('Report site (e2e)', () => {
         vat: 10000,
         total: 110000,
       });
+    });
+
+    // Equal revenue is no order of its own: the name, then the unit, decide,
+    // so the rows (and what falls past the 1000-row cut) never shuffle.
+    it('puts lines of equal revenue in order of name, then unit', async () => {
+      const day = daysAgo(51);
+      const room = (
+        await as('ql1_cs1')
+          .post('/rooms', { name: 'BC 503', pricePerHour: 100000 })
+          .expect(201)
+      ).body as Json;
+      const line = (name: string, unit: string) => ({
+        ...beer(name, 1),
+        unit,
+      });
+      const lines = [
+        line('Zebra', 'Lon'),
+        line('bia', 'Thung'),
+        line('Bia', 'Lon'),
+        line('bia', 'Chai'),
+        line('BIA', 'Ket'),
+      ];
+      const bill = (
+        await as('qlbc_cs1')
+          .post('/report-site/manual-bills?branch=cs1', {
+            businessDate: day,
+            roomId: room.id,
+            amount: 110000 * lines.length,
+          })
+          .expect(201)
+      ).body as Json;
+      await as('qlbc_cs1')
+        .patch(`/einvoices/${bill.einvoiceId as number}`, {
+          amount: 110000 * lines.length,
+          lines,
+        })
+        .expect(200);
+      const body = (
+        await as('qlbc_cs1')
+          .get(`/report-site/reports/products?branch=cs1&from=${day}&to=${day}`)
+          .expect(200)
+      ).body as { rows: Json[] };
+      expect(body.rows.map((r) => [r.name, r.unit])).toEqual([
+        ['bia', 'Chai'],
+        ['BIA', 'Ket'],
+        ['Bia', 'Lon'],
+        ['bia', 'Thung'],
+        ['Zebra', 'Lon'],
+      ]);
     });
 
     it('shows the whole chain to the chain manager and HĐQT', async () => {

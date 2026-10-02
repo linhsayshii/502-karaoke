@@ -31,9 +31,13 @@ export interface ReportSiteBill {
   finalAmount: number | null;
   // Every invoice of the bill (what the HĐĐT page splits).
   allocated: number;
-  // The invoices counted (spec §5.1).
+  // The sums of the invoices counted (spec §5.1): all of the bill's, or only
+  // the issued ones when the bill is voided.
   total: number;
   vat: number;
+  // How many invoices the bill holds, whatever their status, and how many of
+  // them are issued; not the counted ones, so a voided bill's drafts are in
+  // einvoiceCount.
   einvoiceCount: number;
   issuedCount: number;
 }
@@ -209,6 +213,9 @@ export class ReportSiteBillsService {
   // The tab counts (every invoice of the branch) and the sums of the days
   // for the Quản lý bán hàng tiles, both in SQL on the report pool.
   async summary(user: AuthUser, query: EinvoiceSummaryQuery) {
+    // from and to reach the SQL below as text for ::date: check them here
+    // instead of relying on einvoices.summary, which does it first.
+    dateRange(query.from, query.to);
     const counts = await this.einvoices.summary(user, query, 'report');
     const branchId = await this.scope.resolveBranchId(user, query.branch);
     const today = businessDateOf(new Date());

@@ -198,20 +198,24 @@ export class EinvoiceReportsService {
           CROSS JOIN LATERAL ${EINVOICE_LINES}
           WHERE ${where}
         ), grouped AS (
+          -- The group keys after the revenue make the rank a total order, so
+          -- the same groups fall past the cut and rows of equal revenue keep
+          -- their place from one request to the next.
           SELECT min("name") AS "name", "unit", SUM("quantity") AS "quantity",
             SUM("revenue") AS "revenue", SUM("vat") AS "vat",
-            row_number() OVER (ORDER BY SUM("revenue") DESC, lower(min("name"))) AS "rank"
+            row_number() OVER (ORDER BY SUM("revenue") DESC, lower("name"), "unit")::int AS "rank"
           FROM lines
           GROUP BY lower("name"), "unit"
         )
         SELECT "name", "unit", "quantity"::float8 AS "quantity",
-          "revenue"::float8 AS "revenue", "vat"::float8 AS "vat", false AS "others"
+          "revenue"::float8 AS "revenue", "vat"::float8 AS "vat", false AS "others",
+          "rank"
         FROM grouped WHERE "rank" <= ${PRODUCT_ROWS}
         UNION ALL
-        SELECT NULL, NULL, NULL, SUM("revenue")::float8, SUM("vat")::float8, true
+        SELECT NULL, NULL, NULL, SUM("revenue")::float8, SUM("vat")::float8, true, NULL
         FROM grouped WHERE "rank" > ${PRODUCT_ROWS}
         HAVING COUNT(*) > 0
-        ORDER BY "others", "revenue" DESC`,
+        ORDER BY "others", "rank"`,
       this.db.$queryRaw<ProductTotals[]>`
         SELECT COALESCE(SUM(e."amount"), 0)::float8 AS "total",
           COALESCE(SUM(e."vatAmount"), 0)::float8 AS "vat",

@@ -1180,10 +1180,12 @@ export class EinvoicesService implements OnApplicationBootstrap {
 
   // The branch of an invoice, and for one of a bill thêm tay the report site
   // too (spec 2026-10-02 §8): invoice ids are easy to guess, so every route
-  // reaching one by id checks both.
+  // reaching one by id checks both. manualBillId is required, not optional:
+  // a read that forgets to select it must not compile, or the report-site
+  // check would pass for every row.
   private assertRowAccess(
     user: AuthUser,
-    row: { branchId: number; manualBillId?: number | null },
+    row: { branchId: number; manualBillId: number | null },
   ) {
     this.scope.assertBranchAccess(user, row.branchId);
     if (row.manualBillId != null && !canUseReportSite(user)) {

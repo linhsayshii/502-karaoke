@@ -11,11 +11,14 @@ import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import { can } from "@/lib/permissions";
 import type { EinvoiceDetail } from "@/lib/types";
 
-// An issued invoice: only its header is kept (spec §4). One that still has a
-// lastError was issued but Minvoice's number clashed with one of ours, so its
-// number is empty until the chain manager types the one shown on Minvoice.
-// Gửi lại makes a new draft from it (its own draft went when it was issued);
-// the issued one stays as it is, here and on Minvoice.
+// An issued invoice: the panel shows only its header (spec §4). Its draft
+// stays as { lines } for the report site's products report; only the buyer's
+// address and email are dropped, and invoices issued before the report site
+// have draft = null. One that still has a lastError was issued but Minvoice's
+// number clashed with one of ours, so its number is empty until the chain
+// manager types the one shown on Minvoice.
+// Gửi lại makes a new draft from its header (amount, buyer MST and name), not
+// from its lines; the issued one stays as it is, here and on Minvoice.
 // Rendered inside the panel's @container/einvoice.
 export function IssuedView({
   einvoice,

@@ -71,5 +71,9 @@ describe('nextBillNumberOn', () => {
       billNumber: '02104010051',
     });
     expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    // The counter row of that branch and that day, not of the branch's today:
+    // the call is [template strings, branchId, date].
+    const [, ...params] = tx.$queryRaw.mock.calls[0] as unknown[];
+    expect(params).toEqual([1, '2026-10-02']);
   });
 });

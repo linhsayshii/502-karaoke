@@ -67,6 +67,10 @@ ALTER TABLE "Einvoice" ADD CONSTRAINT "Einvoice_one_bill" CHECK (("orderId" IS N
 
 -- 6. A draft without lines counts its whole amount at 10% VAT, as the filler
 --    line would (einvoice-draft.ts draftVatOf); a draft with lines gets it
---    when next saved.
+--    when next saved. jsonb_array_length raises on anything but an array, and
+--    PostgreSQL may run it before the status test (only CASE fixes the order),
+--    so one odd row of any status would roll the whole migration back: lines
+--    that are missing or not an array count as no lines.
 UPDATE "Einvoice" SET "vatAmount" = "amount" - round("amount" / 1.1)
-WHERE "status" = 'DRAFT' AND ("draft" IS NULL OR jsonb_array_length("draft"->'lines') = 0);
+WHERE "status" = 'DRAFT'
+  AND COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof("draft"->'lines') = 'array' THEN "draft"->'lines' END), 0) = 0;

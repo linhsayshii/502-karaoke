@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import type { AuthUser } from '../auth/auth-user';
 import { ReportSiteBillsService } from './report-site-bills.service';
 
@@ -137,5 +138,26 @@ describe('ReportSiteBillsService.list', () => {
       einvoiceCount: 2,
       issuedCount: 1,
     });
+  });
+});
+
+describe('ReportSiteBillsService.summary', () => {
+  // from/to reach the SQL as text for ::date, so the service checks them
+  // itself instead of relying on EinvoicesService.summary running first.
+  it('refuses a bad day before any SQL, whatever the counts call does', async () => {
+    const db = { $queryRaw: jest.fn() };
+    const scope = { resolveBranchId: jest.fn().mockResolvedValue(1) };
+    const einvoices = { summary: jest.fn().mockResolvedValue({}) };
+    const service = new ReportSiteBillsService(
+      db as never,
+      scope as never,
+      einvoices as never,
+    );
+    for (const day of ['0000-01-01', '2026-02-30']) {
+      await expect(
+        service.summary(user, { from: day, to: day }),
+      ).rejects.toThrow(BadRequestException);
+    }
+    expect(db.$queryRaw).not.toHaveBeenCalled();
   });
 });

@@ -6,7 +6,6 @@ import {
 } from './einvoice-metrics';
 
 const day = {
-  billCount: 2,
   einvoiceCount: 3,
   total: 330_000,
   vat: 30_000,
@@ -19,7 +18,6 @@ describe('einvoice metrics', () => {
     addEinvoiceSums(acc, day);
     addEinvoiceSums(acc, day);
     expect(acc).toEqual({
-      billCount: 4,
       einvoiceCount: 6,
       total: 660_000,
       vat: 60_000,

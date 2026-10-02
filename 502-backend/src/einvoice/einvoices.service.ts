@@ -199,7 +199,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
     site: 'main' | 'report' = 'main',
   ) {
     const branchId = await this.scope.resolveBranchId(user, query.branch);
-    const businessDate = dateRange(query.from, query.to);
+    const days = dateRange(query.from, query.to);
     const own: Prisma.EinvoiceWhereInput =
       site === 'main' ? { branchId, orderId: { not: null } } : { branchId };
     const [draftCount, errorCount, uncertainCount, issued] = await Promise.all([
@@ -217,7 +217,14 @@ export class EinvoicesService implements OnApplicationBootstrap {
         where: { ...own, status: NOT_SETTLED },
       }),
       this.reportDb.einvoice.aggregate({
-        where: { ...own, status: EinvoiceStatus.ISSUED, businessDate },
+        // The report site counts an invoice on its invoice date (spec
+        // 2026-10-02-bao-cao-theo-tung-hddt §3), the main site on its bill's
+        // business day.
+        where: {
+          ...own,
+          status: EinvoiceStatus.ISSUED,
+          ...(site === 'main' ? { businessDate: days } : { invoiceDate: days }),
+        },
         _count: { _all: true },
         _sum: { amount: true, vatAmount: true },
       }),

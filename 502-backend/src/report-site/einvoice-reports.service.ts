@@ -243,11 +243,11 @@ export class EinvoiceReportsService {
     };
   }
 
-  // Sums per business day and branch: one query per range, so totals,
+  // Sums per invoice date and branch: one query per range, so totals,
   // periods and branches always agree.
   private daily(branchId: number | undefined, from: string, to: string) {
     return this.db.$queryRaw<DailyRow[]>`
-      SELECT to_char(e."businessDate", 'YYYY-MM-DD') AS "date",
+      SELECT to_char(e."invoiceDate", 'YYYY-MM-DD') AS "date",
         e."branchId" AS "branchId", ${EINVOICE_SUM_COLUMNS}
       FROM "Einvoice" e
       WHERE ${countedWhere(branchId, from, to)}

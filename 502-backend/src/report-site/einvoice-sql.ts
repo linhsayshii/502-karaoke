@@ -18,24 +18,25 @@ import { branchWhere } from '../reports/report-sql';
 export const COUNTED_SQL = Prisma.sql`(e."status" = 'ISSUED' OR e."orderId" IS NULL
   OR (SELECT o."cancelledAt" FROM "Order" o WHERE o."id" = e."orderId") IS NULL)`;
 
-// Counted e-invoices of the business days from..to (a DATE column: no time
-// zone to convert), of one branch or the whole chain (undefined).
-// Einvoice(branchId, businessDate) index.
+// Counted e-invoices of the invoice dates from..to (spec
+// 2026-10-02-bao-cao-theo-tung-hddt §3: an e-invoice counts on its own
+// invoice date, so a bill split over three dates shows on three days; a DATE
+// column, no time zone to convert), of one branch or the whole chain
+// (undefined). Einvoice(branchId, invoiceDate) index.
 export function countedWhere(
   branchId: number | undefined,
   from: string,
   to: string,
 ): Prisma.Sql {
-  return Prisma.sql`e."businessDate" BETWEEN ${from}::date AND ${to}::date
+  return Prisma.sql`e."invoiceDate" BETWEEN ${from}::date AND ${to}::date
     ${branchWhere(Prisma.sql`e."branchId"`, branchId)}
     AND ${COUNTED_SQL}`;
 }
 
-// The EinvoiceSums of a group of counted e-invoices. All the e-invoices of
-// a bill carry its business day, so bill counts add up over days and
-// branches.
+// The EinvoiceSums of a group of counted e-invoices. No bill count: the
+// invoices of one bill may fall on several days, so bill counts would not add
+// up over days.
 export const EINVOICE_SUM_COLUMNS = Prisma.sql`
-  (COUNT(DISTINCT e."orderId") + COUNT(DISTINCT e."manualBillId"))::int AS "billCount",
   COUNT(*)::int AS "einvoiceCount",
   COALESCE(SUM(e."amount"), 0)::float8 AS "total",
   COALESCE(SUM(e."vatAmount"), 0)::float8 AS "vat",

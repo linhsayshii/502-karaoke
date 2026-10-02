@@ -154,7 +154,6 @@ export class EinvoiceConfigService {
         sellerTaxCode: taxCode,
         symbolCode,
         status: EinvoiceStatus.ISSUED,
-        invoiceDate: { not: null },
       },
       orderBy: [
         { invoiceDate: 'desc' },
@@ -162,7 +161,7 @@ export class EinvoiceConfigService {
       ],
       select: { invoiceDate: true, invoiceNumber: true },
     });
-    return row?.invoiceDate
+    return row
       ? {
           invoiceDate: fromDbDate(row.invoiceDate),
           invoiceNumber: row.invoiceNumber,

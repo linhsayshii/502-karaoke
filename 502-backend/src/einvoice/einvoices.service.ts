@@ -17,7 +17,10 @@ import {
   toDateString,
   toDbDate,
 } from '../common/dates';
-import { billNumberPrefixRange } from '../orders/bill-number';
+import {
+  billNumberPrefixRange,
+  nextReportNumber,
+} from '../orders/bill-number';
 import { billedHoursOf } from '../orders/billing';
 import { staffRef } from '../orders/order-include';
 import { PrismaService } from '../prisma/prisma.service';
@@ -463,6 +466,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
         status: true,
         businessDate: true,
         endTime: true,
+        room: { select: { name: true } },
       },
     });
     if (!order) throw new NotFoundException('Không tìm thấy hóa đơn');
@@ -472,22 +476,34 @@ export class EinvoicesService implements OnApplicationBootstrap {
         'Chỉ tạo hóa đơn điện tử cho bill đã thanh toán và chưa hủy',
       );
     }
-    const created = await this.prisma.einvoice.create({
-      data: {
-        branchId: order.branchId,
-        orderId: order.id,
-        businessDate: order.businessDate,
-        // The calendar day the bill was paid: a bill paid at 00:24 belongs
-        // to the business day before but is invoiced on its own date (spec §2).
-        invoiceDate: dbDay(
-          dto.invoiceDate ?? toDateString(order.endTime ?? new Date()),
-          INVALID_INVOICE_DATE,
-        ),
-        ...written,
-      },
-      select: { id: true },
+    const { businessDate } = order;
+    // The calendar day the bill was paid: a bill paid at 00:24 belongs to the
+    // business day before but is invoiced on its own date (spec §2).
+    const invoiceDate =
+      dto.invoiceDate ?? toDateString(order.endTime ?? new Date());
+    const invoiceDay = dbDay(invoiceDate, INVALID_INVOICE_DATE);
+    // Short: the day's ReportCounter row stays locked until this commits.
+    const id = await this.prisma.$transaction(async (tx) => {
+      const number = await nextReportNumber(
+        tx,
+        order.branchId,
+        invoiceDate,
+        order.room?.name,
+      );
+      const created = await tx.einvoice.create({
+        data: {
+          branchId: order.branchId,
+          orderId: order.id,
+          businessDate,
+          invoiceDate: invoiceDay,
+          ...number,
+          ...written,
+        },
+        select: { id: true },
+      });
+      return created.id;
     });
-    return this.findOne(user, created.id);
+    return this.findOne(user, id);
   }
 
   // A draft of a bill thêm tay. The bill's row is locked while the draft is
@@ -502,24 +518,36 @@ export class EinvoicesService implements OnApplicationBootstrap {
     if (!canUseReportSite(user)) throw new ForbiddenException(REPORT_SITE_ONLY);
     const id = await this.prisma.$transaction(async (tx) => {
       const [bill] = await tx.$queryRaw<
-        { branchId: number; businessDate: Date; cancelledAt: Date | null }[]
-      >`SELECT "branchId", "businessDate", "cancelledAt" FROM "ManualBill"
-        WHERE "id" = ${manualBillId} FOR UPDATE`;
+        {
+          branchId: number;
+          businessDate: Date;
+          cancelledAt: Date | null;
+          roomName: string | null;
+        }[]
+      >`SELECT m."branchId", m."businessDate", m."cancelledAt", r."name" AS "roomName"
+        FROM "ManualBill" m LEFT JOIN "Room" r ON r."id" = m."roomId"
+        WHERE m."id" = ${manualBillId} FOR UPDATE OF m`;
       if (!bill) throw new NotFoundException('Không tìm thấy bill');
       this.scope.assertBranchAccess(user, bill.branchId);
       if (bill.cancelledAt) {
         throw new BadRequestException('Bill đã hủy, không thêm được hóa đơn');
       }
+      // The day of the bill, unless the draft says otherwise (spec §4.2).
+      const day = invoiceDate ?? fromDbDate(bill.businessDate);
+      const invoiceDay = dbDay(day, INVALID_INVOICE_DATE);
+      const number = await nextReportNumber(
+        tx,
+        bill.branchId,
+        day,
+        bill.roomName,
+      );
       const created = await tx.einvoice.create({
         data: {
           branchId: bill.branchId,
           manualBillId,
           businessDate: bill.businessDate,
-          // The day of the bill, unless the draft says otherwise (spec §4.2).
-          invoiceDate: dbDay(
-            invoiceDate ?? fromDbDate(bill.businessDate),
-            INVALID_INVOICE_DATE,
-          ),
+          invoiceDate: invoiceDay,
+          ...number,
           ...written,
         },
         select: { id: true },

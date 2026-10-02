@@ -2,6 +2,7 @@ import {
   billNumberPrefixRange,
   formatBillNumber,
   nextBillNumberOn,
+  nextReportNumber,
   roomCode,
 } from './bill-number';
 
@@ -75,5 +76,24 @@ describe('nextBillNumberOn', () => {
     // the call is [template strings, branchId, date].
     const [, ...params] = tx.$queryRaw.mock.calls[0] as unknown[];
     expect(params).toEqual([1, '2026-10-02']);
+  });
+});
+
+describe('nextReportNumber', () => {
+  it('numbers an e-invoice on its own counter, in the shape of a bill number', async () => {
+    const tx = { $queryRaw: jest.fn().mockResolvedValue([{ lastSeq: 2 }]) };
+    const number = await nextReportNumber(tx as never, 3, '2026-10-05', null);
+    expect(number).toEqual({
+      reportDate: new Date('2026-10-05T00:00:00Z'),
+      reportSeq: 2,
+      reportNumber: '05100000002',
+    });
+    const [strings, ...params] = tx.$queryRaw.mock.calls[0] as [
+      TemplateStringsArray,
+      ...unknown[],
+    ];
+    expect(strings.join('?')).toContain('"ReportCounter"');
+    expect(strings.join('?')).not.toContain('"BillCounter"');
+    expect(params).toEqual([3, '2026-10-05']);
   });
 });

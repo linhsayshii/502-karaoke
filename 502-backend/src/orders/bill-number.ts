@@ -45,8 +45,7 @@ export function billNumberPrefixRange(prefix: string): {
 // Hands out the next number of the branch for business day `date`
 // (YYYY-MM-DD). The counter row is incremented atomically and stays locked
 // until the transaction ends, so concurrent closings (checkout, cancelling a
-// session, a bill thêm tay of the report site) never share a number and a
-// rolled-back one gives its number back.
+// session) never share a number and a rolled-back one gives its number back.
 export async function nextBillNumberOn(
   tx: Tx,
   branchId: number,
@@ -63,6 +62,29 @@ export async function nextBillNumberOn(
     businessDate: new Date(`${date}T00:00:00Z`),
     billSeq: lastSeq,
     billNumber: formatBillNumber(date, roomName, lastSeq),
+  };
+}
+
+// The report site's number of a new e-invoice (spec
+// 2026-10-02-bao-cao-theo-tung-hddt §4): the same shape as a bill number, on
+// its own counter per branch and invoice date (`date`, YYYY-MM-DD), so the
+// bill numbers never skip. Locked and given back like nextBillNumberOn.
+export async function nextReportNumber(
+  tx: Tx,
+  branchId: number,
+  date: string,
+  roomName?: string | null,
+) {
+  const [{ lastSeq }] = await tx.$queryRaw<{ lastSeq: number }[]>`
+    INSERT INTO "ReportCounter" ("branchId", "date", "lastSeq")
+    VALUES (${branchId}, ${date}::date, 1)
+    ON CONFLICT ("branchId", "date")
+    DO UPDATE SET "lastSeq" = "ReportCounter"."lastSeq" + 1
+    RETURNING "lastSeq"`;
+  return {
+    reportDate: new Date(`${date}T00:00:00Z`),
+    reportSeq: lastSeq,
+    reportNumber: formatBillNumber(date, roomName, lastSeq),
   };
 }
 

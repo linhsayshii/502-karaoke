@@ -10,7 +10,7 @@ import { BranchScopeService } from '../common/branch-scope.service';
 import { businessDateOf } from '../common/dates';
 import { draftData } from '../einvoice/einvoice-draft';
 import { dbDay } from '../einvoice/einvoice-filters';
-import { nextBillNumberOn } from '../orders/bill-number';
+import { nextReportNumber } from '../orders/bill-number';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CancelManualBillDto,
@@ -40,27 +40,37 @@ export class ManualBillsService {
     if (!room || room.branchId !== branchId) {
       throw new BadRequestException('Phòng không thuộc cơ sở này');
     }
-    // Short: the day's BillCounter row stays locked until this commits, as
-    // in a checkout of the same day.
+    // Short: the day's ReportCounter row stays locked until this commits.
+    // The bill takes the number of its first e-invoice (spec
+    // 2026-10-02-bao-cao-theo-tung-hddt §4.2), never one of BillCounter, so
+    // the main site's bill numbers do not skip.
     return this.prisma.$transaction(async (tx) => {
-      const number = await nextBillNumberOn(
+      const number = await nextReportNumber(
         tx,
         branchId,
         dto.businessDate,
         room.name,
       );
       const bill = await tx.manualBill.create({
-        data: { branchId, ...number, roomId: dto.roomId, createdById: user.id },
+        data: {
+          branchId,
+          businessDate: number.reportDate,
+          billSeq: number.reportSeq,
+          billNumber: number.reportNumber,
+          roomId: dto.roomId,
+          createdById: user.id,
+        },
         select: { id: true, billNumber: true },
       });
       const draft = await tx.einvoice.create({
         data: {
           branchId,
           manualBillId: bill.id,
-          businessDate: number.businessDate,
+          businessDate: number.reportDate,
           // The day of the bill is its invoice date until the draft says
           // otherwise (spec §4.2).
-          invoiceDate: number.businessDate,
+          invoiceDate: number.reportDate,
+          ...number,
           createdById: user.id,
           updatedById: user.id,
           ...draftData({ amount: dto.amount, lines: [] }),

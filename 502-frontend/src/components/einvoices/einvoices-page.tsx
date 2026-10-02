@@ -297,14 +297,19 @@ export function EinvoicesPage({ site }: { site: Site }) {
       />
     );
   const emptyBill = billDetail !== null && billDetail.einvoices.length === 0;
+  // The report site lists a paid bill only while it holds an invoice: without
+  // one it has no row, so no + to press, and comes back from the main site.
+  const unlisted = emptyBill && site === "report" && order !== null;
   const emptyPanel = (
     <EmptyState
       icon={FileCheck2Icon}
       title={emptyBill ? "Bill chưa có hóa đơn nhỏ" : "Chọn một hóa đơn"}
       description={
-        can(user, "einvoices.write") && emptyBill
-          ? "Bấm + trên dòng bill để thêm hóa đơn nhỏ."
-          : "Mở một bill ở cột trái."
+        unlisted
+          ? "Bill này không có hóa đơn nào ở trang báo cáo. Gửi lại từ trang chính bằng nút Thêm hóa đơn vào báo cáo."
+          : can(user, "einvoices.write") && emptyBill
+            ? "Bấm + trên dòng bill để thêm hóa đơn nhỏ."
+            : "Mở một bill ở cột trái."
       }
       className="rounded-xl border"
     />

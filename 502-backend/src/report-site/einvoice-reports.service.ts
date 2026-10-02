@@ -103,10 +103,14 @@ export class EinvoiceReportsService {
     const branchId = await reportScope(this.scope, user, query);
     const by = query.by ?? 'room';
     const [sums, rooms] = await Promise.all([
+      // The paid bill's room through "Order_pkey", one probe per invoice
+      // (einvoice-sql.ts). The LIMIT 1 is load-bearing: without it the
+      // planner pulls the subquery up into a hash join over a Seq Scan of
+      // "Order".
       this.db.$queryRaw<(EinvoiceSums & { roomId: number | null })[]>`
-        SELECT COALESCE(o."roomId", m."roomId") AS "roomId", ${EINVOICE_SUM_COLUMNS}
+        SELECT COALESCE(r."roomId", m."roomId") AS "roomId", ${EINVOICE_SUM_COLUMNS}
         FROM "Einvoice" e
-        LEFT JOIN "Order" o ON o."id" = e."orderId"
+        LEFT JOIN LATERAL (SELECT o."roomId" FROM "Order" o WHERE o."id" = e."orderId" LIMIT 1) r ON true
         LEFT JOIN "ManualBill" m ON m."id" = e."manualBillId"
         WHERE ${countedWhere(branchId, query.from, query.to)}
         GROUP BY 1`,
@@ -194,7 +198,6 @@ export class EinvoiceReportsService {
             ${LINE_REVENUE} AS "revenue",
             ${LINE_VAT} AS "vat"
           FROM "Einvoice" e
-          LEFT JOIN "Order" o ON o."id" = e."orderId"
           CROSS JOIN LATERAL ${EINVOICE_LINES}
           WHERE ${where}
         ), grouped AS (
@@ -222,7 +225,6 @@ export class EinvoiceReportsService {
           COALESCE(SUM(x."revenue"), 0)::float8 AS "lineRevenue",
           COALESCE(SUM(x."vat"), 0)::float8 AS "lineVat"
         FROM "Einvoice" e
-        LEFT JOIN "Order" o ON o."id" = e."orderId"
         CROSS JOIN LATERAL (
           SELECT SUM(${LINE_REVENUE}) AS "revenue", SUM(${LINE_VAT}) AS "vat"
           FROM ${EINVOICE_LINES}
@@ -248,7 +250,6 @@ export class EinvoiceReportsService {
       SELECT to_char(e."businessDate", 'YYYY-MM-DD') AS "date",
         e."branchId" AS "branchId", ${EINVOICE_SUM_COLUMNS}
       FROM "Einvoice" e
-      LEFT JOIN "Order" o ON o."id" = e."orderId"
       WHERE ${countedWhere(branchId, from, to)}
       GROUP BY 1, 2`;
   }

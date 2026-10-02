@@ -214,6 +214,29 @@ describe('Report site (e2e)', () => {
       await login('ql1_cs1', 'report').expect(403);
     });
 
+    // Spec §10: the account is read again on every request, so turning the
+    // right off refuses the next call of a token already handed out.
+    it('stops a live session at its next request once the right is off', async () => {
+      await as('admin')
+        .patch(`/users/${ids.ql1_cs1}`, { reportAccess: true })
+        .expect(200);
+      const token = (
+        (await login('ql1_cs1', 'report').expect(200)).body as Json
+      ).access_token as string;
+      const bills = () =>
+        api()
+          .get('/api/report-site/bills?branch=cs1')
+          .set('Authorization', `Bearer ${token}`);
+      await bills().expect(200);
+      await as('admin')
+        .patch(`/users/${ids.ql1_cs1}`, { reportAccess: false })
+        .expect(200);
+      const res = await bills().expect(403);
+      expect((res.body as Json).message).toBe(
+        'Bạn không có quyền vào trang báo cáo',
+      );
+    });
+
     it('goes when the account moves to another role', async () => {
       const created = (
         await as('admin')
@@ -590,6 +613,36 @@ describe('Report site (e2e)', () => {
       await bills('', 'qlbc_cs2').expect(403);
       await bills('', 'hdqt_bc').expect(200);
     });
+
+    // The reports read the paid bill of each invoice: BC 404, voided, counts
+    // its issued invoice only, BC 403 its draft, each in its own room.
+    it('adds up the paid bills of the day alike in every report', async () => {
+      const day = today();
+      const read = async (path: string, query = '') =>
+        (
+          await as('qlbc_cs1')
+            .get(
+              `/report-site/reports/${path}?branch=cs1&from=${day}&to=${day}${query}`,
+            )
+            .expect(200)
+        ).body as { totals: Json; rows: Json[] };
+      const revenue = await read('revenue');
+      const rooms = await read('rooms', '&by=room');
+      const products = await read('products');
+      const byRoom = new Map(rooms.rows.map((r) => [r.name, r.total]));
+      expect(byRoom.get('BC 404')).toBe(110000);
+      expect(byRoom.get('BC 403')).toBe(50000);
+      const total = revenue.totals.total as number;
+      expect((await summary()).total).toBe(total);
+      expect(rooms.rows.reduce((s, r) => s + (r.total as number), 0)).toBe(
+        total,
+      );
+      expect(products.totals.total).toBe(total);
+      // The issued fillers of BC 404 and of the bill thêm tay issued above.
+      expect(
+        products.rows.find((r) => r.name === 'Dịch vụ karaoke'),
+      ).toMatchObject({ unit: 'Lần', quantity: 2, revenue: 200000 });
+    });
   });
 
   describe('reports', () => {
@@ -713,7 +766,8 @@ describe('Report site (e2e)', () => {
     // Equal revenue is no order of its own: the name, then the unit, decide,
     // so the rows (and what falls past the 1000-row cut) never shuffle.
     it('puts lines of equal revenue in order of name, then unit', async () => {
-      const day = daysAgo(51);
+      // Not D − 1, the day the revenue test compares D with.
+      const day = daysAgo(55);
       const room = (
         await as('ql1_cs1')
           .post('/rooms', { name: 'BC 503', pricePerHour: 100000 })
@@ -756,6 +810,38 @@ describe('Report site (e2e)', () => {
         ['Bia', 'Lon'],
         ['bia', 'Thung'],
         ['Zebra', 'Lon'],
+      ]);
+    });
+
+    // A draft whose lines are not an array (never written by the app) must
+    // not fail every products report of its day: it has no lines.
+    it('reads a draft whose lines are not a list as one without lines', async () => {
+      const day = daysAgo(60);
+      const room = (
+        await as('ql1_cs1')
+          .post('/rooms', { name: 'BC 504', pricePerHour: 100000 })
+          .expect(201)
+      ).body as Json;
+      const bill = (
+        await as('qlbc_cs1')
+          .post('/report-site/manual-bills?branch=cs1', {
+            businessDate: day,
+            roomId: room.id,
+            amount: 110000,
+          })
+          .expect(201)
+      ).body as Json;
+      await app.get(PrismaService).einvoice.update({
+        where: { id: bill.einvoiceId as number },
+        data: { draft: { lines: null } },
+      });
+      const body = (
+        await as('qlbc_cs1')
+          .get(`/report-site/reports/products?branch=cs1&from=${day}&to=${day}`)
+          .expect(200)
+      ).body as { rows: Json[] };
+      expect(body.rows).toEqual([
+        expect.objectContaining({ kind: 'unlisted', total: 110000 }),
       ]);
     });
 

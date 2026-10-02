@@ -139,6 +139,33 @@ describe('ReportSiteBillsService.list', () => {
       issuedCount: 1,
     });
   });
+
+  // By day, the paid bills are narrowed by their own day too (the planner
+  // then reads only those days of the branch); never in a tab of every day
+  // or a search by number.
+  it('narrows the paid bills to the days only when listing by day', async () => {
+    const { service, db } = setup({
+      orders: [],
+      manual: [],
+      orderCount: 0,
+      manualCount: 0,
+    });
+    const days = { from: '2026-09-01', to: '2026-09-30' };
+    await service.list(user, days);
+    await service.list(user, { ...days, status: 'ISSUED' });
+    await service.list(user, { ...days, status: 'DRAFT' });
+    await service.list(user, { ...days, billNumber: '0110' });
+    const byDay = expect.objectContaining({
+      businessDate: { gte: day('2026-09-01'), lte: day('2026-09-30') },
+    }) as unknown;
+    const everyDay = expect.not.objectContaining({
+      businessDate: expect.anything() as unknown,
+    }) as unknown;
+    expect(db.order.count).toHaveBeenNthCalledWith(1, { where: byDay });
+    expect(db.order.count).toHaveBeenNthCalledWith(2, { where: byDay });
+    expect(db.order.count).toHaveBeenNthCalledWith(3, { where: everyDay });
+    expect(db.order.count).toHaveBeenNthCalledWith(4, { where: everyDay });
+  });
 });
 
 describe('ReportSiteBillsService.summary', () => {

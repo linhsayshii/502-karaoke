@@ -223,7 +223,7 @@ Rồi trong khối `server` của `/etc/nginx/sites-available/karaoke502` (khố
    - `baocao.hvlsv.uk`, `baocao-mediastar.vlab.id.vn`: được, miễn phí;
    - `baocao.mediastar.vlab.id.vn` (hai cấp dưới zone `vlab.id.vn`): trình duyệt báo lỗi SSL, trừ khi mua Advanced Certificate Manager rồi bật Total TLS.
 
-   Thêm rule giới hạn đăng nhập (điểm 4) cho cả tên này. Sau khi triển khai, quản lý hệ thống bật "Vào trang báo cáo" cho tài khoản cần dùng (Quản trị → Tài khoản).
+   Rule giới hạn đăng nhập ở điểm 4 không xét tên miền, nên đã áp dụng cho tên báo cáo nằm cùng zone Cloudflare với tên chính (như `baocao.hvlsv.uk` cạnh `kara.hvlsv.uk`). Chỉ khi tên báo cáo thuộc zone khác (như `baocao-mediastar.vlab.id.vn`) mới phải thêm một rule như vậy trong zone đó. Sau khi triển khai, quản lý hệ thống bật "Vào trang báo cáo" cho tài khoản cần dùng (Quản trị → Tài khoản).
 
 ## 4. Vận hành hằng ngày
 
@@ -599,8 +599,9 @@ Sau khi cập nhật:
   - Tính lại VAT của các nháp chưa có dòng hàng.
   - Chạy trong tích tắc. Không đổi `.env` hay `docker-compose.yml`.
 - **Trang chính:** trang Hóa đơn điện tử không còn tạo hóa đơn không theo bill. Hóa đơn xuất từ nay giữ lại dòng hàng (cho báo cáo Hàng hóa của trang báo cáo).
+- **Sau khi cập nhật, tải lại (F5) trang Hóa đơn điện tử ở mọi tab đang mở.** Tab mở từ trước vẫn chạy trang cũ: mỗi lần tải danh sách nó gọi `GET /einvoices?free=1` (đã bỏ) và báo lỗi "Không thể tải hóa đơn không theo bill" cho tới khi tải lại.
 - **Trang báo cáo:** làm theo [mục 3.2](#32-cloudflare-tunnel-không-dùng-nginx) điểm 8 (Cloudflare) hoặc [mục 3](#3-tên-miền-nginx-và-https) (Nginx), rồi bật quyền cho tài khoản.
-- **Rollback cẩn thận:** code cũ không biết `ManualBill` và ràng buộc mới (mỗi hóa đơn thuộc đúng một bill). Trên trang Hóa đơn điện tử cũ, hóa đơn của bill thêm tay hiện như hóa đơn không theo bill, nút **+** cạnh ô tìm số bill (tạo hóa đơn không theo bill) báo lỗi, và "Xóa dữ liệu" của HĐQT báo lỗi khi gặp phòng đã có bill thêm tay, vì code cũ không xóa bảng `ManualBill`. Dữ liệu không mất. Quay về bản trước mục 6.19 thì còn phải theo cả điểm rollback của mục đó: hóa đơn của bill thêm tay cũng có `orderId` để trống.
+- **Rollback cẩn thận:** code cũ không biết `ManualBill` và ràng buộc mới (mỗi hóa đơn thuộc đúng một bill). Trên trang Hóa đơn điện tử cũ, hóa đơn của bill thêm tay hiện và được đếm trên các tab như hóa đơn không theo bill, nút **+** cạnh ô tìm số bill (tạo hóa đơn không theo bill) báo lỗi, và "Xóa dữ liệu" của HĐQT báo lỗi khi gặp phòng đã có bill thêm tay, vì code cũ không xóa bảng `ManualBill`. Xóa một phòng đã có bill thêm tay cũng bị từ chối, nhưng với thông báo chung "Dữ liệu đang được sử dụng ở nơi khác, không thể thực hiện" (khóa ngoại `ManualBill_roomId_fkey`) thay cho thông báo "Phòng đã có lịch sử hóa đơn…" của bản mới. Sau khi rollback cũng tải lại (F5) các tab đang mở trang Hóa đơn điện tử: trang mới chạy trên backend cũ đếm cả hóa đơn của bill thêm tay trên các tab mà không liệt kê chúng, nên số và danh sách không khớp. Dữ liệu không mất. Quay về bản trước mục 6.19 thì còn phải theo cả điểm rollback của mục đó: hóa đơn của bill thêm tay cũng có `orderId` để trống.
 
 ## 7. Xử lý sự cố
 

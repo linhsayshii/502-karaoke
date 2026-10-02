@@ -84,6 +84,12 @@ export class ReportSiteBillsService {
     const orderWhere: Prisma.OrderWhereInput = {
       branchId,
       ...number,
+      // The same rows: an e-invoice's businessDate is copied from its bill's
+      // when it is made (EinvoicesService.create) and a bill's day never
+      // changes once closed. It lets the planner read the days through
+      // Order(branchId, businessDate, billSeq) instead of every bill of the
+      // branch.
+      ...(byDay ? { businessDate: days } : {}),
       einvoices,
     };
     // Every bill thêm tay of the days, with or without an invoice; by status
@@ -224,7 +230,6 @@ export class ReportSiteBillsService {
     const [sums] = await this.db.$queryRaw<EinvoiceSums[]>`
       SELECT ${EINVOICE_SUM_COLUMNS}
       FROM "Einvoice" e
-      LEFT JOIN "Order" o ON o."id" = e."orderId"
       WHERE ${countedWhere(branchId, from, to)}`;
     return { ...counts, ...toEinvoiceMetrics(sums) };
   }

@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
-import { defaultInvoiceDate, invoiceDateProblem, issueProblem, totalsOf } from "@/lib/einvoice";
+import { invoiceDateProblem, issueProblem, totalsOf } from "@/lib/einvoice";
 import { formatDate, formatMoney, toDateInput } from "@/lib/format";
 import { can } from "@/lib/permissions";
 import type { EinvoiceBillDetail, EinvoiceConfigView, EinvoiceDetail, EinvoiceLine } from "@/lib/types";
@@ -22,8 +22,8 @@ interface FormState extends BuyerValue {
   lines: EinvoiceLine[];
 }
 
-const formOf = (einvoice: EinvoiceDetail, fallbackDate: string): FormState => ({
-  invoiceDate: einvoice.invoiceDate ?? fallbackDate,
+const formOf = (einvoice: EinvoiceDetail): FormState => ({
+  invoiceDate: einvoice.invoiceDate,
   buyerTaxCode: einvoice.buyerTaxCode ?? "",
   buyerName: einvoice.buyerName ?? "",
   buyerAddress: einvoice.draft?.buyerAddress ?? "",
@@ -71,8 +71,7 @@ export function EinvoiceEditor({
   const billStands = !bill || bill.status === "COMPLETED";
   const canEdit = can(user, "einvoices.write") && billStands;
   const canIssue = can(user, "einvoices.issue") && billStands;
-  const fallbackDate = defaultInvoiceDate(bill?.endTime);
-  const saved = useMemo(() => formOf(einvoice, fallbackDate), [einvoice, fallbackDate]);
+  const saved = useMemo(() => formOf(einvoice), [einvoice]);
   const [form, setForm] = useState<FormState>(saved);
   const [saving, setSaving] = useState(false);
   const dirty = JSON.stringify(form) !== JSON.stringify(saved);

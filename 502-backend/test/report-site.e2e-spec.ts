@@ -79,6 +79,10 @@ describe('Report site (e2e)', () => {
   // DDMM + room (4) + sequence.
   const seqOf = (billNumber: string) => Number(billNumber.slice(8));
   const today = () => businessDateOf(new Date());
+  // Today's business day to today's date: a draft is dated its bill's business
+  // day, an invoice issued after midnight the calendar day (before 06:00 the
+  // day after the business day).
+  const span = () => `&from=${today()}&to=${toDateString(new Date())}`;
   const daysAgo = (n: number) =>
     toDateString(new Date(Date.now() - n * DAY_MS));
   const filler = (unitPrice: number) => ({
@@ -323,7 +327,7 @@ describe('Report site (e2e)', () => {
     const add = (name: string, body: Json) =>
       as(name).post('/report-site/manual-bills?branch=cs1', body);
 
-    it('take the next number of their day, shared with the paid bills', async () => {
+    it('take the number of their first e-invoice, never one of the paid bills', async () => {
       const first = await paidBill('BC 401');
       roomId = first.roomId as number;
       const added = (
@@ -334,11 +338,9 @@ describe('Report site (e2e)', () => {
         }).expect(201)
       ).body as Json;
       const second = await paidBill('BC 402');
-      expect(seqOf(added.billNumber as string)).toBe(
-        seqOf(first.billNumber as string) + 1,
-      );
+      // The paid bills' sequence does not skip.
       expect(seqOf(second.billNumber as string)).toBe(
-        seqOf(added.billNumber as string) + 1,
+        seqOf(first.billNumber as string) + 1,
       );
       expect((added.billNumber as string).slice(4, 8)).toBe('4010');
       const detail = (
@@ -358,6 +360,7 @@ describe('Report site (e2e)', () => {
         amount: '110000',
         status: 'DRAFT',
         invoiceDate: today(),
+        reportNumber: added.billNumber,
       });
       expect(detail.allocated).toBe(110000);
     });
@@ -528,7 +531,7 @@ describe('Report site (e2e)', () => {
     const summary = async () =>
       (
         await as('qlbc_cs1')
-          .get('/report-site/bills/summary?branch=cs1')
+          .get(`/report-site/bills/summary?branch=cs1${span()}`)
           .expect(200)
       ).body as Json;
 
@@ -537,7 +540,12 @@ describe('Report site (e2e)', () => {
       const before = (await bills().expect(200)).body as Json[];
       expect(before.some((b) => b.orderId === paid.id)).toBe(false);
       await as('tn1_cs1')
-        .post('/einvoices', { orderId: paid.id, amount: 50000, lines: [] })
+        .post('/einvoices', {
+          orderId: paid.id,
+          amount: 50000,
+          lines: [],
+          invoiceDate: today(),
+        })
         .expect(201);
       const res = await bills().expect(200);
       const rows = res.body as Json[];
@@ -617,13 +625,10 @@ describe('Report site (e2e)', () => {
     // The reports read the paid bill of each invoice: BC 404, voided, counts
     // its issued invoice only, BC 403 its draft, each in its own room.
     it('adds up the paid bills of the day alike in every report', async () => {
-      const day = today();
       const read = async (path: string, query = '') =>
         (
           await as('qlbc_cs1')
-            .get(
-              `/report-site/reports/${path}?branch=cs1&from=${day}&to=${day}${query}`,
-            )
+            .get(`/report-site/reports/${path}?branch=cs1${span()}${query}`)
             .expect(200)
         ).body as { totals: Json; rows: Json[] };
       const revenue = await read('revenue');
@@ -704,7 +709,6 @@ describe('Report site (e2e)', () => {
         await report('revenue', '&groupBy=day&compare=1').expect(200)
       ).body as Json;
       expect(body.totals).toEqual({
-        billCount: 3,
         einvoiceCount: 3,
         total: 440000,
         vat: 40000,
@@ -717,9 +721,24 @@ describe('Report site (e2e)', () => {
         key: D,
         total: 440000,
       });
+      // Issued today, it counts on today, its invoice date, no longer on D
+      // (spec 2026-10-02-bao-cao-theo-tung-hddt §3).
       await issueToday(laterId);
-      const issued = (await report('revenue', '').expect(200)).body as Json;
-      expect(issued.totals).toMatchObject({ issued: 220000, pending: 220000 });
+      const left = (await report('revenue', '').expect(200)).body as Json;
+      expect(left.totals).toMatchObject({
+        einvoiceCount: 2,
+        total: 220000,
+        issued: 0,
+      });
+      const now = toDateString(new Date());
+      const moved = (
+        await as('qlbc_cs1')
+          .get(`/report-site/reports/revenue?branch=cs1&from=${now}&to=${now}`)
+          .expect(200)
+      ).body as Json;
+      expect((moved.totals as Json).issued as number).toBeGreaterThanOrEqual(
+        220000,
+      );
     });
 
     it('splits it by room, adding up to the revenue', async () => {
@@ -729,9 +748,9 @@ describe('Report site (e2e)', () => {
       };
       const byName = new Map(body.rows.map((r) => [r.name, r.total]));
       expect(byName.get('BC 501')).toBe(110000);
-      expect(byName.get('BC 502')).toBe(330000);
+      expect(byName.get('BC 502')).toBe(110000);
       expect(body.rows.reduce((s, r) => s + (r.total as number), 0)).toBe(
-        440000,
+        220000,
       );
     });
 
@@ -741,20 +760,33 @@ describe('Report site (e2e)', () => {
         rows: Json[];
       };
       expect(body.totals).toEqual({
-        revenue: 400000,
-        vat: 40000,
-        total: 440000,
+        revenue: 200000,
+        vat: 20000,
+        total: 220000,
       });
       const [item, unlisted] = body.rows;
       expect(item).toMatchObject({
         kind: 'item',
         unit: 'Lon',
-        quantity: 3,
-        revenue: 300000,
-        vat: 30000,
+        quantity: 1,
+        revenue: 100000,
+        vat: 10000,
       });
       expect((item.name as string).toLowerCase()).toBe('bia tiger');
-      // Issued: its lines stay in the report.
+      // Issued (today): its lines stay in the report, on its new day.
+      const now = toDateString(new Date());
+      const ofToday = (
+        await as('qlbc_cs1')
+          .get(`/report-site/reports/products?branch=cs1&from=${now}&to=${now}`)
+          .expect(200)
+      ).body as { rows: Json[] };
+      expect(
+        ofToday.rows.find(
+          (r) =>
+            (r.name as string).toLowerCase().replace(/\s+/g, ' ').trim() ===
+            'bia tiger',
+        ),
+      ).toMatchObject({ quantity: 2, revenue: 200000 });
       expect(unlisted).toMatchObject({
         kind: 'unlisted',
         revenue: 100000,
@@ -866,6 +898,197 @@ describe('Report site (e2e)', () => {
           '/report-site/reports/products?branch=cs1&from=2010-01-01&to=2026-01-01',
         )
         .expect(400);
+    });
+  });
+
+  // Spec 2026-10-02-bao-cao-theo-tung-hddt.
+  describe('one e-invoice at a time', () => {
+    const rows = (query: string, name = 'qlbc_cs1') =>
+      as(name).get(`/report-site/einvoices?branch=cs1${query}`);
+    const ofDay = async (day: string) =>
+      (await rows(`&from=${day}&to=${day}`).expect(200)).body as Json[];
+    const dayOf = (iso: unknown) => (iso as string).slice(0, 10);
+    let reported: Json;
+    let reportedBill: Json;
+
+    it('lets the cashier put a whole paid bill into the report site', async () => {
+      reportedBill = await paidBill('BC 601');
+      reported = (
+        await as('tn1_cs1')
+          .post(`/einvoices/bill/${reportedBill.id as number}/report`)
+          .expect(201)
+      ).body as Json;
+      const day = dayOf(reportedBill.businessDate);
+      expect(reported).toMatchObject({
+        orderId: reportedBill.id,
+        status: 'DRAFT',
+        buyerName: 'Bán cho người tiêu dùng',
+        buyerTaxCode: null,
+        invoiceDate: day,
+      });
+      expect(Number(reported.amount)).toBe(
+        Math.round(Number(reportedBill.finalAmount)),
+      );
+      expect(reported.reportNumber).toMatch(
+        new RegExp(`^${day.slice(8, 10)}${day.slice(5, 7)}6010\\d{3,}$`),
+      );
+      const lines = (reported.draft as { lines: Json[] }).lines;
+      expect(lines[0]).toMatchObject({
+        name: 'Dịch vụ tính theo giờ',
+        unit: 'Giờ',
+        unitPrice: 100000,
+        vatRate: 10,
+      });
+      expect(lines[1]).toMatchObject({ quantity: 2, vatRate: 10 });
+      expect(lines).toHaveLength(2);
+      // On the report site at once, on the bill's business day.
+      expect(
+        (await ofDay(day)).find((r) => r.id === reported.id),
+      ).toMatchObject({
+        billNumber: reportedBill.billNumber,
+        roomName: 'BC 601',
+        status: 'DRAFT',
+      });
+    });
+
+    it('puts a bill into the report site once only', async () => {
+      const url = `/einvoices/bill/${reportedBill.id as number}/report`;
+      const res = await as('ql1_cs1').post(url).expect(409);
+      expect((res.body as Json).message).toBe('Bill đã có trong báo cáo');
+      const fresh = await paidBill('BC 602');
+      const freshUrl = `/einvoices/bill/${fresh.id as number}/report`;
+      await as('ql1_cs2').post(freshUrl).expect(403);
+      await as('hdqt_bc').post(freshUrl).expect(403);
+      await as('admin')
+        .post(`/orders/${fresh.id as number}/void`, { reason: 'Nhầm' })
+        .expect(200);
+      await as('tn1_cs1').post(freshUrl).expect(400);
+    });
+
+    it('counts each e-invoice of a bill on its own invoice date', async () => {
+      const bill = await paidBill('BC 603');
+      const [d1, d2, d3, d4] = [70, 71, 72, 73].map(daysAgo);
+      const made: Json[] = [];
+      for (const [day, amount] of [
+        [d1, 10000],
+        [d2, 20000],
+        [d3, 30000],
+      ] as const) {
+        made.push(
+          (
+            await as('tn1_cs1')
+              .post('/einvoices', {
+                orderId: bill.id,
+                amount,
+                lines: [],
+                invoiceDate: day,
+              })
+              .expect(201)
+          ).body as Json,
+        );
+      }
+      const totalOf = async (day: string) =>
+        (
+          (
+            await as('qlbc_cs1')
+              .get(
+                `/report-site/reports/revenue?branch=cs1&from=${day}&to=${day}`,
+              )
+              .expect(200)
+          ).body as { totals: Json }
+        ).totals.total;
+      for (const [i, day] of [d1, d2, d3].entries()) {
+        expect(await totalOf(day)).toBe((i + 1) * 10000);
+        expect((await ofDay(day)).map((r) => r.id)).toEqual([made[i].id]);
+        // The HĐĐT page lists the bill on each of its invoices' days.
+        const bills = (
+          await as('qlbc_cs1')
+            .get(`/report-site/bills?branch=cs1&from=${day}&to=${day}`)
+            .expect(200)
+        ).body as Json[];
+        expect(bills.map((b) => b.orderId)).toEqual([bill.id]);
+        // A day of its own: the first number of that day.
+        expect(made[i].reportNumber).toMatch(/001$/);
+      }
+      // A draft moved to another date moves in the reports.
+      await as('tn1_cs1')
+        .patch(`/einvoices/${made[2].id as number}`, {
+          amount: 30000,
+          lines: [],
+          invoiceDate: d4,
+        })
+        .expect(200);
+      expect(await totalOf(d3)).toBe(0);
+      expect(await totalOf(d4)).toBe(30000);
+      // Its number keeps the date it was given.
+      expect(
+        (
+          (await as('tn1_cs1').get(`/einvoices/${made[2].id as number}`))
+            .body as Json
+        ).reportNumber,
+      ).toBe(made[2].reportNumber);
+    });
+
+    it('numbers the e-invoices of a day in the order they are made, per branch', async () => {
+      const day = daysAgo(74);
+      const bill = await paidBill('BC 604');
+      const make = async () =>
+        (
+          await as('tn1_cs1')
+            .post('/einvoices', {
+              orderId: bill.id,
+              amount: 1000,
+              lines: [],
+              invoiceDate: day,
+            })
+            .expect(201)
+        ).body as Json;
+      const first = await make();
+      const second = await make();
+      await as('tn1_cs1')
+        .delete(`/einvoices/${second.id as number}`)
+        .expect(200);
+      const third = await make();
+      expect(
+        [first, second, third].map((e) => seqOf(e.reportNumber as string)),
+      ).toEqual([1, 2, 3]);
+      // Another branch counts on its own.
+      const cs2Room = (
+        await as('ql1_cs2')
+          .post('/rooms', { name: 'BC2 605', pricePerHour: 100000 })
+          .expect(201)
+      ).body as Json;
+      const cs2Bill = (
+        await as('qlbc_cs2')
+          .post('/report-site/manual-bills?branch=cs2', {
+            businessDate: day,
+            roomId: cs2Room.id,
+            amount: 1000,
+          })
+          .expect(201)
+      ).body as Json;
+      expect(seqOf(cs2Bill.billNumber as string)).toBe(1);
+    });
+
+    it('finds an e-invoice by its number and leaves out the drafts of a voided bill', async () => {
+      const number = reported.reportNumber as string;
+      const found = (await rows(`&number=${number}`).expect(200))
+        .body as Json[];
+      expect(found.map((r) => r.id)).toEqual([reported.id]);
+      await as('admin')
+        .post(`/orders/${reportedBill.id as number}/void`, { reason: 'Nhầm' })
+        .expect(200);
+      const res = await rows(`&number=${number}`).expect(200);
+      expect(res.body).toEqual([]);
+      expect(res.headers['x-total-count']).toBe('0');
+      await rows('&number=12a').expect(400);
+    });
+
+    it('belongs to the report site', async () => {
+      await rows('', 'tn1_cs1').expect(403);
+      await rows('', 'ql1_cs1').expect(403);
+      await rows('', 'qlbc_cs2').expect(403);
+      await rows('', 'hdqt_bc').expect(200);
     });
   });
 

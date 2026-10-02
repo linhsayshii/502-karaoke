@@ -49,8 +49,10 @@ function setup(lists: {
   orderCount: number;
   manualCount: number;
   groups?: unknown[];
+  picked?: unknown[];
 }) {
   const db = {
+    $queryRaw: jest.fn().mockResolvedValue(lists.picked ?? []),
     order: {
       findMany: jest.fn().mockResolvedValue(lists.orders),
       count: jest.fn().mockResolvedValue(lists.orderCount),
@@ -85,7 +87,7 @@ describe('ReportSiteBillsService.list', () => {
       orderCount: 700,
       manualCount: 650,
     });
-    const [rows, total] = await service.list(user, {});
+    const [rows, total] = await service.list(user, { status: 'DRAFT' });
     expect(total).toBe(1350);
     expect(rows).toHaveLength(500);
     // 1000, 999, 998 … down to 501: the two lists interleaved.
@@ -106,7 +108,7 @@ describe('ReportSiteBillsService.list', () => {
       orderCount: 1,
       manualCount: 1,
     });
-    const [rows] = await service.list(user, {});
+    const [rows] = await service.list(user, { status: 'DRAFT' });
     expect(rows.map((r) => r.billNumber)).toEqual(['m1', 'o999']);
   });
 
@@ -121,7 +123,7 @@ describe('ReportSiteBillsService.list', () => {
         group(id, 'DRAFT', 30, 3),
       ]),
     });
-    const [voided, live] = (await service.list(user, {}))[0];
+    const [voided, live] = (await service.list(user, { status: 'DRAFT' }))[0];
     expect(voided).toMatchObject({
       orderId: 1,
       total: 110,
@@ -140,10 +142,64 @@ describe('ReportSiteBillsService.list', () => {
     });
   });
 
-  // By day, the paid bills are narrowed by their own day too (the planner
-  // then reads only those days of the branch); never in a tab of every day
-  // or a search by number.
-  it('narrows the paid bills to the days only when listing by day', async () => {
+  // By day (Bill and Đã xuất tabs) the bills are picked in SQL by their
+  // invoices' dates (spec 2026-10-02-bao-cao-theo-tung-hddt §3.3), then read
+  // by id; a tab of every day or a search by number stays on Prisma's lists.
+  it('picks the bills of the invoice dates in SQL, then reads them by id', async () => {
+    const { service, db } = setup({
+      orders: [order(5, 2)],
+      manual: [manualBill(9, 1)],
+      orderCount: 0,
+      manualCount: 0,
+      picked: [
+        { orderId: 5, manualBillId: null, total: 812 },
+        { orderId: null, manualBillId: 9, total: 812 },
+      ],
+    });
+    const days = { from: '2026-09-01', to: '2026-09-30' };
+    const [rows, total] = await service.list(user, days);
+    expect(total).toBe(812);
+    expect(rows.map((r) => r.billNumber)).toEqual(['o2', 'm1']);
+    expect(db.order.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: { in: [5] } } }),
+    );
+    expect(db.manualBill.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: { in: [9] } } }),
+    );
+    expect(db.order.count).not.toHaveBeenCalled();
+    const [strings, ...params] = db.$queryRaw.mock.calls[0] as [
+      TemplateStringsArray,
+      ...unknown[],
+    ];
+    const sql = strings.join('?');
+    expect(sql).toContain('"invoiceDate" BETWEEN');
+    // The Bill tab adds the bills thêm tay of the days.
+    expect(JSON.stringify(params)).toContain('ManualBill');
+    expect(params).toEqual(
+      expect.arrayContaining([1, '2026-09-01', '2026-09-30', 500]),
+    );
+
+    await service.list(user, { ...days, status: 'ISSUED' });
+    const issuedParams = JSON.stringify(
+      (db.$queryRaw.mock.calls[1] as unknown[]).slice(1),
+    );
+    expect(issuedParams).toContain('ISSUED');
+    expect(issuedParams).not.toContain('ManualBill');
+  });
+
+  it('reads nothing more when no bill is picked', async () => {
+    const { service, db } = setup({
+      orders: [],
+      manual: [],
+      orderCount: 0,
+      manualCount: 0,
+    });
+    expect(await service.list(user, {})).toEqual([[], 0]);
+    expect(db.order.findMany).not.toHaveBeenCalled();
+    expect(db.manualBill.findMany).not.toHaveBeenCalled();
+  });
+
+  it('keeps every day for pending work and a search by number', async () => {
     const { service, db } = setup({
       orders: [],
       manual: [],
@@ -151,20 +207,14 @@ describe('ReportSiteBillsService.list', () => {
       manualCount: 0,
     });
     const days = { from: '2026-09-01', to: '2026-09-30' };
-    await service.list(user, days);
-    await service.list(user, { ...days, status: 'ISSUED' });
     await service.list(user, { ...days, status: 'DRAFT' });
     await service.list(user, { ...days, billNumber: '0110' });
-    const byDay = expect.objectContaining({
-      businessDate: { gte: day('2026-09-01'), lte: day('2026-09-30') },
-    }) as unknown;
+    expect(db.$queryRaw).not.toHaveBeenCalled();
     const everyDay = expect.not.objectContaining({
       businessDate: expect.anything() as unknown,
     }) as unknown;
-    expect(db.order.count).toHaveBeenNthCalledWith(1, { where: byDay });
-    expect(db.order.count).toHaveBeenNthCalledWith(2, { where: byDay });
-    expect(db.order.count).toHaveBeenNthCalledWith(3, { where: everyDay });
-    expect(db.order.count).toHaveBeenNthCalledWith(4, { where: everyDay });
+    expect(db.order.count).toHaveBeenNthCalledWith(1, { where: everyDay });
+    expect(db.order.count).toHaveBeenNthCalledWith(2, { where: everyDay });
   });
 });
 

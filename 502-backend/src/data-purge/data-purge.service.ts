@@ -104,6 +104,8 @@ export class DataPurgeService {
           stockDocuments: (await tx.stockDocument.deleteMany({ where: own }))
             .count,
           billCounters: (await tx.billCounter.deleteMany({ where: own })).count,
+          reportCounters: (await tx.reportCounter.deleteMany({ where: own }))
+            .count,
           prAttendances: (await tx.prAttendance.deleteMany({ where: own }))
             .count,
           prStaff: (await tx.prStaff.deleteMany({ where: own })).count,

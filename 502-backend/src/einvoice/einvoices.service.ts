@@ -17,7 +17,7 @@ import {
   toDateString,
   toDbDate,
 } from '../common/dates';
-import { billNumberPrefixRange } from '../orders/bill-number';
+import { billNumberPrefixRange, nextReportNumber } from '../orders/bill-number';
 import { billedHoursOf } from '../orders/billing';
 import { staffRef } from '../orders/order-include';
 import { PrismaService } from '../prisma/prisma.service';
@@ -35,6 +35,7 @@ import {
   EinvoiceConfigService,
   type IssueConfig,
 } from './einvoice-config.service';
+import { billLines, billMinutesOf, RETAIL_BUYER } from './bill-lines';
 import { draftData, issuedDraft, parseDraft } from './einvoice-draft';
 import { dateRange, dbDay, NOT_SETTLED, statusWhere } from './einvoice-filters';
 import { issueProblem, totalsOf } from './einvoice-math';
@@ -198,7 +199,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
     site: 'main' | 'report' = 'main',
   ) {
     const branchId = await this.scope.resolveBranchId(user, query.branch);
-    const businessDate = dateRange(query.from, query.to);
+    const days = dateRange(query.from, query.to);
     const own: Prisma.EinvoiceWhereInput =
       site === 'main' ? { branchId, orderId: { not: null } } : { branchId };
     const [draftCount, errorCount, uncertainCount, issued] = await Promise.all([
@@ -216,7 +217,14 @@ export class EinvoicesService implements OnApplicationBootstrap {
         where: { ...own, status: NOT_SETTLED },
       }),
       this.reportDb.einvoice.aggregate({
-        where: { ...own, status: EinvoiceStatus.ISSUED, businessDate },
+        // The report site counts an invoice on its invoice date (spec
+        // 2026-10-02-bao-cao-theo-tung-hddt §3), the main site on its bill's
+        // business day.
+        where: {
+          ...own,
+          status: EinvoiceStatus.ISSUED,
+          ...(site === 'main' ? { businessDate: days } : { invoiceDate: days }),
+        },
         _count: { _all: true },
         _sum: { amount: true, vatAmount: true },
       }),
@@ -336,15 +344,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
     }
 
     const { einvoices, allocated } = await this.invoicesOf({ orderId });
-    const minutes =
-      order.startTime && order.endTime
-        ? Math.max(
-            0,
-            Math.ceil(
-              (order.endTime.getTime() - order.startTime.getTime()) / 60_000,
-            ),
-          )
-        : 0;
+    const minutes = billMinutesOf(order.startTime, order.endTime);
     const { items, ...bill } = order;
     return {
       order: {
@@ -462,7 +462,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
         branchId: true,
         status: true,
         businessDate: true,
-        endTime: true,
+        room: { select: { name: true } },
       },
     });
     if (!order) throw new NotFoundException('Không tìm thấy hóa đơn');
@@ -472,22 +472,114 @@ export class EinvoicesService implements OnApplicationBootstrap {
         'Chỉ tạo hóa đơn điện tử cho bill đã thanh toán và chưa hủy',
       );
     }
-    const created = await this.prisma.einvoice.create({
-      data: {
-        branchId: order.branchId,
-        orderId: order.id,
-        businessDate: order.businessDate,
-        // The calendar day the bill was paid: a bill paid at 00:24 belongs
-        // to the business day before but is invoiced on its own date (spec §2).
-        invoiceDate: dbDay(
-          dto.invoiceDate ?? toDateString(order.endTime ?? new Date()),
-          INVALID_INVOICE_DATE,
-        ),
-        ...written,
-      },
-      select: { id: true },
+    const { businessDate } = order;
+    // The bill's business day, as reportBill dates its draft (spec
+    // 2026-10-02-bao-cao-theo-tung-hddt §2): a bill paid at 00:24 shows on the
+    // report site on the day it belongs to, whichever button made its invoice.
+    // Issuing asks for the date again.
+    const invoiceDate = dto.invoiceDate ?? fromDbDate(businessDate);
+    const invoiceDay = dbDay(invoiceDate, INVALID_INVOICE_DATE);
+    // Short: the day's ReportCounter row stays locked until this commits.
+    const id = await this.prisma.$transaction(async (tx) => {
+      const number = await nextReportNumber(
+        tx,
+        order.branchId,
+        invoiceDate,
+        order.room?.name,
+      );
+      const created = await tx.einvoice.create({
+        data: {
+          branchId: order.branchId,
+          orderId: order.id,
+          businessDate,
+          invoiceDate: invoiceDay,
+          ...number,
+          ...written,
+        },
+        select: { id: true },
+      });
+      return created.id;
     });
-    return this.findOne(user, created.id);
+    return this.findOne(user, id);
+  }
+
+  // "Thêm hóa đơn vào báo cáo" (spec 2026-10-02-bao-cao-theo-tung-hddt §5.1):
+  // one draft for the whole paid bill, on its business day, to a retail buyer,
+  // with its hours and items as lines. Only for a bill with no invoice yet:
+  // the bill's row is locked first, so two clicks never make two drafts.
+  async reportBill(user: AuthUser, orderId: number) {
+    const id = await this.prisma.$transaction(async (tx) => {
+      const [locked] = await tx.$queryRaw<{ id: number }[]>`
+        SELECT "id" FROM "Order" WHERE "id" = ${orderId} FOR UPDATE`;
+      if (!locked) throw new NotFoundException('Không tìm thấy hóa đơn');
+      const order = await tx.order.findUniqueOrThrow({
+        where: { id: orderId },
+        select: {
+          branchId: true,
+          status: true,
+          businessDate: true,
+          startTime: true,
+          endTime: true,
+          finalAmount: true,
+          hourlyFee: true,
+          pricePerHour: true,
+          room: { select: { name: true } },
+          items: {
+            select: {
+              quantity: true,
+              price: true,
+              product: { select: { name: true, unit: true } },
+            },
+            orderBy: { id: 'asc' },
+          },
+        },
+      });
+      this.scope.assertBranchAccess(user, order.branchId);
+      if (order.status !== OrderStatus.COMPLETED || !order.businessDate) {
+        throw new BadRequestException(
+          'Chỉ tạo hóa đơn điện tử cho bill đã thanh toán và chưa hủy',
+        );
+      }
+      if ((await tx.einvoice.count({ where: { orderId } })) > 0) {
+        throw new ConflictException('Bill đã có trong báo cáo');
+      }
+      const day = fromDbDate(order.businessDate);
+      const number = await nextReportNumber(
+        tx,
+        order.branchId,
+        day,
+        order.room?.name,
+      );
+      const created = await tx.einvoice.create({
+        data: {
+          branchId: order.branchId,
+          orderId,
+          businessDate: order.businessDate,
+          invoiceDate: order.businessDate,
+          ...number,
+          createdById: user.id,
+          updatedById: user.id,
+          ...draftData({
+            amount: Math.round(Number(order.finalAmount)),
+            buyerName: RETAIL_BUYER,
+            lines: billLines({
+              minutes: billMinutesOf(order.startTime, order.endTime),
+              hourlyFee: Number(order.hourlyFee),
+              pricePerHour: Number(order.pricePerHour),
+              items: order.items.map((item) => ({
+                name: item.product.name,
+                unit: item.product.unit,
+                quantity: item.quantity,
+                price: Number(item.price),
+              })),
+            }),
+          }),
+        },
+        select: { id: true },
+      });
+      return created.id;
+    });
+    return this.findOne(user, id);
   }
 
   // A draft of a bill thêm tay. The bill's row is locked while the draft is
@@ -502,24 +594,36 @@ export class EinvoicesService implements OnApplicationBootstrap {
     if (!canUseReportSite(user)) throw new ForbiddenException(REPORT_SITE_ONLY);
     const id = await this.prisma.$transaction(async (tx) => {
       const [bill] = await tx.$queryRaw<
-        { branchId: number; businessDate: Date; cancelledAt: Date | null }[]
-      >`SELECT "branchId", "businessDate", "cancelledAt" FROM "ManualBill"
-        WHERE "id" = ${manualBillId} FOR UPDATE`;
+        {
+          branchId: number;
+          businessDate: Date;
+          cancelledAt: Date | null;
+          roomName: string | null;
+        }[]
+      >`SELECT m."branchId", m."businessDate", m."cancelledAt", r."name" AS "roomName"
+        FROM "ManualBill" m LEFT JOIN "Room" r ON r."id" = m."roomId"
+        WHERE m."id" = ${manualBillId} FOR UPDATE OF m`;
       if (!bill) throw new NotFoundException('Không tìm thấy bill');
       this.scope.assertBranchAccess(user, bill.branchId);
       if (bill.cancelledAt) {
         throw new BadRequestException('Bill đã hủy, không thêm được hóa đơn');
       }
+      // The day of the bill, unless the draft says otherwise (spec §4.2).
+      const day = invoiceDate ?? fromDbDate(bill.businessDate);
+      const invoiceDay = dbDay(day, INVALID_INVOICE_DATE);
+      const number = await nextReportNumber(
+        tx,
+        bill.branchId,
+        day,
+        bill.roomName,
+      );
       const created = await tx.einvoice.create({
         data: {
           branchId: bill.branchId,
           manualBillId,
           businessDate: bill.businessDate,
-          // The day of the bill, unless the draft says otherwise (spec §4.2).
-          invoiceDate: dbDay(
-            invoiceDate ?? fromDbDate(bill.businessDate),
-            INVALID_INVOICE_DATE,
-          ),
+          invoiceDate: invoiceDay,
+          ...number,
           ...written,
         },
         select: { id: true },

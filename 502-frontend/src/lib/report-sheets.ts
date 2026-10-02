@@ -11,6 +11,7 @@ import {
 } from "@/lib/format";
 import {
   DOC_TYPE_LABELS,
+  einvoiceStatusBadge,
   FUND_TYPE_LABELS,
   NO_CATEGORY,
   NO_ROOM,
@@ -46,7 +47,7 @@ import type {
   ProfitMetrics,
   ProfitReport,
   ReportBucket,
-  ReportSiteBill,
+  ReportSiteEinvoice,
   RevenueMetrics,
   RevenueReport,
   RoomGroup,
@@ -560,31 +561,31 @@ export function fundSummarySheet(summary: FundSummary, rangeLabel: string, name 
   return toSheet(name, columns, rows);
 }
 
-// ---- Trang báo cáo: Quản lý bán hàng (spec 2026-10-02 §7.4)
+// ---- Trang báo cáo: Quản lý bán hàng (spec 2026-10-02-bao-cao-theo-tung-hddt §5.2)
 
-const reportSiteBillColumns: ExportColumn<ReportSiteBill>[] = [
-  { header: "Số bill", value: (r) => r.billNumber },
-  { header: "Ngày", value: (r) => (r.businessDate ? formatDate(r.businessDate) : null) },
+const reportSiteEinvoiceColumns: ExportColumn<ReportSiteEinvoice>[] = [
+  { header: "Số hóa đơn", value: (r) => r.reportNumber },
+  { header: "Ngày hóa đơn", value: (r) => formatDate(r.invoiceDate) },
+  { header: "Bill", value: (r) => (r.manualBillId !== null ? "Thêm tay" : r.billNumber) },
   { header: "Phòng", value: (r) => r.roomName ?? NO_ROOM },
-  { header: "Loại", value: (r) => (r.manualBillId !== null ? "Thêm tay" : "Bán hàng") },
-  { header: "Trạng thái", value: (r) => (r.cancelledAt ? "Đã hủy" : null) },
-  { header: "Số HĐĐT", type: "number", value: (r) => r.einvoiceCount },
-  { header: "HĐĐT đã xuất", type: "number", value: (r) => r.issuedCount },
-  { header: "Trước VAT", type: "money", value: (r) => r.total - r.vat },
-  { header: "VAT", type: "money", value: (r) => r.vat },
-  { header: "Tổng tiền", type: "money", value: (r) => r.total },
+  { header: "Người mua", value: (r) => r.buyerName },
+  { header: "Trạng thái", value: (r) => einvoiceStatusBadge(r.status, r.hasError ? "!" : null).label },
+  { header: "Số HĐĐT", value: (r) => r.invoiceNumber },
+  { header: "Bill đã hủy", value: (r) => (r.billCancelledAt ? "Đã hủy" : null) },
+  { header: "Trước VAT", type: "money", value: (r) => r.amount - r.vatAmount },
+  { header: "VAT", type: "money", value: (r) => r.vatAmount },
+  { header: "Tổng tiền", type: "money", value: (r) => r.amount },
 ];
 
-// The bills as listed; no total row, as the list may be cut (the totals of
-// the days come from GET /report-site/bills/summary).
-export function reportSiteBillsSheet(rows: ReportSiteBill[], name = "Quản lý bán hàng"): ExportTable {
-  return toSheet(name, reportSiteBillColumns, rows);
+// The e-invoices as listed; no total row, as the list may be cut (the totals
+// of the days come from GET /report-site/bills/summary).
+export function reportSiteEinvoicesSheet(rows: ReportSiteEinvoice[], name = "Quản lý bán hàng"): ExportTable {
+  return toSheet(name, reportSiteEinvoiceColumns, rows);
 }
 
 // ---- Trang báo cáo: báo cáo theo hóa đơn điện tử (spec 2026-10-02 §5)
 
 const EINVOICE_METRIC_COLUMNS: ExportColumn<EinvoiceMetrics>[] = [
-  { header: "Bill", type: "number", value: (r) => r.billCount },
   { header: "Hóa đơn điện tử", type: "number", value: (r) => r.einvoiceCount },
   { header: "Doanh thu (chưa VAT)", type: "money", value: (r) => r.revenue },
   { header: "VAT", type: "money", value: (r) => r.vat },

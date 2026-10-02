@@ -1,7 +1,6 @@
 // Sums of the e-invoices the report site counts (spec 2026-10-02 §5.1); pure.
 
 export interface EinvoiceSums {
-  billCount: number;
   einvoiceCount: number;
   total: number; // VAT included
   vat: number;
@@ -14,7 +13,6 @@ export interface EinvoiceMetrics extends EinvoiceSums {
 }
 
 export const emptyEinvoiceSums = (): EinvoiceSums => ({
-  billCount: 0,
   einvoiceCount: 0,
   total: 0,
   vat: 0,
@@ -22,7 +20,6 @@ export const emptyEinvoiceSums = (): EinvoiceSums => ({
 });
 
 export function addEinvoiceSums(acc: EinvoiceSums, row: EinvoiceSums): void {
-  acc.billCount += row.billCount;
   acc.einvoiceCount += row.einvoiceCount;
   acc.total += row.total;
   acc.vat += row.vat;
@@ -37,9 +34,8 @@ export function sumEinvoices(rows: EinvoiceSums[]): EinvoiceSums {
 
 // Only the metrics: a SQL row also carries its date, branch or room.
 export function toEinvoiceMetrics(sums: EinvoiceSums): EinvoiceMetrics {
-  const { billCount, einvoiceCount, total, vat, issued } = sums;
+  const { einvoiceCount, total, vat, issued } = sums;
   return {
-    billCount,
     einvoiceCount,
     total,
     vat,

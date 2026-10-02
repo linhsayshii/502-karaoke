@@ -28,9 +28,11 @@ import { EinvoicesService } from '../einvoice/einvoices.service';
 import {
   CancelManualBillDto,
   CreateManualBillDto,
+  ReportSiteEinvoicesQuery,
 } from './dto/manual-bill.dto';
 import { ManualBillsService } from './manual-bills.service';
 import { ReportSiteBillsService } from './report-site-bills.service';
+import { ReportSiteEinvoicesService } from './report-site-einvoices.service';
 import { ReportSiteGuard } from './report-site.guard';
 
 // The report site (spec 2026-10-02-trang-bao-cao-hddt §6.1): every route
@@ -46,7 +48,19 @@ export class ReportSiteController {
     private readonly manualBills: ManualBillsService,
     private readonly einvoices: EinvoicesService,
     private readonly bills: ReportSiteBillsService,
+    private readonly einvoiceList: ReportSiteEinvoicesService,
   ) {}
+
+  // Quản lý bán hàng: one row per e-invoice, by invoice date (spec
+  // 2026-10-02-bao-cao-theo-tung-hddt §5.2).
+  @Get('einvoices')
+  einvoiceRows(
+    @CurrentUser() user: AuthUser,
+    @Query() query: ReportSiteEinvoicesQuery,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    return withTotalCount(res, this.einvoiceList.list(user, query));
+  }
 
   // The bills of the report site (spec 2026-10-02 §6.1): the paid bills
   // holding an e-invoice and the bills thêm tay.

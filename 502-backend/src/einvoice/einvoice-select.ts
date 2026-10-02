@@ -17,6 +17,8 @@ export const einvoiceListSelect = {
   symbolCode: true,
   invoiceDate: true,
   invoiceNumber: true,
+  // The report site's number (spec 2026-10-02-bao-cao-theo-tung-hddt §4).
+  reportNumber: true,
   lastError: true,
   createdAt: true,
   issuedAt: true,
@@ -50,9 +52,6 @@ export const einvoiceDetailSelect = {
 } satisfies Prisma.EinvoiceSelect;
 
 // invoiceDate is a @db.Date: sent as YYYY-MM-DD.
-export function toEinvoiceRow<T extends { invoiceDate: Date | null }>(row: T) {
-  return {
-    ...row,
-    invoiceDate: row.invoiceDate ? fromDbDate(row.invoiceDate) : null,
-  };
+export function toEinvoiceRow<T extends { invoiceDate: Date }>(row: T) {
+  return { ...row, invoiceDate: fromDbDate(row.invoiceDate) };
 }

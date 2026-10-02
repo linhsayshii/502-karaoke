@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { CircleCheckIcon, TriangleAlertIcon } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
+import { useSite } from "@/components/layout/site-context";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -31,6 +32,7 @@ export function EinvoiceConfigCard({
   onChanged: () => void;
 }) {
   const { user } = useAuth();
+  const site = useSite();
   const branch = useBranchCode();
   const notify = useNotify();
   const editable = can(user, "einvoices.config");
@@ -90,7 +92,12 @@ export function EinvoiceConfigCard({
         <TriangleAlertIcon />
         <AlertTitle>Cơ sở chưa có mã số thuế</AlertTitle>
         <AlertDescription>
-          {can(user, "branches") ? (
+          {!can(user, "branches") ? (
+            "Quản lý hệ thống cần nhập MST của cơ sở trước."
+          ) : site === "report" ? (
+            // The report site has no Cơ sở page: a link there is a 404.
+            "Nhập MST ở trang Cơ sở của trang chính trước khi đăng nhập Minvoice."
+          ) : (
             <span>
               Nhập MST ở trang{" "}
               <Link className="underline" href={`/${branch}/admin/branches`}>
@@ -98,8 +105,6 @@ export function EinvoiceConfigCard({
               </Link>{" "}
               trước khi đăng nhập Minvoice.
             </span>
-          ) : (
-            "Quản lý hệ thống cần nhập MST của cơ sở trước."
           )}
         </AlertDescription>
       </Alert>

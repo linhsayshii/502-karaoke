@@ -1,6 +1,12 @@
 "use client";
 
+import { useState } from "react";
+import { XIcon } from "lucide-react";
 import { EinvoiceRow } from "@/components/einvoices/einvoice-row";
+import { ReasonDialog } from "@/components/reason-dialog";
+import { Button } from "@/components/ui/button";
+import { useNotify } from "@/hooks/use-notify";
+import api from "@/lib/api";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import type { EinvoiceBillDetail, EinvoiceDetail, ManualBillDetail } from "@/lib/types";
 
@@ -12,13 +18,16 @@ interface RowProps {
   dirtyId: number | null;
   // The invoice the panel is saving or issuing.
   lockedId: number | null;
+  // The report site names each invoice by its own number (spec
+  // 2026-10-02-bao-cao-theo-tung-hddt §4.3), the main site HĐ 1, HĐ 2….
+  numbered: boolean;
   onSelect: (einvoiceId: number) => void;
   onSaved: (row: EinvoiceDetail) => void;
   onDeleted: (einvoiceId: number) => void;
   onSavingChange: (einvoiceId: number, saving: boolean) => void;
 }
 
-// The small invoices of a bill, HĐ 1, HĐ 2… (by id), with their amounts.
+// The small invoices of a bill (by id), with their amounts.
 function InvoiceRows({
   einvoices,
   editable,
@@ -26,6 +35,7 @@ function InvoiceRows({
   focusId,
   dirtyId,
   lockedId,
+  numbered,
   onSelect,
   onSaved,
   onDeleted,
@@ -40,7 +50,7 @@ function InvoiceRows({
         <EinvoiceRow
           key={einvoice.id}
           einvoice={einvoice}
-          label={`HĐ ${index + 1}`}
+          label={numbered ? einvoice.reportNumber : `HĐ ${index + 1}`}
           selected={selectedId === einvoice.id}
           editable={editable}
           autoFocus={focusId === einvoice.id}
@@ -88,14 +98,42 @@ export function BillSplit({ detail, ...rows }: RowProps & { detail: EinvoiceBill
 
 // An open bill thêm tay (report site, spec 2026-10-02 §7.5): who added it and
 // its invoices. Its total is what its invoices hold, so nothing is "left".
-export function ManualBillSplit({ detail, ...rows }: RowProps & { detail: ManualBillDetail }) {
+// Cancelled here, where one left without an invoice can still be reached
+// (spec 2026-10-02-bao-cao-theo-tung-hddt §5.3).
+export function ManualBillSplit({
+  detail,
+  canWrite,
+  onCancelled,
+  ...rows
+}: RowProps & { detail: ManualBillDetail; canWrite: boolean; onCancelled: () => void }) {
   const { bill, einvoices } = detail;
+  const notify = useNotify();
+  const [cancelling, setCancelling] = useState(false);
+  const cancel = async (reason: string) => {
+    try {
+      await api.post(`/report-site/manual-bills/${bill.id}/cancel`, { reason });
+      notify.success(`Đã hủy bill ${bill.billNumber}`);
+      onCancelled();
+      return true;
+    } catch (error) {
+      notify.error(error, "Không hủy được bill");
+      return false;
+    }
+  };
   return (
     <div className="flex flex-col gap-1 border-t py-2">
-      <p className="px-3 text-xs text-muted-foreground">
-        Bill thêm tay ngày {formatDate(bill.businessDate)}
-        {bill.createdBy && ` · ${bill.createdBy.fullName} thêm lúc ${formatDateTime(bill.createdAt)}`}
-      </p>
+      <div className="flex items-center gap-2 px-3">
+        <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+          Bill thêm tay ngày {formatDate(bill.businessDate)}
+          {bill.createdBy && ` · ${bill.createdBy.fullName} thêm lúc ${formatDateTime(bill.createdAt)}`}
+        </p>
+        {canWrite && !bill.cancelledAt && (
+          <Button variant="ghost" size="sm" onClick={() => setCancelling(true)}>
+            <XIcon data-icon="inline-start" />
+            Hủy bill
+          </Button>
+        )}
+      </div>
       {bill.cancelledAt && (
         <p className="px-3 text-xs text-warning">
           Bill đã hủy lúc {formatDateTime(bill.cancelledAt)}
@@ -103,6 +141,15 @@ export function ManualBillSplit({ detail, ...rows }: RowProps & { detail: Manual
         </p>
       )}
       <InvoiceRows einvoices={einvoices} editable={!bill.cancelledAt} {...rows} />
+      <ReasonDialog
+        open={cancelling}
+        onOpenChange={setCancelling}
+        title={`Hủy bill ${bill.billNumber}?`}
+        description="Các hóa đơn nháp của bill bị xóa cùng. Bill đã có hóa đơn gửi hoặc xuất thì không hủy được. Số hóa đơn không được cấp lại."
+        confirmLabel="Hủy bill"
+        maxLength={300} // the most the backend takes (CancelManualBillDto.reason)
+        onConfirm={cancel}
+      />
     </div>
   );
 }

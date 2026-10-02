@@ -72,7 +72,7 @@ function RevenueView() {
       {!data || !t ? (
         <>
           <div className="grid gap-4 @xl/main:grid-cols-2 @5xl/main:grid-cols-3">
-            {Array.from({ length: 6 }, (_, i) => (
+            {Array.from({ length: 5 }, (_, i) => (
               <Skeleton key={i} className="h-32 rounded-xl" />
             ))}
           </div>
@@ -99,7 +99,6 @@ function RevenueView() {
               delta={change((m) => m.total)}
               footer="Đã gồm VAT"
             />
-            <StatTile label="Bill" value={formatNumber(t.billCount)} delta={change((m) => m.billCount)} />
             <StatTile label="Số HĐĐT" value={formatNumber(t.einvoiceCount)} delta={change((m) => m.einvoiceCount)} />
             <StatTile
               label="Đã xuất"

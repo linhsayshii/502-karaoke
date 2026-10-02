@@ -3,6 +3,7 @@ import { EinvoiceModule } from '../einvoice/einvoice.module';
 import { EinvoiceReportsService } from './einvoice-reports.service';
 import { ManualBillsService } from './manual-bills.service';
 import { ReportSiteBillsService } from './report-site-bills.service';
+import { ReportSiteEinvoicesService } from './report-site-einvoices.service';
 import { ReportSiteReportsController } from './report-site-reports.controller';
 import { ReportSiteController } from './report-site.controller';
 
@@ -13,6 +14,7 @@ import { ReportSiteController } from './report-site.controller';
   providers: [
     ManualBillsService,
     ReportSiteBillsService,
+    ReportSiteEinvoicesService,
     EinvoiceReportsService,
   ],
 })

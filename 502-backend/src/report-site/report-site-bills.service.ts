@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { EinvoiceStatus, Prisma } from '@prisma/client';
 import type { AuthUser } from '../auth/auth-user';
 import { BranchScopeService } from '../common/branch-scope.service';
-import { businessDateOf, fromDbDate, toDbDate } from '../common/dates';
+import { businessDateOf, fromDbDate } from '../common/dates';
 import {
   EinvoiceBillsQuery,
   EinvoiceSummaryQuery,
@@ -42,6 +42,27 @@ export interface ReportSiteBill {
   issuedCount: number;
 }
 
+const ORDER_SELECT = {
+  id: true,
+  billNumber: true,
+  businessDate: true,
+  billSeq: true,
+  endTime: true,
+  cancelledAt: true,
+  finalAmount: true,
+  room: { select: { name: true } },
+} satisfies Prisma.OrderSelect;
+
+const MANUAL_SELECT = {
+  id: true,
+  billNumber: true,
+  businessDate: true,
+  billSeq: true,
+  createdAt: true,
+  cancelledAt: true,
+  room: { select: { name: true } },
+} satisfies Prisma.ManualBillSelect;
+
 interface Tally {
   count: number;
   amount: number;
@@ -60,86 +81,17 @@ export class ReportSiteBillsService {
   // Like GET /einvoices/bills (spec 2026-10-02 §6.1): the Bill tab lists the
   // days, a bill number every day, a status the bills holding an invoice of
   // it (every day for drafts, errors and uncertain ones; by day for issued).
+  // A day is an invoice date (spec 2026-10-02-bao-cao-theo-tung-hddt §3.3).
   async list(
     user: AuthUser,
     query: EinvoiceBillsQuery,
   ): Promise<[ReportSiteBill[], number]> {
     const branchId = await this.scope.resolveBranchId(user, query.branch);
-    const today = toDbDate(businessDateOf(new Date()));
-    const days = dateRange(query.from, query.to) ?? { gte: today, lte: today };
-    const number = query.billNumber
-      ? { billNumber: billNumberPrefixRange(query.billNumber) }
-      : {};
     const byDay =
       !query.billNumber && (!query.status || query.status === 'ISSUED');
-    // Einvoice (branchId, businessDate) or (branchId, status, createdAt): a
-    // bill's e-invoices carry its day.
-    const einvoices = {
-      some: {
-        branchId,
-        ...(query.status ? statusWhere(query.status) : {}),
-        ...(byDay ? { businessDate: days } : {}),
-      },
-    };
-    const orderWhere: Prisma.OrderWhereInput = {
-      branchId,
-      ...number,
-      // The same rows: an e-invoice's businessDate is copied from its bill's
-      // when it is made (EinvoicesService.create) and a bill's day never
-      // changes once closed. It lets the planner read the days through
-      // Order(branchId, businessDate, billSeq) instead of every bill of the
-      // branch.
-      ...(byDay ? { businessDate: days } : {}),
-      einvoices,
-    };
-    // Every bill thêm tay of the days, with or without an invoice; by status
-    // or number like the paid bills.
-    const manualWhere: Prisma.ManualBillWhereInput = {
-      branchId,
-      ...number,
-      ...(query.status
-        ? { einvoices }
-        : query.billNumber
-          ? {}
-          : { businessDate: days }),
-    };
-    const newest = [
-      { businessDate: 'desc' as const },
-      { billSeq: 'desc' as const },
-    ];
-    const [orders, orderCount, manualBills, manualCount] = await Promise.all([
-      this.db.order.findMany({
-        where: orderWhere,
-        select: {
-          id: true,
-          billNumber: true,
-          businessDate: true,
-          billSeq: true,
-          endTime: true,
-          cancelledAt: true,
-          finalAmount: true,
-          room: { select: { name: true } },
-        },
-        orderBy: newest,
-        take: LIST_CAP,
-      }),
-      this.db.order.count({ where: orderWhere }),
-      this.db.manualBill.findMany({
-        where: manualWhere,
-        select: {
-          id: true,
-          billNumber: true,
-          businessDate: true,
-          billSeq: true,
-          createdAt: true,
-          cancelledAt: true,
-          room: { select: { name: true } },
-        },
-        orderBy: newest,
-        take: LIST_CAP,
-      }),
-      this.db.manualBill.count({ where: manualWhere }),
-    ]);
+    const { orders, manualBills, total } = byDay
+      ? await this.ofDays(branchId, query)
+      : await this.ofEveryDay(branchId, query);
 
     // Newest day first, then the day's sequence, which both kinds share.
     const bills = [
@@ -213,7 +165,106 @@ export class ReportSiteBillsService {
         issuedCount: entry.issued.count,
       };
     });
-    return [rows, orderCount + manualCount];
+    return [rows, total];
+  }
+
+  // The bills holding an invoice dated in the range (issued ones only in the
+  // Đã xuất tab), plus, in the Bill tab, the bills thêm tay of those days, so
+  // one left without an invoice can still be found and cancelled. The bills
+  // are picked in SQL from the invoices' (branchId, invoiceDate) index; a bill's
+  // day and sequence are read through its primary key (LATERAL … LIMIT 1, see
+  // einvoice-sql.ts), never by a join or IN (SELECT …) over "Order".
+  private async ofDays(branchId: number, query: EinvoiceBillsQuery) {
+    dateRange(query.from, query.to);
+    const today = businessDateOf(new Date());
+    const from = query.from ?? query.to ?? today;
+    const to = query.to ?? query.from ?? today;
+    const issued = query.status === 'ISSUED';
+    const picked = await this.db.$queryRaw<
+      { orderId: number | null; manualBillId: number | null; total: number }[]
+    >`
+      WITH bills AS (
+        SELECT DISTINCT e."orderId", e."manualBillId" FROM "Einvoice" e
+        WHERE e."branchId" = ${branchId}
+          AND e."invoiceDate" BETWEEN ${from}::date AND ${to}::date
+          ${issued ? Prisma.sql`AND e."status" = 'ISSUED'` : Prisma.empty}
+        ${
+          issued
+            ? Prisma.empty
+            : Prisma.sql`UNION SELECT NULL::int, m."id" FROM "ManualBill" m
+                WHERE m."branchId" = ${branchId}
+                  AND m."businessDate" BETWEEN ${from}::date AND ${to}::date`
+        }
+      )
+      SELECT b."orderId", b."manualBillId", (COUNT(*) OVER ())::int AS "total"
+      FROM bills b
+      LEFT JOIN LATERAL (SELECT o."businessDate", o."billSeq" FROM "Order" o WHERE o."id" = b."orderId" LIMIT 1) o ON true
+      LEFT JOIN LATERAL (SELECT m."businessDate", m."billSeq" FROM "ManualBill" m WHERE m."id" = b."manualBillId" LIMIT 1) m ON true
+      ORDER BY COALESCE(o."businessDate", m."businessDate") DESC NULLS LAST,
+        COALESCE(o."billSeq", m."billSeq") DESC NULLS LAST
+      LIMIT ${LIST_CAP}`;
+    const orderIds = picked.flatMap((p) => (p.orderId ? [p.orderId] : []));
+    const manualIds = picked.flatMap((p) =>
+      p.manualBillId ? [p.manualBillId] : [],
+    );
+    const [orders, manualBills] = await Promise.all([
+      orderIds.length
+        ? this.db.order.findMany({
+            where: { id: { in: orderIds } },
+            select: ORDER_SELECT,
+          })
+        : [],
+      manualIds.length
+        ? this.db.manualBill.findMany({
+            where: { id: { in: manualIds } },
+            select: MANUAL_SELECT,
+          })
+        : [],
+    ]);
+    return { orders, manualBills, total: picked[0]?.total ?? 0 };
+  }
+
+  // Drafts, errors and uncertain ones of every day, or a bill number: the
+  // newest of each table, merged by the caller.
+  private async ofEveryDay(branchId: number, query: EinvoiceBillsQuery) {
+    const number = query.billNumber
+      ? { billNumber: billNumberPrefixRange(query.billNumber) }
+      : {};
+    const einvoices = query.status
+      ? { some: { branchId, ...statusWhere(query.status) } }
+      : undefined;
+    const orderWhere: Prisma.OrderWhereInput = {
+      branchId,
+      ...number,
+      // Only the paid bills holding an invoice.
+      einvoices: einvoices ?? { some: { branchId } },
+    };
+    const manualWhere: Prisma.ManualBillWhereInput = {
+      branchId,
+      ...number,
+      ...(einvoices ? { einvoices } : {}),
+    };
+    const newest = [
+      { businessDate: 'desc' as const },
+      { billSeq: 'desc' as const },
+    ];
+    const [orders, orderCount, manualBills, manualCount] = await Promise.all([
+      this.db.order.findMany({
+        where: orderWhere,
+        select: ORDER_SELECT,
+        orderBy: newest,
+        take: LIST_CAP,
+      }),
+      this.db.order.count({ where: orderWhere }),
+      this.db.manualBill.findMany({
+        where: manualWhere,
+        select: MANUAL_SELECT,
+        orderBy: newest,
+        take: LIST_CAP,
+      }),
+      this.db.manualBill.count({ where: manualWhere }),
+    ]);
+    return { orders, manualBills, total: orderCount + manualCount };
   }
 
   // The tab counts (every invoice of the branch) and the sums of the days

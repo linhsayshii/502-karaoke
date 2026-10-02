@@ -232,7 +232,6 @@ describe('EinvoiceConfigService.latestIssued', () => {
         sellerTaxCode: TAX_CODE,
         symbolCode: '1C26MTT',
         status: 'ISSUED',
-        invoiceDate: { not: null },
       },
       orderBy: [
         { invoiceDate: 'desc' },

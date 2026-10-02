@@ -36,6 +36,7 @@ model Branch {
   stockMovements   StockMovement[]
   fundTransactions FundTransaction[]
   billCounters     BillCounter[]
+  reportCounters   ReportCounter[]
   prStaff          PrStaff[]
   prAttendances    PrAttendance[]
   prSessions       PrSession[]
@@ -350,6 +351,18 @@ model BillCounter {
   @@id([branchId, businessDate])
 }
 
+// Hands out the report site's numbers of e-invoices (spec
+// 2026-10-02-bao-cao-theo-tung-hddt §4): one sequence per branch and invoice
+// date, apart from BillCounter, so they never make the bill numbers skip.
+model ReportCounter {
+  branchId Int
+  branch   Branch   @relation(fields: [branchId], references: [id])
+  date     DateTime @db.Date
+  lastSeq  Int
+
+  @@id([branchId, date])
+}
+
 model OrderItem {
   id        Int     @id @default(autoincrement())
   orderId   Int
@@ -638,11 +651,20 @@ model Einvoice {
   // issued {lines} only (null on the ones issued before spec 2026-10-02 §4.3).
   draft        Json?
 
+  // The report site's number (spec 2026-10-02-bao-cao-theo-tung-hddt §4):
+  // invoice date when it was made + its bill's room + the sequence of
+  // ReportCounter (formatBillNumber); given at creation, never changed.
+  reportDate   DateTime @db.Date
+  reportSeq    Int
+  reportNumber String
+
+  // The day the report site counts it on; a draft's planned date, an issued
+  // one's date on the invoice. Always set.
+  invoiceDate       DateTime  @db.Date
   // Header, written when it is sent / issued.
   sellerTaxCode     String?
   symbolCode        String?
   registerInvoiceId String?
-  invoiceDate       DateTime? @db.Date
   invoiceNumber     Int?
   minvoiceId        String?
   lastError         String?
@@ -662,6 +684,9 @@ model Einvoice {
   numberEditedAt   DateTime?
 
   @@unique([sellerTaxCode, symbolCode, invoiceNumber])
+  @@unique([branchId, reportDate, reportSeq])
+  @@index([branchId, reportNumber])
+  @@index([branchId, invoiceDate])
   @@index([branchId, businessDate])
   @@index([branchId, status, createdAt])
   @@index([orderId])
@@ -692,6 +717,9 @@ model ManualBill {
   cancelReason  String?
   einvoices     Einvoice[]
 
-  @@unique([branchId, businessDate, billSeq])
+  // Not unique: since spec 2026-10-02-bao-cao-theo-tung-hddt the number is its
+  // first e-invoice's (ReportCounter), which may repeat a billSeq the older
+  // bills took from BillCounter on the same day.
+  @@index([branchId, businessDate])
   @@index([branchId, billNumber])
 }

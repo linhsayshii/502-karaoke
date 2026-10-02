@@ -646,7 +646,10 @@ export interface EinvoiceRow {
   buyerTaxCode: string | null;
   buyerName: string | null;
   symbolCode: string | null;
-  invoiceDate: string | null; // YYYY-MM-DD
+  // YYYY-MM-DD: the day the report site counts it on (a draft's planned date).
+  invoiceDate: string;
+  // The report site's number (spec 2026-10-02-bao-cao-theo-tung-hddt §4).
+  reportNumber: string;
   invoiceNumber: number | null;
   lastError: string | null;
   createdAt: string;
@@ -758,7 +761,6 @@ export interface TaxPayer {
 // Trang báo cáo (spec 2026-10-02-trang-bao-cao-hddt): sums of the e-invoices
 // counted (every one still there, but those not issued of a voided bill).
 export interface EinvoiceMetrics {
-  billCount: number;
   einvoiceCount: number;
   total: number; // VAT included
   vat: number;
@@ -782,6 +784,25 @@ export interface ReportSiteBill {
   vat: number;
   einvoiceCount: number;
   issuedCount: number;
+}
+
+// GET /report-site/einvoices: Quản lý bán hàng of the report site, one row per
+// counted e-invoice (spec 2026-10-02-bao-cao-theo-tung-hddt §5.2).
+export interface ReportSiteEinvoice {
+  id: number;
+  reportNumber: string;
+  invoiceDate: string; // YYYY-MM-DD
+  status: EinvoiceStatus;
+  hasError: boolean; // has a lastError (einvoiceStatusBadge)
+  invoiceNumber: number | null; // Minvoice's, once issued
+  buyerName: string | null;
+  amount: number;
+  vatAmount: number;
+  orderId: number | null;
+  manualBillId: number | null;
+  billNumber: string | null;
+  roomName: string | null;
+  billCancelledAt: string | null;
 }
 
 // GET /report-site/bills/summary: the tab counts and the sums of the days.

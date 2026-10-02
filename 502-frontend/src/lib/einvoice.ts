@@ -1,4 +1,4 @@
-import { formatDate, toDateInput } from "@/lib/format";
+import { formatDate } from "@/lib/format";
 import type { EinvoiceConfigView, EinvoiceDraft, EinvoiceLine, EinvoiceRow, VatRate } from "@/lib/types";
 
 // Mirror of the backend's src/einvoice/einvoice-math.ts (spec §5): keep the
@@ -104,12 +104,6 @@ export function invoiceDateProblem(
     return `Ký hiệu ${config?.symbolCode} là của năm ${year}, ngày hóa đơn là ${formatDate(date)}`;
   }
   return null;
-}
-
-// The date shown for a draft saved before drafts kept one: the calendar day
-// its bill was paid (never the business day), or today for a bill thêm tay.
-export function defaultInvoiceDate(billEndTime: string | null | undefined): string {
-  return toDateInput(billEndTime ? new Date(billEndTime) : new Date());
 }
 
 // Nothing typed in it yet (amount 0, no buyer, no line): deleted without

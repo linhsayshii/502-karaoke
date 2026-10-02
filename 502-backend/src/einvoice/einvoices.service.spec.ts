@@ -55,7 +55,7 @@ const draftRow = () => ({
   sellerTaxCode: null,
   symbolCode: null,
   registerInvoiceId: null,
-  invoiceDate: null,
+  invoiceDate: toDbDate('2026-10-01'),
   order: { status: 'COMPLETED' },
 });
 
@@ -116,7 +116,7 @@ describe('EinvoicesService.issue when saving the outcome fails', () => {
       id: 12,
       branchId: 1,
       status: 'SENDING',
-      invoiceDate: null,
+      invoiceDate: toDbDate('2026-10-01'),
     });
     await service.findOne(user, 12);
     expect(einvoice.updateMany).toHaveBeenLastCalledWith(
@@ -163,7 +163,12 @@ describe('EinvoicesService.issue when saving the outcome fails', () => {
 describe('EinvoicesService stale SENDING sweep', () => {
   afterEach(() => jest.restoreAllMocks());
 
-  const sending = { id: 12, branchId: 1, status: 'SENDING', invoiceDate: null };
+  const sending = {
+    id: 12,
+    branchId: 1,
+    status: 'SENDING',
+    invoiceDate: toDbDate('2026-10-01'),
+  };
   const sweeps = (einvoice: ReturnType<typeof setup>['einvoice']) =>
     einvoice.updateMany.mock.calls
       .map(([arg]) => (arg as { where: Record<string, unknown> }).where)
@@ -502,7 +507,7 @@ describe('EinvoicesService.issue of an uncertain invoice', () => {
       id: 12,
       branchId: 1,
       status: 'SENDING',
-      invoiceDate: null,
+      invoiceDate: toDbDate('2026-10-01'),
     });
     await service.findOne(user, 12);
     // Only the lock ran, no sweep.
@@ -585,7 +590,7 @@ describe('EinvoicesService.resolve', () => {
       id: 12,
       branchId: 1,
       status: 'DRAFT',
-      invoiceDate: null,
+      invoiceDate: toDbDate('2026-10-01'),
     });
     await service.resolve(user, 12, { found: false });
     const [{ where, data }] = einvoice.updateMany.mock.calls[0] as [
@@ -627,7 +632,7 @@ describe('EinvoicesService.resolve', () => {
       id: 12,
       branchId: 1,
       status: 'ISSUED',
-      invoiceDate: null,
+      invoiceDate: toDbDate('2026-10-01'),
     });
     await service.resolve(user, 12, { found: true, invoiceNumber: 1015 });
     const [{ where }] = einvoice.updateMany.mock.calls[0] as [
@@ -673,7 +678,7 @@ describe('EinvoicesService.editNumber', () => {
         id: 12,
         branchId: 1,
         status: 'ISSUED',
-        invoiceDate: null,
+        invoiceDate: toDbDate('2026-10-01'),
       });
     await service.editNumber(user, 12, { invoiceNumber: 1016 });
     expect(log).toHaveBeenCalledWith(
@@ -762,18 +767,26 @@ const creating = () => {
       id: 40,
       branchId: 1,
       status: 'DRAFT',
-      invoiceDate: null,
+      invoiceDate: toDbDate('2026-10-01'),
     }),
   };
   const order = { findUnique: jest.fn() };
+  // The bill's row, or the next report number (ReportCounter).
+  const billRow = {
+    branchId: 3,
+    businessDate: toDbDate('2026-09-01'),
+    cancelledAt: null,
+    roomName: 'P401',
+  };
   const tx = {
-    $queryRaw: jest.fn().mockResolvedValue([
-      {
-        branchId: 3,
-        businessDate: toDbDate('2026-09-01'),
-        cancelledAt: null,
-      },
-    ]),
+    $queryRaw: jest.fn(
+      (strings: TemplateStringsArray): Promise<object[]> =>
+        Promise.resolve(
+          strings.join('').includes('"ReportCounter"')
+            ? [{ lastSeq: 7 }]
+            : [billRow],
+        ),
+    ),
     einvoice,
   };
   const prisma = {
@@ -820,12 +833,16 @@ describe('EinvoicesService invoices of a bill thêm tay', () => {
   it('are made under the lock of their bill, on its branch and day', async () => {
     const { service, einvoice, tx } = creating();
     await service.create(user, { manualBillId: 9, amount: 110000, lines: [] });
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    // The bill's lock, then its number.
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
     expect(dataOf(einvoice.create)).toMatchObject({
       branchId: 3,
       manualBillId: 9,
       businessDate: toDbDate('2026-09-01'),
       invoiceDate: toDbDate('2026-09-01'),
+      reportDate: toDbDate('2026-09-01'),
+      reportSeq: 7,
+      reportNumber: '01094010007',
       amount: 110000,
       vatAmount: 10000,
     });
@@ -839,6 +856,7 @@ describe('EinvoicesService invoices of a bill thêm tay', () => {
         branchId: 3,
         businessDate: toDbDate('2026-09-01'),
         cancelledAt: new Date(),
+        roomName: null,
       },
     ]);
     await expect(
@@ -858,7 +876,7 @@ describe('EinvoicesService invoices of a bill thêm tay', () => {
       branchId: 1,
       manualBillId: 9,
       status: 'DRAFT',
-      invoiceDate: null,
+      invoiceDate: toDbDate('2026-10-01'),
     });
     await expect(service.findOne(cashier, 41)).rejects.toMatchObject({
       status: 403,
@@ -899,7 +917,10 @@ describe('EinvoicesService invoices of a bill thêm tay', () => {
 describe('EinvoicesService invoice dates', () => {
   afterEach(() => jest.restoreAllMocks());
 
-  it('dates a new draft by the calendar day its bill was paid, not its business day', async () => {
+  // As "Thêm hóa đơn vào báo cáo" dates its draft: a bill paid after midnight
+  // shows on the report site on the day it belongs to, whichever button made
+  // its invoice.
+  it("dates a new draft by its bill's business day, not the calendar day it was paid", async () => {
     const { service, einvoice, order } = creating();
     order.findUnique.mockResolvedValue({
       id: 5,
@@ -909,9 +930,12 @@ describe('EinvoicesService invoice dates', () => {
       endTime: new Date(2026, 8, 30, 0, 24),
     });
     await service.create(user, { orderId: 5, amount: 0, lines: [] });
+    // Numbered on the invoice date, inside a transaction.
     expect(dataOf(einvoice.create)).toMatchObject({
       businessDate: toDbDate('2026-09-29'),
-      invoiceDate: toDbDate('2026-09-30'),
+      invoiceDate: toDbDate('2026-09-29'),
+      reportDate: toDbDate('2026-09-29'),
+      reportNumber: '29090000007',
     });
   });
 

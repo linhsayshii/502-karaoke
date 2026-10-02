@@ -75,7 +75,8 @@ export function AddManualBillDialog({
           <DialogHeader>
             <DialogTitle>Thêm hóa đơn</DialogTitle>
             <DialogDescription>
-              Bill chỉ để xuất hóa đơn điện tử, chỉ có ở trang báo cáo. Số bill nối tiếp dãy số của ngày đã chọn.
+              Bill chỉ để xuất hóa đơn điện tử, chỉ có ở trang báo cáo. Số của bill nối tiếp dãy số hóa đơn của trang
+              báo cáo trong ngày đã chọn.
             </DialogDescription>
           </DialogHeader>
           <FieldGroup>

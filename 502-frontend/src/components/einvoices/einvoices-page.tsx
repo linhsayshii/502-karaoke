@@ -96,7 +96,12 @@ export function EinvoicesPage({ site }: { site: Site }) {
   });
   // The tab the open bill was opened from: it decides the invoice shown first.
   const [openedFrom, setOpenedFrom] = useState<EinvoiceTab>("BILLS");
-  const [selected, setSelected] = useState<Selection | null>(null);
+  // ?einvoice=<id> with the bill: the invoice Quản lý bán hàng was clicked on.
+  const [selected, setSelected] = useState<Selection | null>(() => {
+    const bill = linkedBill(searchParams);
+    const einvoiceId = Number(searchParams.get("einvoice"));
+    return bill && Number.isInteger(einvoiceId) && einvoiceId > 0 ? { bill, einvoiceId } : null;
+  });
   // Phones show the panel in a Sheet, opened only by tapping an invoice.
   const [sheetOpen, setSheetOpen] = useState(false);
   // A draft just made: the cursor goes to its amount.
@@ -233,6 +238,15 @@ export function EinvoicesPage({ site }: { site: Site }) {
       invoiceDate: toDateInput(),
     });
 
+  // A bill thêm tay was cancelled: its drafts are gone with it.
+  const billChanged = () => {
+    setListVersion((v) => v + 1);
+    setDirty(false);
+    setSelected(null);
+    setSheetOpen(false);
+    bill.reload();
+  };
+
   const deleted = (ref: BillRef, einvoiceId: number) => {
     setListVersion((v) => v + 1);
     if (shown?.einvoiceId === einvoiceId) {
@@ -259,7 +273,9 @@ export function EinvoicesPage({ site }: { site: Site }) {
         einvoice={panelEinvoice}
         bill={order}
         label={
-          manual ? `HĐ ${index + 1} · Bill ${billLabel(manual)} · ${manual.room?.name ?? "—"}` : `HĐ ${index + 1}`
+          site === "report"
+            ? `${panelEinvoice.reportNumber}${manual ? ` · Bill ${billLabel(manual)} · ${manual.room?.name ?? "—"}` : ""}`
+            : `HĐ ${index + 1}`
         }
         previous={index > 0 && billDetail ? buyerOf(billDetail.einvoices[index - 1]) : null}
         config={config.data}
@@ -281,14 +297,19 @@ export function EinvoicesPage({ site }: { site: Site }) {
       />
     );
   const emptyBill = billDetail !== null && billDetail.einvoices.length === 0;
+  // The report site lists a paid bill only while it holds an invoice: without
+  // one it has no row, so no + to press, and comes back from the main site.
+  const unlisted = emptyBill && site === "report" && order !== null;
   const emptyPanel = (
     <EmptyState
       icon={FileCheck2Icon}
       title={emptyBill ? "Bill chưa có hóa đơn nhỏ" : "Chọn một hóa đơn"}
       description={
-        can(user, "einvoices.write") && emptyBill
-          ? "Bấm + trên dòng bill để thêm hóa đơn nhỏ."
-          : "Mở một bill ở cột trái."
+        unlisted
+          ? "Bill này không có hóa đơn nào ở trang báo cáo. Gửi lại từ trang chính bằng nút Thêm hóa đơn vào báo cáo."
+          : can(user, "einvoices.write") && emptyBill
+            ? "Bấm + trên dòng bill để thêm hóa đơn nhỏ."
+            : "Mở một bill ở cột trái."
       }
       className="rounded-xl border"
     />
@@ -326,6 +347,7 @@ export function EinvoicesPage({ site }: { site: Site }) {
             onSaved={changed}
             onDeleted={deleted}
             onSavingChange={rowSaving}
+            onBillChanged={billChanged}
           />
           {!isMobile && (
             <div ref={panelRef} className="min-w-0 scroll-mt-[calc(var(--header-height)+1rem)]">

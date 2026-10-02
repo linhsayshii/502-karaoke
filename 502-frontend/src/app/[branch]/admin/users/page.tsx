@@ -51,7 +51,7 @@ import { useNotify } from "@/hooks/use-notify";
 import api from "@/lib/api";
 import { useBranchCode } from "@/lib/branch";
 import { initials } from "@/lib/format";
-import { POSITION_LABELS, ROLE_LABELS, can } from "@/lib/permissions";
+import { POSITION_LABELS, REPORT_ACCESS_ROLES, ROLE_LABELS, can } from "@/lib/permissions";
 import { ONLY_NARROW, SHOW_FROM } from "@/lib/responsive";
 import type { ManagedUser, Role, StaffPosition } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -70,6 +70,7 @@ interface UserForm {
   role: Role;
   position: StaffPosition | typeof NONE;
   managesPr: boolean;
+  reportAccess: boolean;
   branchId: string;
 }
 
@@ -172,6 +173,7 @@ export default function UsersPage() {
             role: "STAFF",
             position: NONE,
             managesPr: false,
+            reportAccess: false,
             branchId: String(currentBranchId ?? ""),
           }
         : {
@@ -182,6 +184,7 @@ export default function UsersPage() {
             role: target.role,
             position: target.position ?? NONE,
             managesPr: target.managesPr,
+            reportAccess: target.reportAccess,
             branchId: target.branchId ? String(target.branchId) : "",
           },
     );
@@ -211,6 +214,10 @@ export default function UsersPage() {
       role: form.role,
       position: form.position === NONE ? null : form.position,
       managesPr: form.managesPr,
+      // Sent by the chain manager only: the server refuses it from anyone else.
+      ...(isChainManager
+        ? { reportAccess: REPORT_ACCESS_ROLES.includes(form.role) && form.reportAccess }
+        : {}),
       // Branch managers can only place accounts in their own branch (server enforces it).
       branchId: noBranchRole(form.role) ? null : isChainManager ? Number(form.branchId) || null : me?.branchId,
     };
@@ -371,6 +378,7 @@ export default function UsersPage() {
                               {" "}
                               · {ROLE_LABELS[u.role]}
                               {u.managesPr && " · quản lý PR/KTV"}
+                              {u.reportAccess && " · trang báo cáo"}
                               {!u.active && " · đã khóa"}
                             </span>
                           </span>
@@ -381,6 +389,7 @@ export default function UsersPage() {
                       <div className="flex flex-wrap items-center gap-1">
                         <Badge variant={u.role === "STAFF" ? "secondary" : "default"}>{ROLE_LABELS[u.role]}</Badge>
                         {u.managesPr && <Badge variant="outline">Quản lý PR/KTV</Badge>}
+                        {u.reportAccess && <Badge variant="outline">Trang báo cáo</Badge>}
                       </div>
                     </TableCell>
                     <TableCell className={SHOW_FROM.md}>{u.position ? POSITION_LABELS[u.position] : "—"}</TableCell>
@@ -579,6 +588,26 @@ export default function UsersPage() {
                     {MANAGER_ROLES.includes(form.role) && (
                       <FieldDescription>Quản lý luôn quản lý được PR/KTV của cơ sở.</FieldDescription>
                     )}
+                  </Field>
+                )}
+                {isChainManager && REPORT_ACCESS_ROLES.includes(form.role) && (
+                  <Field>
+                    <FieldLabel htmlFor="user-report-access">Vào trang báo cáo</FieldLabel>
+                    <Select
+                      value={form.reportAccess ? "yes" : "no"}
+                      onValueChange={(value) => setForm({ ...form, reportAccess: value === "yes" })}
+                    >
+                      <SelectTrigger id="user-report-access" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="no">Không</SelectItem>
+                          <SelectItem value="yes">Có – đăng nhập được trang báo cáo</SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    <FieldDescription>Trang báo cáo theo hóa đơn điện tử, ở tên miền baocao.</FieldDescription>
                   </Field>
                 )}
                 {isChainManager && !noBranchRole(form.role) && (

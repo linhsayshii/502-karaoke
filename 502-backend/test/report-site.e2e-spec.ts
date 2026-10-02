@@ -580,6 +580,148 @@ describe('Report site (e2e)', () => {
     });
   });
 
+  describe('reports', () => {
+    const D = daysAgo(50);
+    const report = (path: string, query: string, name = 'qlbc_cs1') =>
+      as(name).get(
+        `/report-site/reports/${path}?branch=cs1&from=${D}&to=${D}${query}`,
+      );
+    const beer = (name: string, quantity: number) => ({
+      name,
+      unit: 'Lon',
+      quantity,
+      unitPrice: 100000,
+      vatRate: 10,
+    });
+    let laterId: number;
+
+    it('sets up three bills thêm tay on one past day', async () => {
+      const room = async (name: string) =>
+        (
+          (
+            await as('ql1_cs1')
+              .post('/rooms', { name, pricePerHour: 100000 })
+              .expect(201)
+          ).body as Json
+        ).id as number;
+      const r501 = await room('BC 501');
+      const r502 = await room('BC 502');
+      const add = async (roomId: number, amount: number) =>
+        (
+          await as('qlbc_cs1')
+            .post('/report-site/manual-bills?branch=cs1', {
+              businessDate: D,
+              roomId,
+              amount,
+            })
+            .expect(201)
+        ).body as Json;
+      await add(r501, 110000); // no line: all of it "Chưa có dòng hàng"
+      const b = await add(r502, 220000);
+      await as('qlbc_cs1')
+        .patch(`/einvoices/${b.einvoiceId as number}`, {
+          amount: 220000,
+          lines: [beer('Bia  Tiger ', 2)],
+        })
+        .expect(200);
+      const c = await add(r502, 110000);
+      await as('qlbc_cs1')
+        .patch(`/einvoices/${c.einvoiceId as number}`, {
+          amount: 110000,
+          lines: [beer('bia tiger', 1)],
+        })
+        .expect(200);
+      laterId = b.einvoiceId as number;
+    });
+
+    it('sums the revenue of the counted invoices', async () => {
+      const body = (
+        await report('revenue', '&groupBy=day&compare=1').expect(200)
+      ).body as Json;
+      expect(body.totals).toEqual({
+        billCount: 3,
+        einvoiceCount: 3,
+        total: 440000,
+        vat: 40000,
+        issued: 0,
+        revenue: 400000,
+        pending: 440000,
+      });
+      expect((body.previous as Json).totals).toMatchObject({ total: 0 });
+      expect((body.buckets as Json[])[0]).toMatchObject({
+        key: D,
+        total: 440000,
+      });
+      await issueToday(laterId);
+      const issued = (await report('revenue', '').expect(200)).body as Json;
+      expect(issued.totals).toMatchObject({ issued: 220000, pending: 220000 });
+    });
+
+    it('splits it by room, adding up to the revenue', async () => {
+      const body = (await report('rooms', '&by=room').expect(200)).body as {
+        totals: Json;
+        rows: Json[];
+      };
+      const byName = new Map(body.rows.map((r) => [r.name, r.total]));
+      expect(byName.get('BC 501')).toBe(110000);
+      expect(byName.get('BC 502')).toBe(330000);
+      expect(body.rows.reduce((s, r) => s + (r.total as number), 0)).toBe(
+        440000,
+      );
+    });
+
+    it('groups the lines by name and unit, and keeps the rest apart', async () => {
+      const body = (await report('products', '').expect(200)).body as {
+        totals: Json;
+        rows: Json[];
+      };
+      expect(body.totals).toEqual({
+        revenue: 400000,
+        vat: 40000,
+        total: 440000,
+      });
+      const [item, unlisted] = body.rows;
+      expect(item).toMatchObject({
+        kind: 'item',
+        unit: 'Lon',
+        quantity: 3,
+        revenue: 300000,
+        vat: 30000,
+      });
+      expect((item.name as string).toLowerCase()).toBe('bia tiger');
+      // Issued: its lines stay in the report.
+      expect(unlisted).toMatchObject({
+        kind: 'unlisted',
+        revenue: 100000,
+        vat: 10000,
+        total: 110000,
+      });
+    });
+
+    it('shows the whole chain to the chain manager and HĐQT', async () => {
+      const body = (
+        await as('hdqt_bc')
+          .get(`/report-site/reports/revenue?from=${D}&to=${D}`)
+          .expect(200)
+      ).body as Json;
+      expect(body.branchId).toBeNull();
+      expect((body.byBranch as Json[]).length).toBeGreaterThan(1);
+    });
+
+    it('belongs to the report site', async () => {
+      await report('revenue', '', 'tn1_cs1').expect(403);
+      await report('revenue', '', 'ql1_cs1').expect(403);
+      await as('qlbc_cs1')
+        .get(`/report-site/reports/revenue?branch=cs2&from=${D}&to=${D}`)
+        .expect(403);
+      await as('qlbc_cs1')
+        .get(
+          '/report-site/reports/products?branch=cs1&from=2010-01-01&to=2026-01-01',
+        )
+        .expect(400);
+    });
+  });
+
   describe('data purge', () => {
     it('wipes the bills thêm tay of the branch', async () => {
       const res = await as('hdqt_bc')

@@ -31,3 +31,14 @@ export const EINVOICE_SUM_COLUMNS = Prisma.sql`
   COALESCE(SUM(e."amount"), 0)::float8 AS "total",
   COALESCE(SUM(e."vatAmount"), 0)::float8 AS "vat",
   COALESCE(SUM(e."amount") FILTER (WHERE e."status" = 'ISSUED'), 0)::float8 AS "issued"`;
+
+// The lines of an e-invoice's draft as rows `l` (jsonb); an invoice issued
+// before lines were kept has none.
+export const EINVOICE_LINES = Prisma.sql`jsonb_array_elements(COALESCE(e."draft"->'lines', '[]'::jsonb)) l`;
+
+// A line priced as einvoice-math.ts does: before VAT = round(quantity ×
+// unitPrice); VAT = its own vatAmount (a filler line) or round(before VAT ×
+// vatRate / 100). Numeric arithmetic: round() halves away from zero, like
+// Math.round on these positive amounts.
+export const LINE_REVENUE = Prisma.sql`round((l->>'quantity')::numeric * (l->>'unitPrice')::numeric)`;
+export const LINE_VAT = Prisma.sql`COALESCE((l->>'vatAmount')::numeric, round(round((l->>'quantity')::numeric * (l->>'unitPrice')::numeric) * (l->>'vatRate')::numeric / 100))`;

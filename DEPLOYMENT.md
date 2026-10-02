@@ -150,6 +150,8 @@ Chỉ cần một `location /`: frontend tự chuyển `/api` sang backend.
 
 WebSocket (`/api/ws`, màn hình thu ngân/quản lý) đi qua cùng `location /` nhờ hai dòng `Upgrade`/`Connection` ở trên; server tự `ping` mỗi 30 giây nên không cần nâng `proxy_read_timeout` (mặc định 60 giây). Nếu đặt `proxy_read_timeout` thì không dưới **60 giây** (giá trị 31–59 giây vẫn có thể cắt kết nối ngay trước ping kế tiếp).
 
+Trang báo cáo dùng cùng app: thêm tên của nó vào `server_name` (ví dụ `server_name kara.example.com baocao.example.com;`) rồi `sudo certbot --nginx -d kara.example.com -d baocao.example.com`. Let's Encrypt cấp được cho tên miền ở mọi cấp. Giữ `proxy_set_header Host $host;`.
+
 ```bash
 sudo ln -s /etc/nginx/sites-available/karaoke502 /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default
@@ -217,6 +219,11 @@ Rồi trong khối `server` của `/etc/nginx/sites-available/karaoke502` (khố
    - Kiểm tra: mở app bằng tài khoản thu ngân, trong DevTools → Network → WS phải thấy `/api/ws` trạng thái `101` và các khung `ping/pong` mỗi 30 giây.
    - Nếu không có (`ws` bị đóng liên tục): thêm trong tunnel một Public Hostname thứ hai cùng tên miền với **Path** `api/ws` trỏ `HTTP` `localhost:4000` và mở `ports: - "127.0.0.1:4000:4000"` cho `backend` trong `docker-compose.yml`; ứng dụng vẫn chạy bằng polling trong lúc đó.
    - Nên thêm một rule Rate limiting cho URI Path bằng `/api/ws`, ví dụ **30 request mỗi 10 giây** cho mỗi IP: kết nối chưa gửi token vẫn chiếm một chỗ tối đa 5 giây (backend chỉ nhận 20 kết nối như vậy cùng lúc). Nhân viên cùng quán dùng chung một IP nên đừng đặt thấp hơn.
+8. **Trang báo cáo** (`baocao.<tên miền>`, cùng app): thêm một Public Hostname thứ hai trỏ `HTTP` `localhost:3000`, tên bắt đầu bằng `baocao.` hoặc `baocao-` (app nhận trang báo cáo theo tên này). **Không** đặt "HTTP Host Header" khác trong cấu hình hostname: app cần đúng tên người dùng gõ. Chứng chỉ miễn phí của Cloudflare (Universal SSL) chỉ phủ tên miền con **một cấp**:
+   - `baocao.hvlsv.uk`, `baocao-mediastar.vlab.id.vn`: được, miễn phí;
+   - `baocao.mediastar.vlab.id.vn` (hai cấp dưới zone `vlab.id.vn`): trình duyệt báo lỗi SSL, trừ khi mua Advanced Certificate Manager rồi bật Total TLS.
+
+   Rule giới hạn đăng nhập ở điểm 4 không xét tên miền, nên đã áp dụng cho tên báo cáo nằm cùng zone Cloudflare với tên chính (như `baocao.hvlsv.uk` cạnh `kara.hvlsv.uk`). Chỉ khi tên báo cáo thuộc zone khác (như `baocao-mediastar.vlab.id.vn`) mới phải thêm một rule như vậy trong zone đó. Sau khi triển khai, quản lý hệ thống bật "Vào trang báo cáo" cho tài khoản cần dùng (Quản trị → Tài khoản).
 
 ## 4. Vận hành hằng ngày
 
@@ -582,6 +589,19 @@ Sau khi cập nhật:
   - Bấm **Xuất** khi ngày hóa đơn khác hôm nay thì trang hỏi có đổi về hôm nay không (**Giữ** ngày cũ hoặc **Đổi về hôm nay**).
   - Một lần xuất bị Minvoice từ chối thì nháp giữ ngày đã chọn.
 - **Rollback cẩn thận:** khi đã có hóa đơn không theo bill (cột `orderId` để trống), quay lại bản backend cũ làm trang Hóa đơn điện tử báo lỗi 500, vì code cũ coi hóa đơn nào cũng có bill. Trước khi rollback hãy xóa các hóa đơn đó (nháp xóa được trên trang; hóa đơn đã xuất thì không), hoặc ngừng dùng trang Hóa đơn điện tử cho tới khi lên lại bản mới.
+
+### 6.20. Trang báo cáo theo hóa đơn điện tử (migration `20261005000000_report_site`)
+
+- **Migration** tự chạy khi backend khởi động:
+  - Thêm `User.reportAccess`, bảng `ManualBill` (bill thêm tay) và cột `Einvoice.manualBillId`.
+  - Mỗi hóa đơn điện tử không theo bill đang có được chuyển thành một bill thêm tay không phòng (mã phòng 0000), lấy số tiếp theo của ngày kinh doanh của nó. Vì vậy dãy số bill các ngày đó có thêm số.
+  - Thêm ràng buộc mỗi hóa đơn thuộc đúng một bill.
+  - Tính lại VAT của các nháp chưa có dòng hàng.
+  - Chạy trong tích tắc. Không đổi `.env` hay `docker-compose.yml`.
+- **Trang chính:** trang Hóa đơn điện tử không còn tạo hóa đơn không theo bill. Hóa đơn xuất từ nay giữ lại dòng hàng (cho báo cáo Hàng hóa của trang báo cáo).
+- **Sau khi cập nhật, tải lại (F5) trang Hóa đơn điện tử ở mọi tab đang mở.** Tab mở từ trước vẫn chạy trang cũ: mỗi lần tải danh sách nó gọi `GET /einvoices?free=1` (đã bỏ) và báo lỗi "Không thể tải hóa đơn không theo bill" cho tới khi tải lại.
+- **Trang báo cáo:** làm theo [mục 3.2](#32-cloudflare-tunnel-không-dùng-nginx) điểm 8 (Cloudflare) hoặc [mục 3](#3-tên-miền-nginx-và-https) (Nginx), rồi bật quyền cho tài khoản.
+- **Rollback cẩn thận:** code cũ không biết `ManualBill` và ràng buộc mới (mỗi hóa đơn thuộc đúng một bill). Trên trang Hóa đơn điện tử cũ, hóa đơn của bill thêm tay hiện và được đếm trên các tab như hóa đơn không theo bill, nút **+** cạnh ô tìm số bill (tạo hóa đơn không theo bill) báo lỗi, và "Xóa dữ liệu" của HĐQT báo lỗi khi gặp phòng đã có bill thêm tay, vì code cũ không xóa bảng `ManualBill`. Xóa một phòng đã có bill thêm tay cũng bị từ chối, nhưng với thông báo chung "Dữ liệu đang được sử dụng ở nơi khác, không thể thực hiện" (khóa ngoại `ManualBill_roomId_fkey`) thay cho thông báo "Phòng đã có lịch sử hóa đơn…" của bản mới. Sau khi rollback cũng tải lại (F5) các tab đang mở trang Hóa đơn điện tử: trang mới chạy trên backend cũ đếm cả hóa đơn của bill thêm tay trên các tab mà không liệt kê chúng, nên số và danh sách không khớp. Dữ liệu không mất. Quay về bản trước mục 6.19 thì còn phải theo cả điểm rollback của mục đó: hóa đơn của bill thêm tay cũng có `orderId` để trống.
 
 ## 7. Xử lý sự cố
 

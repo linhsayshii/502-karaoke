@@ -1,6 +1,7 @@
 import {
   billNumberPrefixRange,
   formatBillNumber,
+  nextBillNumberOn,
   roomCode,
 } from './bill-number';
 
@@ -57,5 +58,22 @@ describe('billNumberPrefixRange', () => {
   it('carries over trailing nines', () => {
     expect(billNumberPrefixRange('3199')).toEqual({ gte: '3199', lt: '32' });
     expect(billNumberPrefixRange('999')).toEqual({ gte: '999' });
+  });
+});
+
+describe('nextBillNumberOn', () => {
+  it('numbers a given business day through the shared counter', async () => {
+    const tx = { $queryRaw: jest.fn().mockResolvedValue([{ lastSeq: 51 }]) };
+    const number = await nextBillNumberOn(tx as never, 1, '2026-10-02', 'P401');
+    expect(number).toEqual({
+      businessDate: new Date('2026-10-02T00:00:00Z'),
+      billSeq: 51,
+      billNumber: '02104010051',
+    });
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    // The counter row of that branch and that day, not of the branch's today:
+    // the call is [template strings, branchId, date].
+    const [, ...params] = tx.$queryRaw.mock.calls[0] as unknown[];
+    expect(params).toEqual([1, '2026-10-02']);
   });
 });

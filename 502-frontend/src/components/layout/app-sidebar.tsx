@@ -20,6 +20,7 @@ import {
 import { useAuth } from "@/components/auth-provider";
 import { BranchSwitcher } from "@/components/layout/branch-switcher";
 import { NavUser } from "@/components/layout/nav-user";
+import { useSite } from "@/components/layout/site-context";
 import { usePendingDiscounts } from "@/hooks/use-pending-discounts";
 import { useBranchCode } from "@/lib/branch";
 import { findNav, visibleNav } from "@/lib/navigation";
@@ -27,13 +28,14 @@ import { findNav, visibleNav } from "@/lib/navigation";
 // Navigation of the whole app; only the pages the role may use are listed
 // (the backend enforces access, this only hides).
 export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
+  const site = useSite();
   const { user } = useAuth();
   const branch = useBranchCode();
   const pathname = usePathname();
   const { setOpenMobile } = useSidebar();
-  const pendingDiscounts = usePendingDiscounts();
+  const pendingDiscounts = usePendingDiscounts(site === "main");
   const subPath = pathname.replace(/^\/[^/]+/, "");
-  const active = findNav(subPath, user);
+  const active = findNav(subPath, user, site);
 
   // Close the mobile sheet after navigating.
   useEffect(() => {
@@ -46,7 +48,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
         <BranchSwitcher />
       </SidebarHeader>
       <SidebarContent>
-        {visibleNav(user).map((group) => (
+        {visibleNav(user, site).map((group) => (
           <SidebarGroup key={group.label}>
             <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
             <SidebarMenu>

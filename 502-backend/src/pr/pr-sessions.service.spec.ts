@@ -20,6 +20,7 @@ const user = (role: Role, id = 1): AuthUser => ({
   role,
   position: role === Role.STAFF ? StaffPosition.SERVER : null,
   managesPr: false,
+  reportAccess: false,
   branchId: 1,
   branch: { id: 1, code: 'cs1', name: 'Cơ sở 1' },
 });

@@ -52,7 +52,7 @@ export function EinvoiceEditor({
   onWorkingChange,
   busy,
 }: {
-  // Null for a free invoice.
+  // Its paid bill; null for a bill thêm tay.
   bill: EinvoiceBillDetail["order"] | null;
   einvoice: EinvoiceDetail;
   previous: BuyerValue | null;

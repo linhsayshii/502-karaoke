@@ -11,11 +11,14 @@ import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import { can } from "@/lib/permissions";
 import type { EinvoiceDetail } from "@/lib/types";
 
-// An issued invoice: only its header is kept (spec §4). One that still has a
-// lastError was issued but Minvoice's number clashed with one of ours, so its
-// number is empty until the chain manager types the one shown on Minvoice.
-// Gửi lại makes a new draft from it (its own draft went when it was issued);
-// the issued one stays as it is, here and on Minvoice.
+// An issued invoice: the panel shows only its header (spec §4). Its draft
+// stays as { lines } for the report site's products report; only the buyer's
+// address and email are dropped, and invoices issued before the report site
+// have draft = null. One that still has a lastError was issued but Minvoice's
+// number clashed with one of ours, so its number is empty until the chain
+// manager types the one shown on Minvoice.
+// Gửi lại makes a new draft from its header (amount, buyer MST and name), not
+// from its lines; the issued one stays as it is, here and on Minvoice.
 // Rendered inside the panel's @container/einvoice.
 export function IssuedView({
   einvoice,
@@ -103,7 +106,7 @@ export function IssuedView({
         open={resendOpen}
         onOpenChange={setResendOpen}
         title={`Gửi lại hóa đơn${einvoice.invoiceNumber ? ` số ${einvoice.invoiceNumber}` : ""}?`}
-        description={`Hóa đơn này giữ nguyên, ở đây và trên Minvoice. Hệ thống tạo một nháp mới${einvoice.orderId === null ? "" : " của cùng bill"} với số tiền ${formatMoney(einvoice.amount)}, MST và tên người mua, ngày hôm nay. Dòng hàng, địa chỉ và email không còn lưu sau khi xuất nên cần nhập lại trước khi Xuất.${einvoice.orderId === null ? "" : " Phần đã chia của bill tính cả hai hóa đơn."}`}
+        description={`Hóa đơn này giữ nguyên, ở đây và trên Minvoice. Hệ thống tạo một nháp mới của cùng bill với số tiền ${formatMoney(einvoice.amount)}, MST và tên người mua, ngày hôm nay; dòng hàng, địa chỉ và email cần nhập lại trước khi Xuất. Phần đã chia của bill tính cả hai hóa đơn.`}
         confirmLabel="Tạo nháp mới"
         onConfirm={() => onResend(einvoice)}
       />

@@ -42,17 +42,17 @@ export function billNumberPrefixRange(prefix: string): {
   return { gte: prefix, lt: `${stem.slice(0, -1)}${last}` };
 }
 
-// Hands out the next number of the branch for the business day of
-// `closedAt`. The counter row is incremented atomically and stays locked
-// until the transaction ends, so concurrent checkouts never share a number
-// and a rolled-back checkout gives its number back.
-export async function nextBillNumber(
+// Hands out the next number of the branch for business day `date`
+// (YYYY-MM-DD). The counter row is incremented atomically and stays locked
+// until the transaction ends, so concurrent closings (checkout, cancelling a
+// session, a bill thêm tay of the report site) never share a number and a
+// rolled-back one gives its number back.
+export async function nextBillNumberOn(
   tx: Tx,
   branchId: number,
-  closedAt: Date,
+  date: string,
   roomName?: string | null,
 ) {
-  const date = businessDateOf(closedAt);
   const [{ lastSeq }] = await tx.$queryRaw<{ lastSeq: number }[]>`
     INSERT INTO "BillCounter" ("branchId", "businessDate", "lastSeq")
     VALUES (${branchId}, ${date}::date, 1)
@@ -64,4 +64,14 @@ export async function nextBillNumber(
     billSeq: lastSeq,
     billNumber: formatBillNumber(date, roomName, lastSeq),
   };
+}
+
+// The next number of the branch for the business day of `closedAt`.
+export function nextBillNumber(
+  tx: Tx,
+  branchId: number,
+  closedAt: Date,
+  roomName?: string | null,
+) {
+  return nextBillNumberOn(tx, branchId, businessDateOf(closedAt), roomName);
 }

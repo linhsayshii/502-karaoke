@@ -17,6 +17,7 @@ import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useAuth } from "@/components/auth-provider";
 import { useCurrentPageTitle } from "@/components/layout/page-title";
+import { useSite } from "@/components/layout/site-context";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useBranchCode } from "@/lib/branch";
 import { businessDate } from "@/lib/format";
@@ -35,11 +36,12 @@ function useBusinessDay() {
 
 // Pinned to the top while the page scrolls.
 export function SiteHeader() {
+  const site = useSite();
   const { user } = useAuth();
   const branch = useBranchCode();
   const pathname = usePathname();
   const pageTitle = useCurrentPageTitle();
-  const nav = findNav(pathname.replace(/^\/[^/]+/, ""), user);
+  const nav = findNav(pathname.replace(/^\/[^/]+/, ""), user, site);
   const day = useBusinessDay();
 
   return (

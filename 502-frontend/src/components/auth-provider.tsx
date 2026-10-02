@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import api, { getSessionExpiresAt, onSessionChange, onSessionExpired, setSession } from "@/lib/api";
 import { BrandMark } from "@/components/brand";
 import { Spinner } from "@/components/ui/spinner";
-import { can } from "@/lib/permissions";
+import { can, canUseReportSite } from "@/lib/permissions";
+import { isReportSite } from "@/lib/site";
 import type { Branch, User } from "@/lib/types";
 
 interface LoginData {
@@ -27,11 +28,12 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Where an account lands after login: its branch's room map.
+// Where an account lands after login: its branch's room map, or on the report
+// site its Quản lý bán hàng.
 export function homePath(user: User, branches: Branch[]) {
   const code =
     user.branch?.code ?? branches.find((b) => b.active)?.code ?? branches[0]?.code ?? "cs1";
-  return `/${code}/sales/rooms`;
+  return isReportSite() ? `/${code}/sales/bills` : `/${code}/sales/rooms`;
 }
 
 export function canOpenBranch(user: User, branches: Branch[], code: string) {
@@ -105,7 +107,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user, branches, loading, pathname, router]);
 
   const login = async (data: LoginData) => {
-    const response = await api.post("/auth/login", data);
+    // The report site asks the server first (spec 2026-10-02 §3.2).
+    const response = await api.post("/auth/login", { ...data, ...(isReportSite() ? { site: "report" } : {}) });
     setSession(response.data.access_token, response.data.sessionExpiresAt);
     const loggedIn = response.data.user as User;
     const list = await fetchBranches();
@@ -134,6 +137,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback(() => signOut(), [signOut]);
+
+  // The report site: an account that may not use it (any more) is signed out.
+  useEffect(() => {
+    if (user && isReportSite() && !canUseReportSite(user)) {
+      void signOut("Tài khoản không còn quyền vào trang báo cáo");
+    }
+  }, [user, signOut]);
 
   // The server ends every login after 24 hours: sign out right then.
   useEffect(() => {

@@ -26,6 +26,12 @@ import { METRIC_COLUMNS } from "@/lib/report-columns";
 import type {
   BranchReportRow,
   BranchesReport,
+  EinvoiceMetrics,
+  EinvoiceProductReport,
+  EinvoiceProductRow,
+  EinvoiceRevenueReport,
+  EinvoiceRoomReport,
+  EinvoiceRoomRow,
   FundSummary,
   FundTransaction,
   FundType,
@@ -40,6 +46,7 @@ import type {
   ProfitMetrics,
   ProfitReport,
   ReportBucket,
+  ReportSiteBill,
   RevenueMetrics,
   RevenueReport,
   RoomGroup,
@@ -116,7 +123,7 @@ export function staffSheet(data: StaffReport, name = STAFF_ROLE_LABELS[data.role
 export const ROOM_GROUP_LABELS: Record<RoomGroup, string> = { room: "Theo phòng", type: "Theo loại phòng" };
 
 // A room, a room type (by=type) or "Không phòng" (id null).
-export function roomRowName(row: RoomReportRow, by: RoomGroup) {
+export function roomRowName(row: Pick<RoomReportRow, "id" | "name" | "type">, by: RoomGroup) {
   if (row.id === null) return row.name ?? NO_ROOM;
   return by === "type" ? roomTypeLabel(row.type) : (row.name ?? "");
 }
@@ -551,4 +558,105 @@ export function fundSummarySheet(summary: FundSummary, rangeLabel: string, name 
     ),
   ];
   return toSheet(name, columns, rows);
+}
+
+// ---- Trang báo cáo: Quản lý bán hàng (spec 2026-10-02 §7.4)
+
+const reportSiteBillColumns: ExportColumn<ReportSiteBill>[] = [
+  { header: "Số bill", value: (r) => r.billNumber },
+  { header: "Ngày", value: (r) => (r.businessDate ? formatDate(r.businessDate) : null) },
+  { header: "Phòng", value: (r) => r.roomName ?? NO_ROOM },
+  { header: "Loại", value: (r) => (r.manualBillId !== null ? "Thêm tay" : "Bán hàng") },
+  { header: "Trạng thái", value: (r) => (r.cancelledAt ? "Đã hủy" : null) },
+  { header: "Số HĐĐT", type: "number", value: (r) => r.einvoiceCount },
+  { header: "HĐĐT đã xuất", type: "number", value: (r) => r.issuedCount },
+  { header: "Trước VAT", type: "money", value: (r) => r.total - r.vat },
+  { header: "VAT", type: "money", value: (r) => r.vat },
+  { header: "Tổng tiền", type: "money", value: (r) => r.total },
+];
+
+// The bills as listed; no total row, as the list may be cut (the totals of
+// the days come from GET /report-site/bills/summary).
+export function reportSiteBillsSheet(rows: ReportSiteBill[], name = "Quản lý bán hàng"): ExportTable {
+  return toSheet(name, reportSiteBillColumns, rows);
+}
+
+// ---- Trang báo cáo: báo cáo theo hóa đơn điện tử (spec 2026-10-02 §5)
+
+const EINVOICE_METRIC_COLUMNS: ExportColumn<EinvoiceMetrics>[] = [
+  { header: "Bill", type: "number", value: (r) => r.billCount },
+  { header: "Hóa đơn điện tử", type: "number", value: (r) => r.einvoiceCount },
+  { header: "Doanh thu (chưa VAT)", type: "money", value: (r) => r.revenue },
+  { header: "VAT", type: "money", value: (r) => r.vat },
+  { header: "Tổng tiền", type: "money", value: (r) => r.total },
+  { header: "Đã xuất", type: "money", value: (r) => r.issued },
+  { header: "Chưa xuất", type: "money", value: (r) => r.pending },
+];
+
+export function einvoiceRevenueSheet(data: EinvoiceRevenueReport, name = "Theo kỳ"): ExportTable {
+  const columns: ExportColumn<ReportBucket & EinvoiceMetrics>[] = [
+    { header: "Kỳ", value: (r) => r.label },
+    { header: "Từ ngày", value: (r) => formatDate(r.from) },
+    { header: "Đến ngày", value: (r) => formatDate(r.to) },
+    ...EINVOICE_METRIC_COLUMNS,
+  ];
+  return toSheet(name, columns, data.buckets, {
+    key: "",
+    label: "Tổng",
+    from: data.range.from,
+    to: data.range.to,
+    ...data.totals,
+  });
+}
+
+// Only for the whole chain (byBranch).
+export function einvoiceRevenueBranchesSheet(data: EinvoiceRevenueReport, name = "Theo cơ sở"): ExportTable | null {
+  if (!data.byBranch) return null;
+  const columns: ExportColumn<{ name: string } & EinvoiceMetrics>[] = [
+    { header: "Cơ sở", value: (r) => r.name },
+    ...EINVOICE_METRIC_COLUMNS,
+  ];
+  return toSheet(name, columns, data.byBranch, { name: "Tổng", ...data.totals });
+}
+
+export function einvoiceRoomsSheet(data: EinvoiceRoomReport, name = ROOM_GROUP_LABELS[data.by]): ExportTable {
+  const columns: ExportColumn<EinvoiceRoomRow>[] = [
+    { header: data.by === "room" ? "Phòng" : "Loại phòng", value: (r) => roomRowName(r, data.by) },
+    ...(data.by === "room"
+      ? [{ header: "Cơ sở", value: (r: EinvoiceRoomRow) => r.branchCode?.toUpperCase() ?? null }]
+      : [{ header: "Số phòng", type: "number" as const, value: (r: EinvoiceRoomRow) => r.rooms }]),
+    ...EINVOICE_METRIC_COLUMNS,
+  ];
+  // id null + a name: roomRowName() shows "Tổng".
+  return toSheet(name, columns, data.rows, {
+    id: null,
+    name: "Tổng",
+    type: null,
+    branchCode: null,
+    rooms: data.rows.reduce((sum, r) => sum + r.rooms, 0),
+    ...data.totals,
+  });
+}
+
+export const einvoiceProductName = (row: EinvoiceProductRow) =>
+  row.kind === "others" ? "Các mặt hàng khác" : row.kind === "unlisted" ? "Chưa có dòng hàng" : (row.name ?? "");
+
+// "Chưa có dòng hàng" can be negative (a draft whose lines exceed its amount):
+// the amounts go out as they are, with their sign.
+export function einvoiceProductsSheet(data: EinvoiceProductReport, name = "Hàng hóa"): ExportTable {
+  const columns: ExportColumn<EinvoiceProductRow>[] = [
+    { header: "Tên hàng", value: einvoiceProductName },
+    { header: "ĐVT", value: (r) => r.unit },
+    { header: "Số lượng", type: "decimal", value: (r) => r.quantity },
+    { header: "Trước VAT", type: "money", value: (r) => r.revenue },
+    { header: "VAT", type: "money", value: (r) => r.vat },
+    { header: "Tổng tiền", type: "money", value: (r) => r.total },
+  ];
+  return toSheet(name, columns, data.rows, {
+    kind: "item",
+    name: "Tổng",
+    unit: null,
+    quantity: null,
+    ...data.totals,
+  });
 }

@@ -21,3 +21,20 @@ export const CHAIN_ONLY: Role[] = [Role.CHAIN_MANAGER];
 // them and HĐQT; issuing, numbers and the Minvoice account are CHAIN_ONLY.
 export const EINVOICE_WRITERS: Role[] = SALES;
 export const EINVOICE_READERS: Role[] = SALES_READERS;
+
+// Trang báo cáo (spec 2026-10-02-trang-bao-cao-hddt §3.1): the chain manager
+// always; a branch manager or HĐQT whose account has "Vào trang báo cáo";
+// never the cashier or the floor staff. The account is reloaded on every
+// request, so a change applies at once. Copied in the frontend's
+// lib/permissions.ts.
+export const REPORT_ACCESS_ROLES: Role[] = [Role.BRANCH_MANAGER, Role.BOARD];
+
+export function canUseReportSite(user: {
+  role: Role;
+  reportAccess: boolean;
+}): boolean {
+  return (
+    user.role === Role.CHAIN_MANAGER ||
+    (user.reportAccess && REPORT_ACCESS_ROLES.includes(user.role))
+  );
+}

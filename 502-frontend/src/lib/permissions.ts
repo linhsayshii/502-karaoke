@@ -1,3 +1,4 @@
+import type { Site } from "@/lib/site";
 import type { Order, Role, User } from "@/lib/types";
 
 // UI-side copy of the backend permission matrix. It only hides what the user
@@ -99,6 +100,23 @@ export function can(user: User | null, permission: Permission): boolean {
   return MATRIX[permission].includes(user.role) || byFlag;
 }
 
+// Trang báo cáo (spec 2026-10-02-trang-bao-cao-hddt §3.1), a copy of
+// REPORT_ACCESS_ROLES and canUseReportSite in the backend's src/auth/roles.ts:
+// the chain manager always, a branch manager or HĐQT whose account has "Vào
+// trang báo cáo", never the cashier or the floor staff.
+export const REPORT_ACCESS_ROLES: Role[] = ["BRANCH_MANAGER", "BOARD"];
+
+export function canUseReportSite(user: User | null): boolean {
+  if (!user) return false;
+  return user.role === "CHAIN_MANAGER" || (user.reportAccess && REPORT_ACCESS_ROLES.includes(user.role));
+}
+
+// The report site's pages by path after /[branch] (spec §7.3).
+const REPORT_ROUTE_PERMISSIONS: [string, Permission][] = [
+  ["/sales", "einvoices.view"],
+  ["/reports", "reports"],
+];
+
 // Page permissions by path after /[branch]; first match wins.
 const ROUTE_PERMISSIONS: [string, Permission][] = [
   ["/reports/branches", "reports.chain"],
@@ -122,8 +140,9 @@ const ROUTE_PERMISSIONS: [string, Permission][] = [
   ["/admin", "users.view"],
 ];
 
-export function canVisit(user: User | null, subPath: string): boolean {
-  const rule = ROUTE_PERMISSIONS.find(([prefix]) => subPath.startsWith(prefix));
+export function canVisit(user: User | null, subPath: string, site: Site = "main"): boolean {
+  const rules = site === "report" ? REPORT_ROUTE_PERMISSIONS : ROUTE_PERMISSIONS;
+  const rule = rules.find(([prefix]) => subPath.startsWith(prefix));
   return rule ? can(user, rule[1]) : !!user;
 }
 

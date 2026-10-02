@@ -32,7 +32,7 @@ export function EinvoiceLines({
   onChange,
 }: {
   lines: EinvoiceLine[];
-  // Null for a free invoice: nothing to take from.
+  // Null for a bill thêm tay: nothing to take from.
   bill: EinvoiceBillDetail["order"] | null;
   missing: number;
   disabled: boolean;

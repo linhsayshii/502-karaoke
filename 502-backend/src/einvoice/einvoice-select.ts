@@ -2,11 +2,13 @@ import { Prisma } from '@prisma/client';
 import { fromDbDate } from '../common/dates';
 import { staffRef } from '../orders/order-include';
 
-// Only what the list shows: it returns up to 500 invoices.
+// The fields every invoice row carries; einvoiceDetailSelect (the bill
+// panel's) adds the draft to them.
 export const einvoiceListSelect = {
   id: true,
   branchId: true,
   orderId: true,
+  manualBillId: true,
   status: true,
   amount: true,
   vatAmount: true,

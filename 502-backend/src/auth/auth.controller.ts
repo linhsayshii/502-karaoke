@@ -52,6 +52,7 @@ export class AuthController {
     const result = await this.authService.login(
       loginDto.username,
       loginDto.password,
+      loginDto.site,
     );
 
     setRefreshCookie(response, result.refresh_token);

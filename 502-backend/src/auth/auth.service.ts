@@ -2,6 +2,7 @@ import {
   Injectable,
   UnauthorizedException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
@@ -14,6 +15,7 @@ import {
 } from '../config/env';
 import { AuthUser } from './auth-user';
 import { LoginThrottle } from './login-throttle';
+import { canUseReportSite } from './roles';
 
 // Compared against when the username does not exist, so a wrong username takes
 // as long as a wrong password and does not reveal which accounts exist.
@@ -73,7 +75,7 @@ export class AuthService {
     };
   }
 
-  async login(username: string, pass: string) {
+  async login(username: string, pass: string, site?: 'report') {
     this.loginThrottle.assertAllowed(username);
 
     const account = await this.usersService.findOne(username);
@@ -93,6 +95,14 @@ export class AuthService {
     const user = await this.usersService.findAuthUser(account.id);
     if (!user) {
       throw new UnauthorizedException('Tài khoản đã bị khóa');
+    }
+
+    // Only an early answer for the login form: every route of the report site
+    // checks canUseReportSite itself (spec 2026-10-02 §3.2).
+    if (site === 'report' && !canUseReportSite(user)) {
+      throw new ForbiddenException(
+        'Tài khoản này không được vào trang báo cáo',
+      );
     }
 
     return { ...this.startSession(user, account.password), user };

@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
+import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
@@ -122,26 +122,27 @@ export class EinvoiceDraftDto {
 export class CreateEinvoiceDto extends EinvoiceDraftDto {
   @ApiProperty({
     required: false,
-    description: 'Bill đã thanh toán; bỏ trống là hóa đơn không theo bill',
+    description: 'Bill đã thanh toán; có đúng một trong orderId, manualBillId',
   })
   @IsOptional()
   @IsInt()
-  orderId?: number | null;
+  orderId?: number;
+
+  @ApiProperty({
+    required: false,
+    description: 'Bill thêm tay của trang báo cáo',
+  })
+  @IsOptional()
+  @IsInt()
+  manualBillId?: number;
 }
 
-export class EinvoiceListQuery {
+// The tab counts and the issued sums of the chosen business days.
+export class EinvoiceSummaryQuery {
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()
   branch?: string;
-
-  @ApiProperty({
-    required: false,
-    enum: ['DRAFT', 'ERROR', 'UNCERTAIN', 'ISSUED'],
-  })
-  @IsOptional()
-  @IsIn(['DRAFT', 'ERROR', 'UNCERTAIN', 'ISSUED'])
-  status?: 'DRAFT' | 'ERROR' | 'UNCERTAIN' | 'ISSUED';
 
   @ApiProperty({ required: false, description: 'Từ ngày kinh doanh của bill' })
   @IsOptional()
@@ -152,23 +153,6 @@ export class EinvoiceListQuery {
   @IsOptional()
   @Matches(DATE_RE, { message: DATE_MESSAGE })
   to?: string;
-
-  @ApiProperty({
-    required: false,
-    description: 'Tìm theo đầu số bill, mọi ngày',
-  })
-  @IsOptional()
-  @Matches(BILL_NUMBER_RE, { message: 'Số bill chỉ gồm chữ số' })
-  billNumber?: string;
-
-  @ApiProperty({
-    required: false,
-    description: 'Chỉ hóa đơn không theo bill (1 / true)',
-  })
-  @IsOptional()
-  @Transform(({ value }) => value === true || value === 'true' || value === '1')
-  @IsBoolean()
-  free?: boolean;
 }
 
 export class EinvoiceBillsQuery {

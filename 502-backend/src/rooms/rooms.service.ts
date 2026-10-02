@@ -129,8 +129,12 @@ export class RoomsService {
 
   async remove(user: AuthUser, id: number) {
     await this.getRoom(user, id);
-    const orderCount = await this.prisma.order.count({ where: { roomId: id } });
-    if (orderCount > 0) {
+    const [orderCount, manualBillCount] = await Promise.all([
+      this.prisma.order.count({ where: { roomId: id } }),
+      // A bill thêm tay of the report site carries the room in its number.
+      this.prisma.manualBill.count({ where: { roomId: id } }),
+    ]);
+    if (orderCount + manualBillCount > 0) {
       throw new ConflictException(
         'Phòng đã có lịch sử hóa đơn, không thể xóa. Hãy chuyển sang trạng thái bảo trì.',
       );

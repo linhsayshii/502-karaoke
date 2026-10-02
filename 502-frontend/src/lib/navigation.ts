@@ -28,6 +28,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { can, type Permission } from "@/lib/permissions";
+import type { Site } from "@/lib/site";
 import type { User } from "@/lib/types";
 
 // The app's navigation: sidebar groups, breadcrumb and page titles all come
@@ -116,6 +117,27 @@ export const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
+// The report site's menu (spec 2026-10-02-trang-bao-cao-hddt §7.3).
+export const REPORT_NAV_GROUPS: NavGroup[] = [
+  {
+    label: "Bán hàng",
+    items: [
+      { title: "Quản lý bán hàng", path: "/sales/bills", icon: ReceiptText, permission: "einvoices.view" },
+      { title: "Hóa đơn điện tử", path: "/sales/einvoices", icon: FileCheck2, permission: "einvoices.view" },
+    ],
+  },
+  {
+    label: "Báo cáo",
+    items: [
+      { title: "Doanh thu", path: "/reports/revenue", icon: ChartColumnBig, permission: "reports" },
+      { title: "Phòng", path: "/reports/rooms", icon: DoorOpen, permission: "reports" },
+      { title: "Hàng hóa", path: "/reports/products", icon: Package, permission: "reports" },
+    ],
+  },
+];
+
+const groupsOf = (site: Site) => (site === "report" ? REPORT_NAV_GROUPS : NAV_GROUPS);
+
 // Staff only see the rooms they serve.
 function titleFor(item: NavItem, user: User | null) {
   return item.path === "/sales/rooms" && user?.role === "STAFF" ? "Phòng đang phục vụ" : item.title;
@@ -123,21 +145,23 @@ function titleFor(item: NavItem, user: User | null) {
 
 // Groups and items the account may use (empty groups dropped), titled as
 // the sidebar shows them.
-export function visibleNav(user: User | null): NavGroup[] {
-  return NAV_GROUPS.map((group) => ({
-    ...group,
-    items: group.items
-      .filter((item) => !item.permission || can(user, item.permission))
-      .map((item) => ({ ...item, title: item.sidebarTitle ?? titleFor(item, user) })),
-  })).filter((group) => group.items.length > 0);
+export function visibleNav(user: User | null, site: Site = "main"): NavGroup[] {
+  return groupsOf(site)
+    .map((group) => ({
+      ...group,
+      items: group.items
+        .filter((item) => !item.permission || can(user, item.permission))
+        .map((item) => ({ ...item, title: item.sidebarTitle ?? titleFor(item, user) })),
+    }))
+    .filter((group) => group.items.length > 0);
 }
 
 // The nav entry a sub-path belongs to: the longest matching path wins, so
 // /sales/statistics/bills is "Hóa đơn" and /sales/rooms/12 is "Sơ đồ phòng".
 // Pages the account may not open are found too, so the header still names them.
-export function findNav(subPath: string, user: User | null) {
+export function findNav(subPath: string, user: User | null, site: Site = "main") {
   let best: { group: NavGroup; item: NavItem } | undefined;
-  for (const group of NAV_GROUPS) {
+  for (const group of groupsOf(site)) {
     for (const item of group.items) {
       const matches = subPath === item.path || subPath.startsWith(`${item.path}/`);
       if (matches && (!best || item.path.length > best.item.path.length)) {

@@ -1,7 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { AuthUser } from '../auth/auth-user';
-import { businessDateOf, toDateString, toDbDate } from '../common/dates';
+import { toDateString, toDbDate } from '../common/dates';
 import type { IssueConfig } from './einvoice-config.service';
 import type { SendOutcome } from './einvoice-sender';
 import { EinvoicesService, RESEND_WAIT_MS } from './einvoices.service';
@@ -293,7 +293,7 @@ describe('EinvoicesService.issue of an uncertain invoice', () => {
         symbolCode: sentSymbol,
         registerInvoiceId: 'range-0',
         invoiceDate: toDbDate(sentDate),
-        draft: Prisma.DbNull,
+        draft: { lines: [line] },
         lastError: null,
         sendingAt: null,
       }),
@@ -705,27 +705,6 @@ describe('EinvoicesService.editNumber', () => {
 describe('EinvoicesService pending "Không rõ" work', () => {
   const pending = { in: ['SENDING', 'UNCERTAIN'] };
 
-  it('lists invoices being sent with the uncertain ones', async () => {
-    const einvoice = {
-      findMany: jest.fn().mockResolvedValue([]),
-      count: jest.fn().mockResolvedValue(0),
-    };
-    const service = new EinvoicesService(
-      { einvoice } as never,
-      {} as never,
-      { resolveBranchId: jest.fn().mockResolvedValue(1) } as never,
-      {} as never,
-      {} as never,
-    );
-    await service.list(user, { status: 'UNCERTAIN' });
-    expect(einvoice.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { branchId: 1, status: pending },
-        take: 500,
-      }),
-    );
-  });
-
   it('counts them together', async () => {
     const count = jest.fn().mockResolvedValue(0);
     const service = new EinvoicesService(
@@ -745,12 +724,36 @@ describe('EinvoicesService pending "Không rõ" work', () => {
     );
     await service.summary(user, {});
     expect(count).toHaveBeenCalledWith({
+      where: { branchId: 1, orderId: { not: null }, status: pending },
+    });
+  });
+
+  it('counts every invoice of the branch for the report site', async () => {
+    const count = jest.fn().mockResolvedValue(0);
+    const service = new EinvoicesService(
+      {} as never,
+      {
+        einvoice: {
+          count,
+          aggregate: jest.fn().mockResolvedValue({
+            _count: { _all: 0 },
+            _sum: { amount: null, vatAmount: null },
+          }),
+        },
+      } as never,
+      { resolveBranchId: jest.fn().mockResolvedValue(1) } as never,
+      {} as never,
+      {} as never,
+    );
+    await service.summary(user, {}, 'report');
+    expect(count).toHaveBeenCalledWith({
       where: { branchId: 1, status: pending },
     });
   });
 });
 
-// A service whose prisma creates and updates drafts (create, update).
+// A service whose prisma creates and updates drafts (create, update). A bill
+// thêm tay is read under its lock in a transaction (`tx`).
 const creating = () => {
   const einvoice = {
     create: jest.fn().mockResolvedValue({ id: 40 }),
@@ -763,75 +766,133 @@ const creating = () => {
     }),
   };
   const order = { findUnique: jest.fn() };
+  const tx = {
+    $queryRaw: jest.fn().mockResolvedValue([
+      {
+        branchId: 3,
+        businessDate: toDbDate('2026-09-01'),
+        cancelledAt: null,
+      },
+    ]),
+    einvoice,
+  };
+  const prisma = {
+    einvoice,
+    order,
+    $transaction: jest.fn((run: (client: typeof tx) => unknown) => run(tx)),
+  };
   const scope = {
     resolveBranchId: jest.fn().mockResolvedValue(3),
     assertBranchAccess: jest.fn(),
   };
   const service = new EinvoicesService(
-    { einvoice, order } as never,
+    prisma as never,
     {} as never,
     scope as never,
     {} as never,
     {} as never,
   );
-  return { service, einvoice, order, scope };
+  return { service, einvoice, order, scope, tx };
 };
 // The `data` of the n-th call of a prisma create/update mock.
 const dataOf = (mock: jest.Mock, call = 0) =>
   (mock.mock.calls[call] as [{ data: Record<string, unknown> }])[0].data;
 
-describe('EinvoicesService free invoices', () => {
+describe('EinvoicesService invoices of a bill thêm tay', () => {
   afterEach(() => jest.restoreAllMocks());
+  const cashier = { id: 8, role: 'CASHIER', reportAccess: false } as AuthUser;
 
-  it("are created in the branch of the page, on today's business day", async () => {
-    const { service, einvoice, order, scope } = creating();
-    await service.create(user, { amount: 0, lines: [] }, 'cs3');
-    expect(scope.resolveBranchId).toHaveBeenCalledWith(user, 'cs3');
-    expect(order.findUnique).not.toHaveBeenCalled();
+  it('need exactly one bill', async () => {
+    const { service } = creating();
+    await expect(
+      service.create(user, { amount: 0, lines: [] }),
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      service.create(user, {
+        orderId: 5,
+        manualBillId: 9,
+        amount: 0,
+        lines: [],
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('are made under the lock of their bill, on its branch and day', async () => {
+    const { service, einvoice, tx } = creating();
+    await service.create(user, { manualBillId: 9, amount: 110000, lines: [] });
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
     expect(dataOf(einvoice.create)).toMatchObject({
       branchId: 3,
-      orderId: null,
-      businessDate: toDbDate(businessDateOf(new Date())),
-      amount: 0,
+      manualBillId: 9,
+      businessDate: toDbDate('2026-09-01'),
+      invoiceDate: toDbDate('2026-09-01'),
+      amount: 110000,
+      vatAmount: 10000,
+    });
+    expect(dataOf(einvoice.create)).not.toHaveProperty('orderId');
+  });
+
+  it('are refused on a cancelled bill', async () => {
+    const { service, tx, einvoice } = creating();
+    tx.$queryRaw.mockResolvedValueOnce([
+      {
+        branchId: 3,
+        businessDate: toDbDate('2026-09-01'),
+        cancelledAt: new Date(),
+      },
+    ]);
+    await expect(
+      service.create(user, { manualBillId: 9, amount: 1, lines: [] }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(einvoice.create).not.toHaveBeenCalled();
+  });
+
+  it('are out of reach of whoever may not use the report site', async () => {
+    const { service, tx, einvoice } = creating();
+    await expect(
+      service.create(cashier, { manualBillId: 9, amount: 1, lines: [] }),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
+    einvoice.findUnique.mockResolvedValueOnce({
+      id: 41,
+      branchId: 1,
+      manualBillId: 9,
+      status: 'DRAFT',
+      invoiceDate: null,
+    });
+    await expect(service.findOne(cashier, 41)).rejects.toMatchObject({
+      status: 403,
     });
   });
 
-  it('are also made by an orderId that is null', async () => {
-    const { service, einvoice, order } = creating();
-    await service.create(
-      user,
-      { orderId: null, amount: 0, lines: [] } as never,
-      'cs3',
-    );
-    expect(order.findUnique).not.toHaveBeenCalled();
-    expect(dataOf(einvoice.create)).toMatchObject({ orderId: null });
+  // The routes only the chain manager reaches (issue, resolve, number) cannot
+  // show this over HTTP, so the service is called with a cashier directly.
+  it('are refused on every route that takes an invoice by id', async () => {
+    const { service, einvoice } = setup(issued);
+    einvoice.findUnique.mockResolvedValue({ ...draftRow(), manualBillId: 9 });
+    const calls = [
+      () => service.update(cashier, 12, { amount: 0, lines: [] }),
+      () => service.remove(cashier, 12),
+      () => service.issue(cashier, 12, dto),
+      () => service.resolve(cashier, 12, { found: false }),
+      () => service.editNumber(cashier, 12, { invoiceNumber: 1 }),
+    ];
+    for (const call of calls) {
+      await expect(call()).rejects.toMatchObject({ status: 403 });
+    }
+    expect(einvoice.updateMany).not.toHaveBeenCalled();
+    expect(einvoice.update).not.toHaveBeenCalled();
   });
 
-  it('are issued without a bill to check', async () => {
+  it('are issued without an order to check', async () => {
     const { service, einvoice, sender } = setup(issued);
-    einvoice.findUnique.mockResolvedValueOnce({ ...draftRow(), order: null });
+    einvoice.findUnique.mockResolvedValueOnce({
+      ...draftRow(),
+      order: null,
+      manualBillId: 9,
+    });
     await service.issue(user, 12, dto);
     expect(sender.send).toHaveBeenCalledTimes(1);
-  });
-
-  it('are listed apart', async () => {
-    const einvoice = {
-      findMany: jest.fn().mockResolvedValue([]),
-      count: jest.fn().mockResolvedValue(0),
-    };
-    const service = new EinvoicesService(
-      { einvoice } as never,
-      {} as never,
-      { resolveBranchId: jest.fn().mockResolvedValue(1) } as never,
-      {} as never,
-      {} as never,
-    );
-    await service.list(user, { free: true, status: 'DRAFT' });
-    expect(einvoice.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { branchId: 1, status: 'DRAFT', lastError: null, orderId: null },
-      }),
-    );
   });
 });
 
@@ -854,16 +915,17 @@ describe('EinvoicesService invoice dates', () => {
     });
   });
 
-  it('dates a free invoice today, or as asked', async () => {
+  it('dates a draft of a bill thêm tay by the day of the bill, or as asked', async () => {
     const { service, einvoice } = creating();
-    await service.create(user, { amount: 0, lines: [] }, 'cs1');
-    await service.create(
-      user,
-      { amount: 0, lines: [], invoiceDate: '2026-12-31' },
-      'cs1',
-    );
+    await service.create(user, { manualBillId: 9, amount: 0, lines: [] });
+    await service.create(user, {
+      manualBillId: 9,
+      amount: 0,
+      lines: [],
+      invoiceDate: '2026-12-31',
+    });
     expect(dataOf(einvoice.create, 0).invoiceDate).toEqual(
-      toDbDate(toDateString(new Date())),
+      toDbDate('2026-09-01'),
     );
     expect(dataOf(einvoice.create, 1).invoiceDate).toEqual(
       toDbDate('2026-12-31'),

@@ -34,11 +34,11 @@ export function EinvoiceRow({
   onDeleted,
   onSavingChange,
 }: {
-  // A row of the open bill (with its draft) or of the free list (without).
+  // A row of the open bill, with its draft.
   einvoice: EinvoiceListRow | EinvoiceDetail;
   label: string;
   selected: boolean;
-  // Its bill stands, or it has none: the amount of a draft may change.
+  // Its bill stands: the amount of a draft may change.
   editable: boolean;
   // Just created: the cursor goes to its amount.
   autoFocus?: boolean;
@@ -84,11 +84,10 @@ export function EinvoiceRow({
   );
 
   // PATCH replaces the whole draft: the buyer, lines and date go with the new
-  // amount. Every row reads the invoice first, bill or free alike: the row's
-  // own data may be older than a Lưu nháp in the panel whose reload is still
-  // on its way, and the old buyer and lines would overwrite that save. The
-  // date goes along only when the invoice has one, so an old draft without a
-  // date keeps none.
+  // amount. Every row reads the invoice first: the row's own data may be
+  // older than a Lưu nháp in the panel whose reload is still on its way, and
+  // the old buyer and lines would overwrite that save. The date goes along
+  // only when the invoice has one, so an old draft without a date keeps none.
   const saveAmount = async () => {
     if (typed === null) {
       setTyped(savedAmount);

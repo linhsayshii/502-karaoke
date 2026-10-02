@@ -48,9 +48,9 @@ export function EinvoiceIssuePanel({
   onWorkingChange,
 }: {
   einvoice: EinvoiceDetail;
-  // Its bill; null for a free invoice.
+  // Its paid bill; null for a bill thêm tay.
   bill: EinvoiceBillDetail["order"] | null;
-  // "HĐ 2" within its bill, or "HĐ tự do #12".
+  // "HĐ 2" within its bill; a bill thêm tay's carries the bill and room too.
   label: string;
   previous: BuyerValue | null;
   config: EinvoiceConfigView | null;

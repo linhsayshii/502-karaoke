@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 const DELETED_LABELS: [string, string][] = [
   ["orders", "hóa đơn"],
   ["einvoices", "hóa đơn điện tử"],
+  ["manualBills", "bill thêm tay"],
   ["stockDocuments", "phiếu kho"],
   ["fundTransactions", "phiếu thu/chi"],
   ["products", "mặt hàng"],

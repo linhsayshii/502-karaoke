@@ -107,7 +107,7 @@ export function invoiceDateProblem(
 }
 
 // The date shown for a draft saved before drafts kept one: the calendar day
-// its bill was paid (never the business day), or today without a bill.
+// its bill was paid (never the business day), or today for a bill thêm tay.
 export function defaultInvoiceDate(billEndTime: string | null | undefined): string {
   return toDateInput(billEndTime ? new Date(billEndTime) : new Date());
 }

@@ -22,6 +22,9 @@ export interface User {
   position: StaffPosition | null;
   // Quản lý PR/KTV: edits the PR/KTV list and takes their roll call.
   managesPr: boolean;
+  // Vào trang báo cáo: a branch manager or HĐQT may use the report site (the
+  // chain manager always can); see canUseReportSite in lib/permissions.ts.
+  reportAccess: boolean;
   branchId: number | null;
   branch: BranchRef | null;
 }
@@ -630,11 +633,13 @@ export interface EinvoiceDraft {
   lines: EinvoiceLine[];
 }
 
-// GET /einvoices (newest 500).
+// An e-invoice as the lists and the panel show it.
 export interface EinvoiceRow {
   id: number;
   branchId: number;
-  orderId: number | null; // null: a free invoice, made without a bill
+  // Its bill: a paid bill, or a bill thêm tay of the report site (exactly one).
+  orderId: number | null;
+  manualBillId: number | null;
   status: EinvoiceStatus;
   amount: string;
   vatAmount: string;
@@ -659,7 +664,7 @@ export interface EinvoiceRow {
   } | null;
 }
 
-// One invoice with its draft (null once issued).
+// One invoice with its draft; once issued only its lines are kept (none for the ones issued before 02/10/2026).
 export interface EinvoiceDetail extends EinvoiceRow {
   draft: EinvoiceDraft | null;
   sellerTaxCode: string | null;
@@ -748,4 +753,109 @@ export interface TaxPayer {
   status: string;
   active: boolean;
   source: "gdt" | "xinvoice";
+}
+
+// Trang báo cáo (spec 2026-10-02-trang-bao-cao-hddt): sums of the e-invoices
+// counted (every one still there, but those not issued of a voided bill).
+export interface EinvoiceMetrics {
+  billCount: number;
+  einvoiceCount: number;
+  total: number; // VAT included
+  vat: number;
+  issued: number; // of the total, issued on Minvoice
+  revenue: number; // total − VAT
+  pending: number; // total − issued
+}
+
+// GET /report-site/bills: the paid bills holding an e-invoice, and the bills thêm tay.
+export interface ReportSiteBill {
+  orderId: number | null;
+  manualBillId: number | null;
+  billNumber: string | null;
+  businessDate: string | null;
+  roomName: string | null;
+  time: string | null; // paid at; added at for a bill thêm tay
+  cancelledAt: string | null;
+  finalAmount: number | null; // null for a bill thêm tay
+  allocated: number; // every invoice of the bill
+  total: number; // the invoices counted
+  vat: number;
+  einvoiceCount: number;
+  issuedCount: number;
+}
+
+// GET /report-site/bills/summary: the tab counts and the sums of the days.
+export interface ReportSiteSummary extends EinvoiceSummary, EinvoiceMetrics {}
+
+// GET /report-site/manual-bills/:id.
+export interface ManualBillDetail {
+  bill: {
+    id: number;
+    branchId: number;
+    billNumber: string;
+    businessDate: string;
+    cancelledAt: string | null;
+    cancelReason: string | null;
+    createdAt: string;
+    room: { name: string } | null;
+    createdBy: StaffRef | null;
+  };
+  einvoices: EinvoiceDetail[];
+  allocated: number;
+}
+
+// POST /report-site/manual-bills.
+export interface CreatedManualBill {
+  id: number;
+  billNumber: string;
+  businessDate: string;
+  einvoiceId: number;
+}
+
+// GET /report-site/reports/revenue.
+export interface EinvoiceRevenueReport {
+  branchId: number | null; // null: whole chain
+  range: { from: string; to: string };
+  groupBy: GroupBy;
+  totals: EinvoiceMetrics;
+  previous: { from: string; to: string; totals: EinvoiceMetrics } | null;
+  buckets: (ReportBucket & EinvoiceMetrics)[];
+  byBranch: ({ branchId: number; code: string; name: string } & EinvoiceMetrics)[] | null;
+}
+
+// GET /report-site/reports/rooms; id: room id, or the room type (by=type); null: "Không phòng".
+export interface EinvoiceRoomRow extends EinvoiceMetrics {
+  id: number | string | null;
+  name: string | null;
+  type: string | null;
+  branchCode: string | null;
+  rooms: number;
+}
+
+export interface EinvoiceRoomReport {
+  branchId: number | null;
+  range: { from: string; to: string };
+  by: RoomGroup;
+  totals: EinvoiceMetrics;
+  rows: EinvoiceRoomRow[];
+}
+
+// GET /report-site/reports/products: lines grouped by name and unit; "others"
+// past the first 1000, "unlisted" (Chưa có dòng hàng) what the invoices hold
+// beyond their lines. The rows add up to the totals.
+export interface EinvoiceProductRow {
+  kind: "item" | "others" | "unlisted";
+  name: string | null;
+  unit: string | null;
+  quantity: number | null;
+  revenue: number;
+  vat: number;
+  total: number;
+}
+
+export interface EinvoiceProductReport {
+  branchId: number | null;
+  range: { from: string; to: string };
+  totals: { revenue: number; vat: number; total: number };
+  rows: EinvoiceProductRow[];
 }

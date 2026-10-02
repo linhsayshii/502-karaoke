@@ -62,7 +62,9 @@ describe('PR/KTV (e2e)', () => {
     app = configureApp(
       moduleRef.createNestApplication<NestExpressApplication>(),
     );
-    await app.init();
+    // On 127.0.0.1, where supertest calls: its own listen(0) binds [::] and
+    // can get a port another program holds on 127.0.0.1, which then answers.
+    await app.listen(0, '127.0.0.1');
     for (const name of [
       'admin',
       'ql1_cs1',
@@ -233,6 +235,12 @@ describe('PR/KTV (e2e)', () => {
     let staffUserId: number;
     const minutesAgo = (m: number) =>
       new Date(Date.now() - m * 60_000).toISOString();
+    // No visit starts before its room opened, so the business days from the
+    // opening to now hold them all: soon after 06:00 the visits of the last
+    // hours started on the previous day, outside `today`.
+    const openedAt = new Date(Date.now() - 2 * 3600_000);
+    const visitDays = () =>
+      `from=${businessDateOf(openedAt)}&to=${businessDateOf(new Date())}`;
     const sessionsOf = (order: Json) => order.prSessions as Json[];
     const idOf = (res: { body: unknown }) => (res.body as Json).id as number;
 
@@ -260,7 +268,7 @@ describe('PR/KTV (e2e)', () => {
       const prisma = app.get(PrismaService);
       await prisma.order.updateMany({
         where: { id: { in: [orderA, orderB] } },
-        data: { startTime: new Date(Date.now() - 2 * 3600_000) },
+        data: { startTime: openedAt },
       });
       const users = (await manager.get('/users').expect(200)).body as Json[];
       staffUserId = users.find((u) => u.username === 'pv1_cs1')!.id as number;
@@ -503,9 +511,7 @@ describe('PR/KTV (e2e)', () => {
         })
         .expect(201);
       const stats = (
-        await as('ql1_cs1')
-          .get(`/pr/stats?from=${today}&to=${today}`)
-          .expect(200)
+        await as('ql1_cs1').get(`/pr/stats?${visitDays()}`).expect(200)
       ).body as { rows: { prStaffId: number; minutes: number }[] };
       const yen = stats.rows.find((r) => r.prStaffId === yenId)!;
       expect(yen.minutes).toBeGreaterThanOrEqual(45);
@@ -514,7 +520,7 @@ describe('PR/KTV (e2e)', () => {
 
     it('sums the hours of each PR over a range', async () => {
       const res = await as('ql1_cs1')
-        .get(`/pr/stats?from=${today}&to=${today}`)
+        .get(`/pr/stats?${visitDays()}`)
         .expect(200);
       const stats = res.body as {
         totals: { minutes: number; sessions: number; rooms: number };

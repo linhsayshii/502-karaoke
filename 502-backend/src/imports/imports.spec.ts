@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, Logger } from '@nestjs/common';
 import { Prisma, Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth-user';
 import { BranchScopeService } from '../common/branch-scope.service';
@@ -69,6 +69,7 @@ describe('ImportsService', () => {
     role: Role.BRANCH_MANAGER,
     position: null,
     managesPr: false,
+    reportAccess: false,
     branchId: 1,
     branch: cs1,
   };
@@ -349,6 +350,77 @@ describe('ImportsService', () => {
           'Tên đăng nhập "sai tên" chỉ gồm 3–32 chữ thường không dấu, số, dấu chấm, gạch dưới',
         ],
       ]);
+    });
+
+    it('turns "Vào trang báo cáo" off when an account moves to a role without it', async () => {
+      const chainManager: AuthUser = {
+        ...manager,
+        id: 1,
+        role: Role.CHAIN_MANAGER,
+        branchId: null,
+        branch: null,
+      };
+      const account = (
+        id: number,
+        username: string,
+        reportAccess: boolean,
+      ) => ({
+        id,
+        username,
+        fullName: username,
+        phone: null,
+        role: Role.BRANCH_MANAGER,
+        position: null,
+        reportAccess,
+        branchId: 1,
+        active: true,
+      });
+      db.user.findMany.mockResolvedValue([
+        account(20, 'ql_co_quyen', true),
+        account(21, 'ql_khong_quyen', false),
+      ]);
+      const log = jest.spyOn(Logger.prototype, 'log').mockImplementation();
+      const dto = {
+        onDuplicate: OnDuplicate.UPDATE,
+        rows: [
+          {
+            row: 2,
+            fullName: 'ql_co_quyen',
+            username: 'ql_co_quyen',
+            role: Role.CASHIER,
+          },
+          {
+            row: 3,
+            fullName: 'ql_khong_quyen',
+            username: 'ql_khong_quyen',
+            role: Role.STAFF,
+          },
+        ],
+      };
+
+      // The check only tells; nothing is written or logged.
+      const dry = await service.importUsers(chainManager, 'cs1', {
+        ...dto,
+        dryRun: true,
+      });
+      expect(dry.rows.map((r) => r.message)).toEqual([
+        'ql_co_quyen: đổi vai trò; tắt quyền vào trang báo cáo',
+        'ql_khong_quyen: đổi vai trò',
+      ]);
+      expect(log).not.toHaveBeenCalled();
+
+      await service.importUsers(chainManager, 'cs1', { ...dto, dryRun: false });
+      expect(tx.user.update).toHaveBeenCalledWith({
+        where: { id: 20 },
+        data: { role: Role.CASHIER, reportAccess: false },
+      });
+      expect(tx.user.update).toHaveBeenCalledWith({
+        where: { id: 21 },
+        data: { role: Role.STAFF },
+      });
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(log).toHaveBeenCalledWith('User 20: report access off by user 1');
+      log.mockRestore();
     });
   });
 });

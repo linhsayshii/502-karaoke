@@ -20,13 +20,12 @@ import type { AuthUser } from '../auth/auth-user';
 import { CHAIN_ONLY, EINVOICE_READERS, EINVOICE_WRITERS } from '../auth/roles';
 import { SharedRequestInterceptor } from '../common/shared-request.interceptor';
 import { withTotalCount } from '../common/total-count';
-import { EinvoiceBranchQuery } from './dto/config.dto';
 import {
   CreateEinvoiceDto,
   EinvoiceBillsQuery,
   EinvoiceDraftDto,
-  EinvoiceListQuery,
   EinvoiceNumberDto,
+  EinvoiceSummaryQuery,
   IssueEinvoiceDto,
   ResolveEinvoiceDto,
 } from './dto/einvoice.dto';
@@ -41,20 +40,10 @@ export class EinvoicesController {
   // `summary`, `bills` and `bill/:orderId` are declared before `:id`: Nest
   // matches in declaration order.
 
-  @Get()
-  @Roles(...EINVOICE_READERS)
-  list(
-    @CurrentUser() user: AuthUser,
-    @Query() query: EinvoiceListQuery,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    return withTotalCount(res, this.einvoices.list(user, query));
-  }
-
   @Get('summary')
   @Roles(...EINVOICE_READERS)
   @UseInterceptors(SharedRequestInterceptor)
-  summary(@CurrentUser() user: AuthUser, @Query() query: EinvoiceListQuery) {
+  summary(@CurrentUser() user: AuthUser, @Query() query: EinvoiceSummaryQuery) {
     return this.einvoices.summary(user, query);
   }
 
@@ -88,12 +77,8 @@ export class EinvoicesController {
 
   @Post()
   @Roles(...EINVOICE_WRITERS)
-  create(
-    @CurrentUser() user: AuthUser,
-    @Query() query: EinvoiceBranchQuery,
-    @Body() dto: CreateEinvoiceDto,
-  ) {
-    return this.einvoices.create(user, dto, query.branch);
+  create(@CurrentUser() user: AuthUser, @Body() dto: CreateEinvoiceDto) {
+    return this.einvoices.create(user, dto);
   }
 
   @Patch(':id')

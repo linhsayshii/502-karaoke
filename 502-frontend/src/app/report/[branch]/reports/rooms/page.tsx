@@ -80,7 +80,7 @@ function RoomsView() {
 
       {!data || !t ? (
         <>
-          <div className="grid gap-4 @xl/main:grid-cols-3">
+          <div className="grid gap-4 @xl/main:grid-cols-2 @5xl/main:grid-cols-3">
             {Array.from({ length: 3 }, (_, i) => (
               <Skeleton key={i} className="h-32 rounded-xl" />
             ))}
@@ -89,7 +89,7 @@ function RoomsView() {
         </>
       ) : (
         <div className={cn("flex flex-col gap-4 transition-opacity md:gap-6", loading && "opacity-60")}>
-          <div className="grid gap-4 @xl/main:grid-cols-3">
+          <div className="grid gap-4 @xl/main:grid-cols-2 @5xl/main:grid-cols-3">
             <StatTile label="Doanh thu (chưa VAT)" value={formatMoney(t.revenue)} footer={`VAT ${formatMoney(t.vat)}`} />
             <StatTile label="Tổng tiền" value={formatMoney(t.total)} footer={`Đã xuất ${formatMoney(t.issued)}`} />
             <StatTile

@@ -102,6 +102,7 @@ export function EinvoiceBillList({
   onSaved,
   onDeleted,
   onSavingChange,
+  onBillChanged,
 }: {
   site: Site;
   // The day listed first (a link from Quản lý bán hàng); today's business day otherwise.
@@ -128,6 +129,8 @@ export function EinvoiceBillList({
   onSaved: (row: EinvoiceDetail) => void;
   onDeleted: (bill: BillRef, einvoiceId: number) => void;
   onSavingChange: (einvoiceId: number, saving: boolean) => void;
+  // A bill thêm tay was cancelled: the lists and the open bill reload.
+  onBillChanged: () => void;
 }) {
   const { user } = useAuth();
   const branch = useBranchCode();
@@ -257,6 +260,8 @@ export function EinvoiceBillList({
                 onSaved={onSaved}
                 onDeleted={(einvoiceId) => onDeleted(bill.ref, einvoiceId)}
                 onSavingChange={onSavingChange}
+                numbered={report}
+                onBillChanged={onBillChanged}
               />
             );
           })}
@@ -285,6 +290,8 @@ function BillItem({
   onSaved,
   onDeleted,
   onSavingChange,
+  numbered,
+  onBillChanged,
 }: {
   bill: ListedBill;
   open: boolean;
@@ -305,6 +312,9 @@ function BillItem({
   onSaved: (row: EinvoiceDetail) => void;
   onDeleted: (einvoiceId: number) => void;
   onSavingChange: (einvoiceId: number, saving: boolean) => void;
+  // The report site names each invoice by its own number.
+  numbered: boolean;
+  onBillChanged: () => void;
 }) {
   const manual = bill.ref.kind === "manual";
   const total = bill.finalAmount;
@@ -321,7 +331,7 @@ function BillItem({
     : total === null
       ? `${count} HĐ`
       : `Đã chia ${formatMoney(allocated)} · ${count} HĐ`;
-  const rows = { selectedId, focusId, dirtyId, lockedId, onSelect, onSaved, onDeleted, onSavingChange };
+  const rows = { selectedId, focusId, dirtyId, lockedId, numbered, onSelect, onSaved, onDeleted, onSavingChange };
   return (
     <li className="rounded-xl border">
       <div className="flex items-center gap-2 py-1 pr-2 pl-1">
@@ -371,7 +381,7 @@ function BillItem({
           "order" in detail ? (
             <BillSplit detail={detail} {...rows} />
           ) : (
-            <ManualBillSplit detail={detail} {...rows} />
+            <ManualBillSplit detail={detail} canWrite={canWrite} onCancelled={onBillChanged} {...rows} />
           )
         ) : (
           <div className="border-t p-3">

@@ -633,11 +633,13 @@ export interface EinvoiceDraft {
   lines: EinvoiceLine[];
 }
 
-// GET /einvoices (newest 500).
+// An e-invoice as the lists and the panel show it.
 export interface EinvoiceRow {
   id: number;
   branchId: number;
-  orderId: number | null; // null: a free invoice, made without a bill
+  // Its bill: a paid bill, or a bill thêm tay of the report site (exactly one).
+  orderId: number | null;
+  manualBillId: number | null;
   status: EinvoiceStatus;
   amount: string;
   vatAmount: string;
@@ -662,7 +664,7 @@ export interface EinvoiceRow {
   } | null;
 }
 
-// One invoice with its draft (null once issued).
+// One invoice with its draft; once issued only its lines are kept (none for the ones issued before 02/10/2026).
 export interface EinvoiceDetail extends EinvoiceRow {
   draft: EinvoiceDraft | null;
   sellerTaxCode: string | null;
@@ -751,4 +753,61 @@ export interface TaxPayer {
   status: string;
   active: boolean;
   source: "gdt" | "xinvoice";
+}
+
+// Trang báo cáo (spec 2026-10-02-trang-bao-cao-hddt): sums of the e-invoices
+// counted (every one still there, but those not issued of a voided bill).
+export interface EinvoiceMetrics {
+  billCount: number;
+  einvoiceCount: number;
+  total: number; // VAT included
+  vat: number;
+  issued: number; // of the total, issued on Minvoice
+  revenue: number; // total − VAT
+  pending: number; // total − issued
+}
+
+// GET /report-site/bills: the paid bills holding an e-invoice, and the bills thêm tay.
+export interface ReportSiteBill {
+  orderId: number | null;
+  manualBillId: number | null;
+  billNumber: string | null;
+  businessDate: string | null;
+  roomName: string | null;
+  time: string | null; // paid at; added at for a bill thêm tay
+  cancelledAt: string | null;
+  finalAmount: number | null; // null for a bill thêm tay
+  allocated: number; // every invoice of the bill
+  total: number; // the invoices counted
+  vat: number;
+  einvoiceCount: number;
+  issuedCount: number;
+}
+
+// GET /report-site/bills/summary: the tab counts and the sums of the days.
+export interface ReportSiteSummary extends EinvoiceSummary, EinvoiceMetrics {}
+
+// GET /report-site/manual-bills/:id.
+export interface ManualBillDetail {
+  bill: {
+    id: number;
+    branchId: number;
+    billNumber: string;
+    businessDate: string;
+    cancelledAt: string | null;
+    cancelReason: string | null;
+    createdAt: string;
+    room: { name: string } | null;
+    createdBy: StaffRef | null;
+  };
+  einvoices: EinvoiceDetail[];
+  allocated: number;
+}
+
+// POST /report-site/manual-bills.
+export interface CreatedManualBill {
+  id: number;
+  billNumber: string;
+  businessDate: string;
+  einvoiceId: number;
 }

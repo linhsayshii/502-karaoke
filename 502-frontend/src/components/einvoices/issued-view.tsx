@@ -103,7 +103,7 @@ export function IssuedView({
         open={resendOpen}
         onOpenChange={setResendOpen}
         title={`Gửi lại hóa đơn${einvoice.invoiceNumber ? ` số ${einvoice.invoiceNumber}` : ""}?`}
-        description={`Hóa đơn này giữ nguyên, ở đây và trên Minvoice. Hệ thống tạo một nháp mới${einvoice.orderId === null ? "" : " của cùng bill"} với số tiền ${formatMoney(einvoice.amount)}, MST và tên người mua, ngày hôm nay. Dòng hàng, địa chỉ và email không còn lưu sau khi xuất nên cần nhập lại trước khi Xuất.${einvoice.orderId === null ? "" : " Phần đã chia của bill tính cả hai hóa đơn."}`}
+        description={`Hóa đơn này giữ nguyên, ở đây và trên Minvoice. Hệ thống tạo một nháp mới của cùng bill với số tiền ${formatMoney(einvoice.amount)}, MST và tên người mua, ngày hôm nay; dòng hàng, địa chỉ và email cần nhập lại trước khi Xuất. Phần đã chia của bill tính cả hai hóa đơn.`}
         confirmLabel="Tạo nháp mới"
         onConfirm={() => onResend(einvoice)}
       />

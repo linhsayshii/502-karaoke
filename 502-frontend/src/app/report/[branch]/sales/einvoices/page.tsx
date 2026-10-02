@@ -3,10 +3,10 @@
 import { Suspense } from "react";
 import { EinvoicesPage } from "@/components/einvoices/einvoices-page";
 
-export default function MainEinvoicesPage() {
+export default function ReportEinvoicesPage() {
   return (
     <Suspense>
-      <EinvoicesPage site="main" />
+      <EinvoicesPage site="report" />
     </Suspense>
   );
 }

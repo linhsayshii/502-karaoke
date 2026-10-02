@@ -5,8 +5,7 @@ import { ChevronRightIcon, FileCheck2Icon, PlusIcon } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { EmptyState, ListLimitNotice } from "@/components/data-states";
 import { DateRangePicker, type DateRangeValue } from "@/components/date-range-picker";
-import { BillSplit } from "@/components/einvoices/bill-split";
-import { EinvoiceRow } from "@/components/einvoices/einvoice-row";
+import { BillSplit, ManualBillSplit } from "@/components/einvoices/bill-split";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,22 +15,16 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useApiData } from "@/hooks/use-api-data";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useBranchCode } from "@/lib/branch";
-import { billLabel, businessDate, formatDateTime, formatMoney, formatTime } from "@/lib/format";
+import { type BillDetail, type BillRef, billKey, sameBill } from "@/lib/einvoice-bills";
+import { billLabel, businessDate, formatDate, formatDateTime, formatMoney, formatTime } from "@/lib/format";
 import { can } from "@/lib/permissions";
+import type { Site } from "@/lib/site";
 import { cn } from "@/lib/utils";
-import type {
-  EinvoiceBill,
-  EinvoiceBillDetail,
-  EinvoiceDetail,
-  EinvoiceRow as EinvoiceListRow,
-  EinvoiceSummary,
-} from "@/lib/types";
+import type { EinvoiceBill, EinvoiceDetail, EinvoiceSummary, ReportSiteBill } from "@/lib/types";
 
-// "BILLS" lists the paid bills of the days; the others the bills holding an
+// "BILLS" lists the bills of the days; the others the bills holding an
 // invoice of that status (spec 2026-10-01-hddt-bo-cuc-va-hd-tu-do §5.2).
 export type EinvoiceTab = "BILLS" | "DRAFT" | "ERROR" | "UNCERTAIN" | "ISSUED";
-// What a new draft is being made for: a bill, or "free" (no bill).
-export type Creating = number | "free" | null;
 
 const TABS: { value: EinvoiceTab; label: string; count?: keyof EinvoiceSummary }[] = [
   { value: "BILLS", label: "Bill" },
@@ -42,14 +35,60 @@ const TABS: { value: EinvoiceTab; label: string; count?: keyof EinvoiceSummary }
   { value: "ISSUED", label: "Đã xuất", count: "issuedCount" },
 ];
 
-// Left column: the bills, each opened in place to split it, and the invoices
-// without a bill on top. Rendered inside @container/main, so its responsive
-// classes are container variants.
+// A bill of the left column, from the list of either site.
+interface ListedBill {
+  ref: BillRef;
+  billNumber: string | null;
+  roomName: string | null;
+  // When a paid bill was paid; a bill thêm tay shows its day instead.
+  time: string | null;
+  businessDate: string | null;
+  cancelledAt: string | null;
+  // The bill's own total; null for a bill thêm tay, whose invoices are its total.
+  finalAmount: number | null;
+  allocated: number;
+  einvoiceCount: number;
+}
+
+// GET /einvoices/bills (main site): the paid bills.
+const fromMainList = (bill: EinvoiceBill): ListedBill => ({
+  ref: { kind: "order", id: bill.orderId },
+  billNumber: bill.billNumber,
+  roomName: bill.roomName,
+  time: bill.endTime,
+  businessDate: null,
+  cancelledAt: bill.cancelledAt,
+  finalAmount: Number(bill.finalAmount),
+  allocated: bill.allocated,
+  einvoiceCount: bill.einvoiceCount,
+});
+
+// GET /report-site/bills: paid bills holding an invoice, and bills thêm tay.
+const fromReportList = (bill: ReportSiteBill): ListedBill => ({
+  ref:
+    bill.manualBillId !== null
+      ? { kind: "manual", id: bill.manualBillId }
+      : { kind: "order", id: bill.orderId as number },
+  billNumber: bill.billNumber,
+  roomName: bill.roomName,
+  time: bill.time,
+  businessDate: bill.businessDate,
+  cancelledAt: bill.cancelledAt,
+  finalAmount: bill.finalAmount,
+  allocated: bill.allocated,
+  einvoiceCount: bill.einvoiceCount,
+});
+
+// Left column: the bills, each opened in place to split it. On the report
+// site (spec 2026-10-02 §7.5) the paid bills holding an invoice and the bills
+// thêm tay. Rendered inside @container/main, so its responsive classes are
+// container variants.
 export function EinvoiceBillList({
+  site,
+  initialDay,
   version,
-  revealFreeDraft,
-  openOrderId,
   openBill,
+  openBillDetail,
   openBillLoading,
   selectedId,
   focusId,
@@ -64,13 +103,14 @@ export function EinvoiceBillList({
   onDeleted,
   onSavingChange,
 }: {
+  site: Site;
+  // The day listed first (a link from Quản lý bán hàng); today's business day otherwise.
+  initialDay: string | null;
   // Bumped after every write: the lists and counts reload.
   version: number;
-  // Bumped when a free draft was made elsewhere (Gửi lại): the list moves to show it.
-  revealFreeDraft: number;
-  openOrderId: number | null;
+  openBill: BillRef | null;
   // The open bill once loaded (null meanwhile), and whether it is being read.
-  openBill: EinvoiceBillDetail | null;
+  openBillDetail: BillDetail | null;
   openBillLoading: boolean;
   selectedId: number | null;
   focusId: number | null;
@@ -79,20 +119,25 @@ export function EinvoiceBillList({
   lockedId: number | null;
   // The invoices whose amount is being saved: the + of their bill waits.
   savingIds: number[];
-  creating: Creating;
-  onToggleBill: (orderId: number, tab: EinvoiceTab) => void;
-  onSelect: (orderId: number | null, einvoiceId: number) => void;
-  // A new draft at once: for a bill with what is left of it, or free at 0.
-  onCreate: (orderId: number | null, amount: number) => void;
+  // billKey of the bill a new draft is being made for.
+  creating: string | null;
+  onToggleBill: (bill: BillRef, tab: EinvoiceTab) => void;
+  onSelect: (bill: BillRef, einvoiceId: number) => void;
+  // A new draft at once: what is left of a paid bill, 0 for a bill thêm tay.
+  onCreate: (bill: BillRef, amount: number) => void;
   onSaved: (row: EinvoiceDetail) => void;
-  onDeleted: (orderId: number | null, einvoiceId: number) => void;
+  onDeleted: (bill: BillRef, einvoiceId: number) => void;
   onSavingChange: (einvoiceId: number, saving: boolean) => void;
 }) {
   const { user } = useAuth();
   const branch = useBranchCode();
   const canWrite = can(user, "einvoices.write");
+  const report = site === "report";
   const [tab, setTab] = useState<EinvoiceTab>("BILLS");
-  const [range, setRange] = useState<DateRangeValue>(() => ({ from: businessDate(), to: businessDate() }));
+  const [range, setRange] = useState<DateRangeValue>(() => {
+    const day = initialDay ?? businessDate();
+    return { from: day, to: day };
+  });
   const [search, setSearch] = useState("");
   // A bill number searches every day (the server ignores the dates then).
   const billNumber = useDebouncedValue(search).replace(/\D/g, "");
@@ -101,69 +146,42 @@ export function EinvoiceBillList({
   const status = tab === "BILLS" ? undefined : tab;
   const days = dated && !billNumber ? range : {};
 
-  const bills = useApiData<EinvoiceBill[]>(
-    "/einvoices/bills",
+  const bills = useApiData<(EinvoiceBill | ReportSiteBill)[]>(
+    report ? "/report-site/bills" : "/einvoices/bills",
     { branch, status, billNumber: billNumber || undefined, ...days },
     [],
     "Không thể tải danh sách bill",
   );
-  // A bill number never matches a free invoice: the group is not asked for then.
-  const free = useApiData<EinvoiceListRow[]>(
-    billNumber ? null : "/einvoices",
-    { branch, free: 1, status, ...days },
-    [],
-    "Không thể tải hóa đơn không theo bill",
-  );
+  const rows = report
+    ? (bills.data as ReportSiteBill[]).map(fromReportList)
+    : (bills.data as EinvoiceBill[]).map(fromMainList);
   // The tab counts: pending work of every day, issued ones of the chosen days
   // (summed in SQL, never from a capped list).
   const summary = useApiData<EinvoiceSummary | null>(
-    "/einvoices/summary",
+    report ? "/report-site/bills/summary" : "/einvoices/summary",
     { branch, ...range },
     null,
     "Không thể tải số hóa đơn",
   );
   const reloadBills = bills.reload;
-  const reloadFree = free.reload;
   const reloadSummary = summary.reload;
   useEffect(() => {
     if (version === 0) return;
     reloadBills();
-    reloadFree();
     reloadSummary();
-  }, [version, reloadBills, reloadFree, reloadSummary]);
+  }, [version, reloadBills, reloadSummary]);
 
-  const freeRows = billNumber ? [] : free.data;
   // Over more than one day a bill shows its date too.
   const showDate = !dated || !!billNumber || range.from !== range.to;
   const emptyText = billNumber
     ? "Không có bill nào khớp số này."
     : tab === "BILLS"
-      ? "Không có bill đã thanh toán trong khoảng ngày này."
+      ? report
+        ? "Không có bill có hóa đơn điện tử hay bill thêm tay trong khoảng ngày này."
+        : "Không có bill đã thanh toán trong khoảng ngày này."
       : tab === "ISSUED"
         ? "Không có hóa đơn đã xuất trong khoảng ngày này."
         : "Không có hóa đơn nào ở trạng thái này.";
-
-  // A new free draft is dated today's business day. It shows in the Nháp tab,
-  // and in the Bill tab while its range holds today; no other tab or range
-  // lists it, and a bill-number search hides the free group altogether, so
-  // the list moves to Nháp and the search is cleared (its box empties at
-  // once, the list follows after the debounce).
-  const showFreeDraft = () => {
-    const today = businessDate();
-    const shown = tab === "DRAFT" || (tab === "BILLS" && range.from <= today && today <= range.to);
-    if (!shown) setTab("DRAFT");
-    if (search) setSearch("");
-  };
-  const createFree = () => {
-    showFreeDraft();
-    onCreate(null, 0);
-  };
-  // One made by the panel (Gửi lại) moves the list too (adjusted during render).
-  const [revealSeen, setRevealSeen] = useState(revealFreeDraft);
-  if (revealSeen !== revealFreeDraft) {
-    setRevealSeen(revealFreeDraft);
-    showFreeDraft();
-  }
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
@@ -187,58 +205,17 @@ export function EinvoiceBillList({
         ) : (
           <span className="text-sm text-muted-foreground">Mọi ngày</span>
         )}
-        <div className="flex min-w-0 flex-1 items-center gap-2 @md/main:flex-none">
-          <Input
-            type="search"
-            inputMode="numeric"
-            placeholder="Tìm số bill…"
-            aria-label="Tìm theo số bill"
-            maxLength={15}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="min-w-0 flex-1 @md/main:w-44 @md/main:flex-none"
-          />
-          {canWrite && (
-            <Button
-              size="icon"
-              variant="outline"
-              aria-label="Thêm hóa đơn không theo bill"
-              title="Thêm hóa đơn không theo bill"
-              disabled={creating === "free"}
-              onClick={createFree}
-            >
-              {creating === "free" ? <Spinner /> : <PlusIcon />}
-            </Button>
-          )}
-        </div>
+        <Input
+          type="search"
+          inputMode="numeric"
+          placeholder="Tìm số bill…"
+          aria-label="Tìm theo số bill"
+          maxLength={15}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="min-w-0 flex-1 @md/main:w-44 @md/main:flex-none"
+        />
       </div>
-      {freeRows.length > 0 && (
-        <section className="rounded-xl border">
-          <div className="flex items-baseline justify-between gap-2 border-b px-3 py-2 text-sm">
-            <span className="font-medium">Hóa đơn không theo bill</span>
-            <span className="tabular-nums text-muted-foreground">{free.total ?? freeRows.length}</span>
-          </div>
-          <ListLimitNotice shown={freeRows.length} total={free.total} noun="hóa đơn" hint="Chọn khoảng ngày ngắn hơn." />
-          <ul>
-            {freeRows.map((row) => (
-              <EinvoiceRow
-                key={row.id}
-                einvoice={row}
-                label={`HĐ #${row.id}`}
-                selected={selectedId === row.id}
-                editable
-                autoFocus={focusId === row.id}
-                forceConfirm={dirtyId === row.id}
-                locked={lockedId === row.id}
-                onSelect={() => onSelect(null, row.id)}
-                onSaved={onSaved}
-                onDeleted={() => onDeleted(null, row.id)}
-                onSavingChange={onSavingChange}
-              />
-            ))}
-          </ul>
-        </section>
-      )}
       <ListLimitNotice
         shown={bills.data.length}
         total={bills.total}
@@ -253,35 +230,36 @@ export function EinvoiceBillList({
             <Skeleton key={i} className="h-14 w-full" />
           ))}
         </div>
-      ) : bills.data.length === 0 ? (
-        freeRows.length === 0 && (
-          <EmptyState icon={FileCheck2Icon} title="Không có bill" description={emptyText} className="rounded-xl border" />
-        )
+      ) : rows.length === 0 ? (
+        <EmptyState icon={FileCheck2Icon} title="Không có bill" description={emptyText} className="rounded-xl border" />
       ) : (
         <ul className="flex flex-col gap-2">
-          {bills.data.map((bill) => (
-            <BillItem
-              key={bill.orderId}
-              bill={bill}
-              open={openOrderId === bill.orderId}
-              detail={openBill?.order.id === bill.orderId ? openBill : null}
-              detailLoading={openOrderId === bill.orderId && openBillLoading}
-              showDate={showDate}
-              canWrite={canWrite}
-              creating={creating === bill.orderId}
-              selectedId={selectedId}
-              focusId={focusId}
-              dirtyId={dirtyId}
-              lockedId={lockedId}
-              savingIds={savingIds}
-              onToggle={() => onToggleBill(bill.orderId, tab)}
-              onCreate={onCreate}
-              onSelect={(einvoiceId) => onSelect(bill.orderId, einvoiceId)}
-              onSaved={onSaved}
-              onDeleted={(einvoiceId) => onDeleted(bill.orderId, einvoiceId)}
-              onSavingChange={onSavingChange}
-            />
-          ))}
+          {rows.map((bill) => {
+            const open = sameBill(openBill, bill.ref);
+            return (
+              <BillItem
+                key={billKey(bill.ref)}
+                bill={bill}
+                open={open}
+                detail={open ? openBillDetail : null}
+                detailLoading={open && openBillLoading}
+                showDate={showDate}
+                canWrite={canWrite}
+                creating={creating === billKey(bill.ref)}
+                selectedId={selectedId}
+                focusId={focusId}
+                dirtyId={dirtyId}
+                lockedId={lockedId}
+                savingIds={savingIds}
+                onToggle={() => onToggleBill(bill.ref, tab)}
+                onCreate={onCreate}
+                onSelect={(einvoiceId) => onSelect(bill.ref, einvoiceId)}
+                onSaved={onSaved}
+                onDeleted={(einvoiceId) => onDeleted(bill.ref, einvoiceId)}
+                onSavingChange={onSavingChange}
+              />
+            );
+          })}
         </ul>
       )}
     </div>
@@ -308,9 +286,9 @@ function BillItem({
   onDeleted,
   onSavingChange,
 }: {
-  bill: EinvoiceBill;
+  bill: ListedBill;
   open: boolean;
-  detail: EinvoiceBillDetail | null;
+  detail: BillDetail | null;
   // The bill is open and being read again (after a write, or just opened).
   detailLoading: boolean;
   showDate: boolean;
@@ -322,20 +300,28 @@ function BillItem({
   lockedId: number | null;
   savingIds: number[];
   onToggle: () => void;
-  onCreate: (orderId: number, amount: number) => void;
+  onCreate: (bill: BillRef, amount: number) => void;
   onSelect: (einvoiceId: number) => void;
   onSaved: (row: EinvoiceDetail) => void;
   onDeleted: (einvoiceId: number) => void;
   onSavingChange: (einvoiceId: number, saving: boolean) => void;
 }) {
-  const total = Number(bill.finalAmount);
+  const manual = bill.ref.kind === "manual";
+  const total = bill.finalAmount;
   // The open bill, once loaded, is fresher than the list.
   const allocated = detail ? detail.allocated : bill.allocated;
   const count = detail ? detail.einvoices.length : bill.einvoiceCount;
-  const label = billLabel({ id: bill.orderId, billNumber: bill.billNumber });
+  const label = billLabel({ id: bill.ref.id, billNumber: bill.billNumber });
   // + hands out what is left of the bill, so it waits until that is known: its
   // own create, a read of the bill, or an amount of its invoices being saved.
   const plusBusy = creating || detailLoading || !!detail?.einvoices.some((e) => savingIds.includes(e.id));
+  const when = manual ? formatDate(bill.businessDate) : showDate ? formatDateTime(bill.time) : formatTime(bill.time);
+  const split = !count
+    ? "Chưa có HĐĐT"
+    : total === null
+      ? `${count} HĐ`
+      : `Đã chia ${formatMoney(allocated)} · ${count} HĐ`;
+  const rows = { selectedId, focusId, dirtyId, lockedId, onSelect, onSaved, onDeleted, onSavingChange };
   return (
     <li className="rounded-xl border">
       <div className="flex items-center gap-2 py-1 pr-2 pl-1">
@@ -356,15 +342,15 @@ function BillItem({
             <span
               className={cn(
                 "block truncate text-xs text-muted-foreground tabular-nums",
-                allocated > total && "text-warning",
+                total !== null && allocated > total && "text-warning",
               )}
             >
-              {showDate ? formatDateTime(bill.endTime) : formatTime(bill.endTime)} ·{" "}
-              {count ? `Đã chia ${formatMoney(allocated)} · ${count} HĐ` : "Chưa có HĐĐT"}
+              {when} · {split}
             </span>
           </span>
+          {manual && <Badge variant="outline">Thêm tay</Badge>}
           {bill.cancelledAt && <Badge variant="warning">Đã hủy</Badge>}
-          <span className="shrink-0 tabular-nums">{formatMoney(bill.finalAmount)}</span>
+          <span className="shrink-0 tabular-nums">{formatMoney(total ?? allocated)}</span>
         </button>
         {canWrite && !bill.cancelledAt && (
           <Button
@@ -374,7 +360,7 @@ function BillItem({
             title="Thêm hóa đơn nhỏ"
             disabled={plusBusy}
             className={cn(open && "border-primary")}
-            onClick={() => onCreate(bill.orderId, Math.max(0, total - allocated))}
+            onClick={() => onCreate(bill.ref, total === null ? 0 : Math.max(0, total - allocated))}
           >
             {creating ? <Spinner /> : <PlusIcon />}
           </Button>
@@ -382,17 +368,11 @@ function BillItem({
       </div>
       {open &&
         (detail ? (
-          <BillSplit
-            detail={detail}
-            selectedId={selectedId}
-            focusId={focusId}
-            dirtyId={dirtyId}
-            lockedId={lockedId}
-            onSelect={onSelect}
-            onSaved={onSaved}
-            onDeleted={onDeleted}
-            onSavingChange={onSavingChange}
-          />
+          "order" in detail ? (
+            <BillSplit detail={detail} {...rows} />
+          ) : (
+            <ManualBillSplit detail={detail} {...rows} />
+          )
         ) : (
           <div className="border-t p-3">
             <Skeleton className="h-12 w-full" />

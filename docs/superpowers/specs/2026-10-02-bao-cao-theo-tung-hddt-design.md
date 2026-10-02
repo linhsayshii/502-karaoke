@@ -1,6 +1,6 @@
 # Trang báo cáo tính theo từng hóa đơn điện tử — thiết kế
 
-Ngày: 02/10/2026. Trạng thái: thiết kế đã duyệt trong chat, chờ duyệt spec.
+Ngày: 02/10/2026. Trạng thái: đã duyệt và đã triển khai (kế hoạch `docs/superpowers/plans/2026-10-02-bao-cao-theo-tung-hddt.md`).
 
 Spec này sửa `2026-10-02-trang-bao-cao-hddt-design.md` (gọi tắt là **spec trang báo cáo**):
 

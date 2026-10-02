@@ -106,7 +106,7 @@ model ManualBill {
   billNumber    String
   // Null only for the free invoices the migration turned into bills (room 0000).
   roomId        Int?
-  room          Room?      @relation(fields: [roomId], references: [id])
+  room          Room?      @relation(fields: [roomId], references: [id], onDelete: Restrict)
   createdById   Int?
   createdBy     User?      @relation("ManualBillCreatedBy", fields: [createdById], references: [id])
   createdAt     DateTime   @default(now())
@@ -260,7 +260,7 @@ model ManualBill {
   - khóa bill bằng một lệnh ghi có điều kiện `cancelledAt IS NULL`; bill đã hủy thì 409;
   - xóa các nháp của bill;
   - đếm HĐĐT còn lại. Nếu còn thì trả 409 "Bill có hóa đơn đã gửi hoặc đã xuất, không hủy được" và hoàn tác toàn bộ.
-  - Vì sao không cần chặn riêng ở bước xuất: lệnh xuất khóa `DRAFT → SENDING` bằng `updateMany`, nên nếu hủy chạy trước thì xuất trả 409, còn nếu xuất chạy trước thì hủy trả 409.
+  - Vì sao không cần chặn riêng ở bước xuất: lệnh xuất khóa `DRAFT → SENDING` bằng `updateMany`, nên nếu hủy chạy trước thì hủy đã xóa các nháp và xuất trả 404 "Không tìm thấy hóa đơn điện tử", còn nếu xuất chạy trước thì hủy trả 409. Hai chiều đều bị từ chối.
 
 **Báo cáo**
 - `GET /report-site/reports/revenue|rooms|products` (`READERS`).

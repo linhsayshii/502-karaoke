@@ -14,7 +14,9 @@ export interface EinvoiceLine {
   vatAmount?: number;
 }
 
-// Einvoice.draft: the details that are deleted once the invoice is issued.
+// Einvoice.draft: the details of an invoice not issued yet. Once it is issued
+// only the buyer's address and email are dropped: the lines stay (`{ lines }`,
+// spec 2026-10-02 §4.3), for the report site's products report.
 export interface EinvoiceDraft {
   buyerAddress: string | null;
   buyerEmail: string | null;

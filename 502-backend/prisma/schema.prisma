@@ -576,7 +576,7 @@ enum EinvoiceStatus {
   DRAFT // Nháp: editable, has `draft`; with `lastError` the page shows "Lỗi"
   SENDING // Being sent to Minvoice
   UNCERTAIN // Unknown whether Minvoice created it: check before sending again
-  ISSUED // Đã xuất: has its number, `draft` is null
+  ISSUED // Đã xuất: has its number; `draft` keeps only { lines } (null before spec 2026-10-02)
 }
 
 // The Minvoice account and symbol of a branch. Apart from Branch because
@@ -607,8 +607,9 @@ model EinvoiceConfig {
   updatedAt         DateTime  @updatedAt
 }
 
-// One small invoice of a paid bill. Its details (`draft`) live until it is
-// issued; then only the header and Minvoice's number stay.
+// One small invoice of a bill (a paid bill or a bill thêm tay). Its details
+// (`draft`) live until it is issued; then the header, Minvoice's number and
+// the lines stay (the buyer's address and email go).
 model Einvoice {
   id           Int            @id @default(autoincrement())
   branchId     Int
@@ -621,16 +622,20 @@ model Einvoice {
   order        Order?         @relation(fields: [orderId], references: [id], onDelete: Restrict)
   manualBillId Int?
   manualBill   ManualBill?    @relation(fields: [manualBillId], references: [id], onDelete: Restrict)
-  // Copied from Order.businessDate so the list filters on its own index.
+  // Copied from Order.businessDate or ManualBill.businessDate, so the lists and
+  // reports filter on its own index.
   businessDate DateTime       @db.Date
   status       EinvoiceStatus @default(DRAFT)
   // VAT included, typed by whoever creates it.
   amount       Decimal
-  // Σ VAT of the lines, recomputed on every save.
+  // Σ VAT of the lines; a draft adds the VAT inside the part of `amount` the
+  // lines do not cover yet, as the 10% filler line would (draftVatOf).
+  // Recomputed on every save.
   vatAmount    Decimal        @default(0)
   buyerTaxCode String?
   buyerName    String?
-  // {buyerAddress, buyerEmail, lines[]} (einvoice-types.ts EinvoiceDraft).
+  // {buyerAddress, buyerEmail, lines[]} (einvoice-types.ts EinvoiceDraft); once
+  // issued {lines} only (null on the ones issued before spec 2026-10-02 §4.3).
   draft        Json?
 
   // Header, written when it is sent / issued.

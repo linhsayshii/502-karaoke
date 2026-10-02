@@ -40,6 +40,7 @@ import type {
   ProfitMetrics,
   ProfitReport,
   ReportBucket,
+  ReportSiteBill,
   RevenueMetrics,
   RevenueReport,
   RoomGroup,
@@ -551,4 +552,25 @@ export function fundSummarySheet(summary: FundSummary, rangeLabel: string, name 
     ),
   ];
   return toSheet(name, columns, rows);
+}
+
+// ---- Trang báo cáo: Quản lý bán hàng (spec 2026-10-02 §7.4)
+
+const reportSiteBillColumns: ExportColumn<ReportSiteBill>[] = [
+  { header: "Số bill", value: (r) => r.billNumber },
+  { header: "Ngày", value: (r) => (r.businessDate ? formatDate(r.businessDate) : null) },
+  { header: "Phòng", value: (r) => r.roomName ?? NO_ROOM },
+  { header: "Loại", value: (r) => (r.manualBillId !== null ? "Thêm tay" : "Bán hàng") },
+  { header: "Trạng thái", value: (r) => (r.cancelledAt ? "Đã hủy" : null) },
+  { header: "Số HĐĐT", type: "number", value: (r) => r.einvoiceCount },
+  { header: "HĐĐT đã xuất", type: "number", value: (r) => r.issuedCount },
+  { header: "Trước VAT", type: "money", value: (r) => r.total - r.vat },
+  { header: "VAT", type: "money", value: (r) => r.vat },
+  { header: "Tổng tiền", type: "money", value: (r) => r.total },
+];
+
+// The bills as listed; no total row, as the list may be cut (the totals of
+// the days come from GET /report-site/bills/summary).
+export function reportSiteBillsSheet(rows: ReportSiteBill[], name = "Quản lý bán hàng"): ExportTable {
+  return toSheet(name, reportSiteBillColumns, rows);
 }

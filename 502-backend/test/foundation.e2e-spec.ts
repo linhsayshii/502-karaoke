@@ -66,7 +66,9 @@ describe('Foundation (e2e)', () => {
     app = configureApp(
       moduleRef.createNestApplication<NestExpressApplication>(),
     );
-    await app.init();
+    // On 127.0.0.1, where supertest calls: its own listen(0) binds [::] and
+    // can get a port another program holds on 127.0.0.1, which then answers.
+    await app.listen(0, '127.0.0.1');
 
     await login('admin');
     for (const u of [

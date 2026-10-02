@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BanIcon, CircleAlertIcon, PencilIcon } from "lucide-react";
+import { BanIcon, CircleAlertIcon, FileInputIcon, PencilIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -66,6 +66,7 @@ function BillDetail({ orderId, onChanged }: { orderId: number; onChanged: () => 
   const [order, setOrder] = useState<Order | null>(null);
   const [voidOpen, setVoidOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [reporting, setReporting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -88,6 +89,24 @@ function BillDetail({ orderId, onChanged }: { orderId: number; onChanged: () => 
     } catch (error) {
       notify.error(error, "Không thể hủy hóa đơn");
       return false;
+    }
+  };
+
+  // Thêm hóa đơn vào báo cáo (spec 2026-10-02-bao-cao-theo-tung-hddt §5.1):
+  // the whole bill as one draft of the report site. The bill is read again for
+  // its new e-invoice count.
+  const report = async () => {
+    if (!order) return;
+    setReporting(true);
+    try {
+      await api.post(`/einvoices/bill/${order.id}/report`);
+      const res = await api.get<Order>(`/orders/${order.id}`);
+      setOrder(res.data);
+      notify.success("Đã thêm hóa đơn vào báo cáo");
+    } catch (error) {
+      notify.error(error, "Không thêm được hóa đơn vào báo cáo");
+    } finally {
+      setReporting(false);
     }
   };
 
@@ -184,22 +203,36 @@ function BillDetail({ orderId, onChanged }: { orderId: number; onChanged: () => 
         )}
       </div>
 
-      {order?.status === "COMPLETED" && (can(user, "sales.editPaid") || can(user, "sales.void")) && (
-        <SheetFooter className="border-t">
-          {can(user, "sales.editPaid") && (
-            <Button variant="outline" onClick={() => setEditOpen(true)}>
-              <PencilIcon data-icon="inline-start" />
-              Sửa hóa đơn
-            </Button>
-          )}
-          {can(user, "sales.void") && (
-            <Button variant="destructive" onClick={() => setVoidOpen(true)}>
-              <BanIcon data-icon="inline-start" />
-              Hủy hóa đơn
-            </Button>
-          )}
-        </SheetFooter>
-      )}
+      {order?.status === "COMPLETED" &&
+        (can(user, "einvoices.write") || can(user, "sales.editPaid") || can(user, "sales.void")) && (
+          <SheetFooter className="border-t">
+            {can(user, "einvoices.write") && (
+              <>
+                <Button variant="outline" disabled={reporting || einvoiceCount > 0} onClick={report}>
+                  <FileInputIcon data-icon="inline-start" />
+                  Thêm hóa đơn vào báo cáo
+                </Button>
+                {einvoiceCount > 0 && (
+                  <p className="text-center text-xs text-muted-foreground">
+                    Đã có trong báo cáo ({einvoiceCount} hóa đơn)
+                  </p>
+                )}
+              </>
+            )}
+            {can(user, "sales.editPaid") && (
+              <Button variant="outline" onClick={() => setEditOpen(true)}>
+                <PencilIcon data-icon="inline-start" />
+                Sửa hóa đơn
+              </Button>
+            )}
+            {can(user, "sales.void") && (
+              <Button variant="destructive" onClick={() => setVoidOpen(true)}>
+                <BanIcon data-icon="inline-start" />
+                Hủy hóa đơn
+              </Button>
+            )}
+          </SheetFooter>
+        )}
 
       {order?.status === "COMPLETED" && (
         <EditPaidBillDialog

@@ -18,7 +18,8 @@ export interface ReportSiteEinvoice {
   reportNumber: string;
   invoiceDate: string;
   status: EinvoiceStatus;
-  // A draft whose last send failed (the "Lỗi" tab).
+  // Carries a lastError: a draft whose last send failed ("Lỗi"), or an issued
+  // one whose number has to be fixed (einvoiceStatusBadge in the frontend).
   hasError: boolean;
   // Minvoice's number, once issued.
   invoiceNumber: number | null;
@@ -71,7 +72,7 @@ export class ReportSiteEinvoicesService {
       this.db.$queryRaw<ReportSiteEinvoice[]>`
         SELECT e."id", e."reportNumber",
           to_char(e."invoiceDate", 'YYYY-MM-DD') AS "invoiceDate",
-          e."status", (e."status" = 'DRAFT' AND e."lastError" IS NOT NULL) AS "hasError",
+          e."status", (e."lastError" IS NOT NULL) AS "hasError",
           e."invoiceNumber", e."buyerName",
           e."amount"::float8 AS "amount", e."vatAmount"::float8 AS "vatAmount",
           e."orderId", e."manualBillId",

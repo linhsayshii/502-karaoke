@@ -59,7 +59,8 @@ export function EinvoiceLines({
               {
                 label: `Tiền giờ ${bill.billedHours.toLocaleString("vi-VN")} giờ × ${formatMoney(bill.pricePerHour)}`,
                 line: {
-                  name: `Tiền giờ phòng ${bill.room?.name ?? ""}`.trim(),
+                  // As "Thêm hóa đơn vào báo cáo" names it (bill-lines.ts).
+                  name: "Dịch vụ tính theo giờ",
                   unit: "Giờ",
                   quantity: bill.billedHours,
                   unitPrice: Math.round(Number(bill.pricePerHour)),

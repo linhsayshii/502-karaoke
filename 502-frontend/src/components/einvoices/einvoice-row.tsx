@@ -101,7 +101,7 @@ export function EinvoiceRow({
       const current = (await api.get<EinvoiceDetail>(`/einvoices/${einvoice.id}`)).data;
       const res = await api.patch<EinvoiceDetail>(`/einvoices/${einvoice.id}`, {
         amount: typed,
-        ...(current.invoiceDate ? { invoiceDate: current.invoiceDate } : {}),
+        invoiceDate: current.invoiceDate,
         buyerTaxCode: current.buyerTaxCode,
         buyerName: current.buyerName,
         buyerAddress: current.draft?.buyerAddress ?? null,

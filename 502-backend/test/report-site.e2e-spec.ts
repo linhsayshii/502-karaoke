@@ -487,6 +487,99 @@ describe('Report site (e2e)', () => {
     });
   });
 
+  describe('bills of the report site', () => {
+    const bills = (query = '', name = 'qlbc_cs1') =>
+      as(name).get(`/report-site/bills?branch=cs1${query}`);
+    const summary = async () =>
+      (
+        await as('qlbc_cs1')
+          .get('/report-site/bills/summary?branch=cs1')
+          .expect(200)
+      ).body as Json;
+
+    it('lists the paid bills holding an e-invoice and the bills thêm tay of the days', async () => {
+      const paid = await paidBill('BC 403');
+      const before = (await bills().expect(200)).body as Json[];
+      expect(before.some((b) => b.orderId === paid.id)).toBe(false);
+      await as('tn1_cs1')
+        .post('/einvoices', { orderId: paid.id, amount: 50000, lines: [] })
+        .expect(201);
+      const res = await bills().expect(200);
+      const rows = res.body as Json[];
+      expect(rows.find((b) => b.orderId === paid.id)).toMatchObject({
+        manualBillId: null,
+        total: 50000,
+        allocated: 50000,
+        einvoiceCount: 1,
+        issuedCount: 0,
+        finalAmount: Number(paid.finalAmount),
+      });
+      // Today's bills thêm tay, the cancelled one too.
+      expect(
+        rows.filter((b) => b.manualBillId !== null).length,
+      ).toBeGreaterThanOrEqual(3);
+      expect(rows.some((b) => b.cancelledAt !== null)).toBe(true);
+      expect(Number(res.headers['x-total-count'])).toBe(rows.length);
+      const seqs = rows.map((b) => seqOf(b.billNumber as string));
+      expect([...seqs].sort((a, b) => b - a)).toEqual(seqs);
+    });
+
+    it('counts only the issued invoices of a bill voided since', async () => {
+      const bill = await paidBill('BC 404');
+      const kept = (
+        await as('tn1_cs1')
+          .post('/einvoices', {
+            orderId: bill.id,
+            amount: 110000,
+            lines: [filler(100000)],
+          })
+          .expect(201)
+      ).body as Json;
+      await issueToday(kept.id as number);
+      await as('tn1_cs1')
+        .post('/einvoices', { orderId: bill.id, amount: 30000, lines: [] })
+        .expect(201);
+      const before = await summary();
+      await as('admin')
+        .post(`/orders/${bill.id as number}/void`, {
+          reason: 'Khách đổi phòng',
+        })
+        .expect(200);
+      const after = await summary();
+      expect((before.total as number) - (after.total as number)).toBe(30000);
+      const [row] = (
+        await bills(`&billNumber=${bill.billNumber as string}`).expect(200)
+      ).body as Json[];
+      expect(row).toMatchObject({
+        orderId: bill.id,
+        total: 110000,
+        allocated: 140000,
+        einvoiceCount: 2,
+        issuedCount: 1,
+      });
+      expect(row.cancelledAt).toEqual(expect.any(String));
+    });
+
+    it('finds bills by the status of their invoices, every day for drafts', async () => {
+      const drafts = (await bills('&status=DRAFT').expect(200)).body as Json[];
+      // The bill thêm tay of 2025-01-15 ("e-invoices of a bill thêm tay").
+      expect(drafts.some((b) => b.billNumber === '15010000900')).toBe(true);
+      const main = (await as('tn1_cs1').get('/einvoices/summary').expect(200))
+        .body as Json;
+      expect((await summary()).draftCount as number).toBeGreaterThan(
+        main.draftCount as number,
+      );
+    });
+
+    it('belongs to the report site', async () => {
+      await bills('', 'tn1_cs1').expect(403);
+      await bills('', 'ql1_cs1').expect(403);
+      await as('ql1_cs1').get('/report-site/bills/summary').expect(403);
+      await bills('', 'qlbc_cs2').expect(403);
+      await bills('', 'hdqt_bc').expect(200);
+    });
+  });
+
   describe('data purge', () => {
     it('wipes the bills thêm tay of the branch', async () => {
       const res = await as('hdqt_bc')

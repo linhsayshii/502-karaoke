@@ -37,8 +37,8 @@ import { EinvoicesService } from './einvoices.service';
 export class EinvoicesController {
   constructor(private readonly einvoices: EinvoicesService) {}
 
-  // `summary`, `bills` and `bill/:orderId` are declared before `:id`: Nest
-  // matches in declaration order.
+  // `summary`, `bills`, `bill/:orderId` and `bill/:orderId/report` are
+  // declared before `:id`: Nest matches in declaration order.
 
   @Get('summary')
   @Roles(...EINVOICE_READERS)
@@ -64,6 +64,17 @@ export class EinvoicesController {
     @Param('orderId', ParseIntPipe) orderId: number,
   ) {
     return this.einvoices.billDetail(user, orderId);
+  }
+
+  // Thu ngân: the whole bill as one draft of the report site (spec
+  // 2026-10-02-bao-cao-theo-tung-hddt §5.1); 409 once the bill has one.
+  @Post('bill/:orderId/report')
+  @Roles(...EINVOICE_WRITERS)
+  reportBill(
+    @CurrentUser() user: AuthUser,
+    @Param('orderId', ParseIntPipe) orderId: number,
+  ) {
+    return this.einvoices.reportBill(user, orderId);
   }
 
   @Get(':id')

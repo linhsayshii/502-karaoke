@@ -17,10 +17,7 @@ import {
   toDateString,
   toDbDate,
 } from '../common/dates';
-import {
-  billNumberPrefixRange,
-  nextReportNumber,
-} from '../orders/bill-number';
+import { billNumberPrefixRange, nextReportNumber } from '../orders/bill-number';
 import { billedHoursOf } from '../orders/billing';
 import { staffRef } from '../orders/order-include';
 import { PrismaService } from '../prisma/prisma.service';
@@ -38,6 +35,7 @@ import {
   EinvoiceConfigService,
   type IssueConfig,
 } from './einvoice-config.service';
+import { billLines, billMinutesOf, RETAIL_BUYER } from './bill-lines';
 import { draftData, issuedDraft, parseDraft } from './einvoice-draft';
 import { dateRange, dbDay, NOT_SETTLED, statusWhere } from './einvoice-filters';
 import { issueProblem, totalsOf } from './einvoice-math';
@@ -339,15 +337,7 @@ export class EinvoicesService implements OnApplicationBootstrap {
     }
 
     const { einvoices, allocated } = await this.invoicesOf({ orderId });
-    const minutes =
-      order.startTime && order.endTime
-        ? Math.max(
-            0,
-            Math.ceil(
-              (order.endTime.getTime() - order.startTime.getTime()) / 60_000,
-            ),
-          )
-        : 0;
+    const minutes = billMinutesOf(order.startTime, order.endTime);
     const { items, ...bill } = order;
     return {
       order: {
@@ -498,6 +488,85 @@ export class EinvoicesService implements OnApplicationBootstrap {
           invoiceDate: invoiceDay,
           ...number,
           ...written,
+        },
+        select: { id: true },
+      });
+      return created.id;
+    });
+    return this.findOne(user, id);
+  }
+
+  // "Thêm hóa đơn vào báo cáo" (spec 2026-10-02-bao-cao-theo-tung-hddt §5.1):
+  // one draft for the whole paid bill, on its business day, to a retail buyer,
+  // with its hours and items as lines. Only for a bill with no invoice yet:
+  // the bill's row is locked first, so two clicks never make two drafts.
+  async reportBill(user: AuthUser, orderId: number) {
+    const id = await this.prisma.$transaction(async (tx) => {
+      const [locked] = await tx.$queryRaw<{ id: number }[]>`
+        SELECT "id" FROM "Order" WHERE "id" = ${orderId} FOR UPDATE`;
+      if (!locked) throw new NotFoundException('Không tìm thấy hóa đơn');
+      const order = await tx.order.findUniqueOrThrow({
+        where: { id: orderId },
+        select: {
+          branchId: true,
+          status: true,
+          businessDate: true,
+          startTime: true,
+          endTime: true,
+          finalAmount: true,
+          hourlyFee: true,
+          pricePerHour: true,
+          room: { select: { name: true } },
+          items: {
+            select: {
+              quantity: true,
+              price: true,
+              product: { select: { name: true, unit: true } },
+            },
+            orderBy: { id: 'asc' },
+          },
+        },
+      });
+      this.scope.assertBranchAccess(user, order.branchId);
+      if (order.status !== OrderStatus.COMPLETED || !order.businessDate) {
+        throw new BadRequestException(
+          'Chỉ tạo hóa đơn điện tử cho bill đã thanh toán và chưa hủy',
+        );
+      }
+      if ((await tx.einvoice.count({ where: { orderId } })) > 0) {
+        throw new ConflictException('Bill đã có trong báo cáo');
+      }
+      const day = fromDbDate(order.businessDate);
+      const number = await nextReportNumber(
+        tx,
+        order.branchId,
+        day,
+        order.room?.name,
+      );
+      const created = await tx.einvoice.create({
+        data: {
+          branchId: order.branchId,
+          orderId,
+          businessDate: order.businessDate,
+          invoiceDate: order.businessDate,
+          ...number,
+          createdById: user.id,
+          updatedById: user.id,
+          ...draftData({
+            amount: Math.round(Number(order.finalAmount)),
+            buyerName: RETAIL_BUYER,
+            lines: billLines({
+              minutes: billMinutesOf(order.startTime, order.endTime),
+              hourlyFee: Number(order.hourlyFee),
+              pricePerHour: Number(order.pricePerHour),
+              items: order.items.map((item) => ({
+                name: item.product.name,
+                unit: item.product.unit,
+                quantity: item.quantity,
+                price: Number(item.price),
+              })),
+            }),
+          }),
         },
         select: { id: true },
       });
